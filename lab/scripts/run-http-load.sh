@@ -41,5 +41,5 @@ readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
 
 echo "=== HTTP load: ${tenant_name} (${requests} requests, concurrency ${concurrency}) ==="
 ssh "${ssh_options[@]}" "${ssh_user}@${client_ip}" \
-  "LC_ALL=C ab -n '${requests}' -c '${concurrency}' 'http://${web_ip}/write'" |
+  "LC_ALL=C ab -l -n '${requests}' -c '${concurrency}' 'http://${web_ip}/write'" |
   grep -E '^(Requests per second|Time per request|Transfer rate|Failed requests):'

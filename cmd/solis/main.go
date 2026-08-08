@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 )
@@ -21,6 +22,7 @@ type VM struct {
 	State   string
 	IPLease string
 	Disk    string
+	QEMUPID string
 }
 
 func main() {
@@ -64,20 +66,22 @@ func inventory() error {
 		vms[i].State = virshText("domstate", vms[i].Name)
 		vms[i].IPLease = getLeaseIP(vms[i].Name)
 		vms[i].Disk = getDiskPath(vms[i].Name)
+		vms[i].QEMUPID = getQEMUPID(vms[i].Name)
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tTENANT\tROLE\tSTATE\tPLAN_IP\tLEASE_IP\tDISK")
+	fmt.Fprintln(w, "NAME\tTENANT\tROLE\tSTATE\tPLAN_IP\tLEASE_IP\tQEMU_PID\tDISK")
 	for _, vm := range vms {
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			vm.Name,
 			vm.Tenant,
 			vm.Role,
 			emptyDash(vm.State),
 			emptyDash(vm.IPPlan),
 			emptyDash(vm.IPLease),
+			emptyDash(vm.QEMUPID),
 			emptyDash(vm.Disk),
 		)
 	}
@@ -144,6 +148,76 @@ func getDiskPath(name string) string {
 			return fields[3]
 		}
 	}
+	return ""
+}
+
+func getQEMUPID(name string) string {
+	if pid := readLibvirtPIDFile(name); pid != "" {
+		return pid
+	}
+
+	if pid := findQEMUPIDFromPS(name); pid != "" {
+		return pid
+	}
+
+	return ""
+}
+
+func readLibvirtPIDFile(name string) string {
+	dirs := []string{
+		"/run/libvirt/qemu",
+		"/var/run/libvirt/qemu",
+	}
+
+	for _, dir := range dirs {
+		candidates := []string{
+			filepath.Join(dir, name+".pid"),
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			for _, entry := range entries {
+				entryName := entry.Name()
+				if strings.HasSuffix(entryName, ".pid") && strings.Contains(entryName, name) {
+					candidates = append(candidates, filepath.Join(dir, entryName))
+				}
+			}
+		}
+
+		for _, path := range candidates {
+			b, err := os.ReadFile(path)
+			if err == nil {
+				pid := strings.TrimSpace(string(b))
+				if pid != "" {
+					return pid
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func findQEMUPIDFromPS(name string) string {
+	out, err := exec.Command("ps", "-eo", "pid=,args=").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		pid := fields[0]
+		args := strings.Join(fields[1:], " ")
+
+		if strings.Contains(args, "qemu-system") && strings.Contains(args, "guest="+name) {
+			return pid
+		}
+	}
+
 	return ""
 }
 

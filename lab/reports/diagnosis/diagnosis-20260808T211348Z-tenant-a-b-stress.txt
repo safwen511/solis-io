@@ -1,0 +1,34 @@
+Solis Noisy Neighbor Diagnosis
+
+Inputs
+Report directory:  lab/reports/workload/20260808T174825Z
+Victim:            tenant-a
+Suspect:           b-stress
+Duration:          10s
+Interval:          2s
+
+Experiment evidence
+METRIC             BASELINE  DURING_NOISE  POST_NOISE
+Requests/sec       174.14    133.02        150.88
+Latency (ms)       114.850   150.359       132.560
+Failed requests    0         0             0
+Throughput drop:   23.61%
+Latency increase:  30.92%
+
+Storage topology
+TARGET                 VM        TENANT    ROLE    QEMU_PID  DISK                                                               SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+victim                 a-client  tenant-a  client  24501     /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim                 a-db      tenant-a  db      24633     /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2          /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim                 a-stress  tenant-a  stress  24700     /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim                 a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+suspect                b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+Shared physical disk:  yes
+
+QEMU I/O evidence
+Victim average write MiB/s:   0.00
+Suspect average write MiB/s:  151.40
+Suspect/victim write ratio:   dominant suspect
+Dominant writer:              b-stress
+
+Verdict
+Probable noisy-neighbor storage interference.

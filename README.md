@@ -122,6 +122,16 @@ Solis itself never invokes `sudo`. These examples use it because Linux commonly 
 
 To save a combined diagnosis, add either `--output <path>` or `--output-dir <dir>`. The latter generates a UTC timestamped filename and will not overwrite an existing report with the same name.
 
+## Run the full demo
+
+The demo runner builds Solis, starts the existing fio workload on `b-stress`, waits for noise to become active, runs the combined diagnosis, and saves the result under `lab/reports/diagnosis/`. It then waits for fio, prints its summary, and reports the generated diagnosis path.
+
+```bash
+./lab/scripts/run-noisy-neighbor-diagnosis-demo.sh
+```
+
+Run it from any directory inside the checked-out repository; the script resolves and changes to the repository root automatically. It requires the configured lab SSH access and interactive or cached `sudo` authorization for reading QEMU procfs counters. The workload writes only to the existing fio test file inside the `b-stress` guest.
+
 ## Sample result
 
 In the included lab experiment and a corresponding live QEMU I/O sample:

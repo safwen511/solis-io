@@ -10,12 +10,27 @@ import (
 
 // WriteBlockLatency writes a host-wide block request latency summary.
 func WriteBlockLatency(dst io.Writer, result BlockLatencyResult) error {
+	return writeBlockLatency(dst, result, nil)
+}
+
+// WriteVMBlockLatency writes VM storage context followed by the host-wide
+// block request latency summary.
+func WriteVMBlockLatency(dst io.Writer, result BlockLatencyResult, context BlockLatencyVMContext) error {
+	return writeBlockLatency(dst, result, &context)
+}
+
+func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockLatencyVMContext) error {
 	averageNS := float64(0)
 	if result.CompletedRequests > 0 {
 		averageNS = float64(result.TotalLatencyNS) / float64(result.CompletedRequests)
 	}
 	if _, err := fmt.Fprintln(dst, "Solis eBPF Block Latency (experimental)"); err != nil {
 		return err
+	}
+	if context != nil {
+		if err := writeBlockLatencyVMContext(dst, *context); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintf(
 		dst,
@@ -45,6 +60,70 @@ func WriteBlockLatency(dst io.Writer, result BlockLatencyResult) error {
 	}
 	_, err := fmt.Fprintln(dst, "\nSafety: temporary tracepoint programs detached; no payloads or process memory inspected")
 	return err
+}
+
+func writeBlockLatencyVMContext(dst io.Writer, context BlockLatencyVMContext) error {
+	if _, err := fmt.Fprintf(dst, "\nVM-aware context:\nVictim:  %s\nSuspect: %s\n\nVM storage topology:\n", valueOrDash(context.Victim.Name), valueOrDash(context.Suspect.Name)); err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "TARGET\tVM\tQEMU_PID\tQCOW2_DISK\tMOUNTPOINT\tSOURCE_DEVICE\tFILESYSTEM\tPARENT_DEVICE\tPHYSICAL_DEVICE"); err != nil {
+		return err
+	}
+	for _, target := range []struct {
+		kind string
+		vm   BlockLatencyVMTarget
+	}{
+		{"victim", context.Victim},
+		{"suspect", context.Suspect},
+	} {
+		if _, err := fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			target.kind,
+			valueOrDash(target.vm.Name),
+			valueOrDash(target.vm.QEMUPID),
+			valueOrDash(target.vm.Disk),
+			valueOrDash(target.vm.Mountpoint),
+			valueOrDash(target.vm.SourceDevice),
+			valueOrDash(target.vm.Filesystem),
+			valueOrDash(target.vm.ParentDevice),
+			valueOrDash(target.vm.PhysicalDevice),
+		); err != nil {
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if context.SharesPhysicalStorage {
+		if _, err := fmt.Fprintf(
+			dst,
+			"\nShared storage path:\nSource device:   %s\nParent device:   %s\nPhysical device: %s\n",
+			valueOrDash(context.SharedSourceDevice),
+			valueOrDash(context.SharedParentDevice),
+			valueOrDash(context.SharedPhysicalDevice),
+		); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintln(dst, "\nWARNING: victim and suspect do not share a resolved physical storage device; continuing with host-wide latency collection."); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(
+		dst,
+		"Attribution scope: eBPF block latency is host/storage-path level; it is not precise per-VM block latency attribution.\nVM writer attribution: use solis qemu io-summary to compare victim and suspect QEMU write activity.",
+	)
+	return err
+}
+
+func valueOrDash(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "-" {
+		return "-"
+	}
+	return value
 }
 
 // WriteBlockEvents writes parsed block tracepoint formats.

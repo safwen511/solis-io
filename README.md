@@ -35,7 +35,7 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
 - Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
-- Check eBPF readiness, inspect tracepoint formats, count block events, and collect an experimental host-wide block latency histogram.
+- Check eBPF readiness, inspect tracepoint formats, count block events, and collect an experimental host-wide block latency histogram with optional VM storage-topology context.
 
 The `top` command remains a placeholder.
 
@@ -50,6 +50,7 @@ Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procf
 sudo ./solis ebpf block-events --duration 10s
 sudo ./solis ebpf block-count --duration 10s
 sudo ./solis ebpf block-latency --duration 10s
+sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis inventory
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
@@ -211,7 +212,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 
 ## Current limitations
 
-- Experimental host-wide eBPF block latency measurement is available, but it does not yet attribute latency histograms to individual VMs.
+- Experimental host-wide eBPF block latency measurement can show victim/suspect storage-path context, but it does not attribute latency histograms to individual VMs. Use `qemu io-summary` for VM writer attribution.
 - `ebpf doctor` and `ebpf block-watch` are readiness-only. `ebpf block-events` reads tracepoint formats, while `ebpf block-count` and `ebpf block-latency` temporarily attach limited-purpose programs.
 - No per-VM block-latency histograms yet.
 - QEMU process counters require sufficient procfs permissions and reflect process accounting rather than request-level block latency.

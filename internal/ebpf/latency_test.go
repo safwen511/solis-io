@@ -196,6 +196,9 @@ func TestWriteBlockLatency(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
 		}
 	}
+	if strings.Contains(output.String(), "VM-aware context") {
+		t.Fatalf("host-wide output unexpectedly contains VM-aware context:\n%s", output.String())
+	}
 }
 
 func TestLatencyOperationErrorIncludesVerifierAndPermissionGuidance(t *testing.T) {

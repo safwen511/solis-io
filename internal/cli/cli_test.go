@@ -58,17 +58,70 @@ func TestParseRequiredEBPFDuration(t *testing.T) {
 	}
 }
 
-func TestParseRequiredEBPFBlockLatencyDuration(t *testing.T) {
-	duration, err := parseRequiredEBPFDuration(
-		[]string{"ebpf", "block-latency", "--duration", "750ms"},
-		"block-latency",
-		ebpfBlockLatencyUsage,
-	)
-	if err != nil {
-		t.Fatal(err)
+func TestParseEBPFBlockLatencyArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		wantVictim   string
+		wantSuspect  string
+		wantDuration time.Duration
+		wantErr      string
+	}{
+		{
+			name:         "host wide",
+			args:         []string{"ebpf", "block-latency", "--duration", "750ms"},
+			wantDuration: 750 * time.Millisecond,
+		},
+		{
+			name:         "VM aware",
+			args:         []string{"ebpf", "block-latency", "--suspect", "b-stress", "--duration", "10s", "--victim", "a-web"},
+			wantVictim:   "a-web",
+			wantSuspect:  "b-stress",
+			wantDuration: 10 * time.Second,
+		},
+		{
+			name:    "victim without suspect",
+			args:    []string{"ebpf", "block-latency", "--victim", "a-web", "--duration", "10s"},
+			wantErr: "--victim and --suspect must be provided together",
+		},
+		{
+			name:    "suspect without victim",
+			args:    []string{"ebpf", "block-latency", "--suspect", "b-stress", "--duration", "10s"},
+			wantErr: "--victim and --suspect must be provided together",
+		},
+		{
+			name:    "missing duration",
+			args:    []string{"ebpf", "block-latency", "--victim", "a-web", "--suspect", "b-stress"},
+			wantErr: ebpfBlockLatencyUsage,
+		},
+		{
+			name:    "duplicate option",
+			args:    []string{"ebpf", "block-latency", "--duration", "10s", "--duration", "20s"},
+			wantErr: "duplicate option --duration",
+		},
+		{
+			name:    "invalid duration",
+			args:    []string{"ebpf", "block-latency", "--duration", "0s"},
+			wantErr: "invalid --duration",
+		},
 	}
-	if duration != 750*time.Millisecond {
-		t.Fatalf("duration = %s, want 750ms", duration)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			options, err := parseEBPFBlockLatencyArgs(test.args)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if options.Victim != test.wantVictim || options.Suspect != test.wantSuspect || options.Duration != test.wantDuration {
+				t.Fatalf("options = %#v", options)
+			}
+		})
 	}
 }
 

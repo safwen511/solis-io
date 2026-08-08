@@ -91,11 +91,17 @@ const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>"
-const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency --duration <duration>"
+const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
-const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency --duration <duration>"
+const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
+
+type ebpfBlockLatencyOptions struct {
+	Victim   string
+	Suspect  string
+	Duration time.Duration
+}
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -147,6 +153,48 @@ func parseRequiredEBPFDuration(args []string, command, usage string) (time.Durat
 		return 0, fmt.Errorf("%s: invalid --duration %q", usage, args[3])
 	}
 	return duration, nil
+}
+
+func parseEBPFBlockLatencyArgs(args []string) (ebpfBlockLatencyOptions, error) {
+	if len(args) < 2 || args[0] != "ebpf" || args[1] != "block-latency" {
+		return ebpfBlockLatencyOptions{}, errors.New(ebpfBlockLatencyUsage)
+	}
+
+	var options ebpfBlockLatencyOptions
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); index += 2 {
+		option := args[index]
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+			return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: missing value for %s", ebpfBlockLatencyUsage, option)
+		}
+		if seen[option] {
+			return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: duplicate option %s", ebpfBlockLatencyUsage, option)
+		}
+		seen[option] = true
+		value := args[index+1]
+		switch option {
+		case "--victim":
+			options.Victim = value
+		case "--suspect":
+			options.Suspect = value
+		case "--duration":
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration <= 0 {
+				return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: invalid --duration %q", ebpfBlockLatencyUsage, value)
+			}
+			options.Duration = duration
+		default:
+			return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: unknown option %s", ebpfBlockLatencyUsage, option)
+		}
+	}
+
+	if !seen["--duration"] {
+		return ebpfBlockLatencyOptions{}, errors.New(ebpfBlockLatencyUsage)
+	}
+	if (options.Victim == "") != (options.Suspect == "") {
+		return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: --victim and --suspect must be provided together", ebpfBlockLatencyUsage)
+	}
+	return options, nil
 }
 
 func parseTracePlanArgs(args []string) (string, string, error) {
@@ -790,15 +838,32 @@ func runEBPFCommand(args []string, w io.Writer) error {
 		}
 		return nil
 	case "block-latency":
-		duration, err := parseRequiredEBPFDuration(args, "block-latency", ebpfBlockLatencyUsage)
+		options, err := parseEBPFBlockLatencyArgs(args)
 		if err != nil {
 			return err
 		}
-		result, err := ebpf.MeasureBlockLatency(duration)
+		var vmContext *ebpf.BlockLatencyVMContext
+		if options.Victim != "" {
+			plan, err := loadEnrichedTargetPlan(options.Victim, options.Suspect)
+			if err != nil {
+				return fmt.Errorf("ebpf block-latency error: %w", err)
+			}
+			if plan.VictimIsTenant || len(plan.VictimTargets) != 1 {
+				return fmt.Errorf("ebpf block-latency error: victim must resolve to one VM: %s", options.Victim)
+			}
+			context := ebpf.NewBlockLatencyVMContext(plan.VictimTargets[0], plan.SuspectTarget)
+			vmContext = &context
+		}
+		result, err := ebpf.MeasureBlockLatency(options.Duration)
 		if err != nil {
 			return fmt.Errorf("ebpf block-latency error: %w", err)
 		}
-		if err := ebpf.WriteBlockLatency(w, result); err != nil {
+		if vmContext != nil {
+			err = ebpf.WriteVMBlockLatency(w, result, *vmContext)
+		} else {
+			err = ebpf.WriteBlockLatency(w, result)
+		}
+		if err != nil {
 			return fmt.Errorf("ebpf block-latency error: %w", err)
 		}
 		return nil
@@ -831,7 +896,7 @@ Usage:
   solis ebpf block-watch [--duration <duration>]
   solis ebpf block-events --duration <duration>
   solis ebpf block-count --duration <duration>
-  solis ebpf block-latency --duration <duration>
+  solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
   solis inventory
   solis top
   solis inspect <vm> [--verbose]

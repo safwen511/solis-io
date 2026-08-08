@@ -66,3 +66,33 @@ func TestParseDiagnoseNoisyNeighborArgsDefaults(t *testing.T) {
 		t.Fatalf("durations = %s, %s, want 10s, 2s", options.Duration, options.Interval)
 	}
 }
+
+func TestParseDiagnoseNoisyNeighborOutputPath(t *testing.T) {
+	options, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "tenant-a",
+		"--suspect", "b-stress",
+		"--output", "reports/diagnosis.txt",
+	})
+	if err != nil {
+		t.Fatalf("parseDiagnoseNoisyNeighborArgs() error = %v", err)
+	}
+	if options.OutputPath != "reports/diagnosis.txt" || options.OutputDirectory != "" {
+		t.Fatalf("output options = %#v, want exact output path", options)
+	}
+}
+
+func TestParseDiagnoseNoisyNeighborRejectsOutputConflict(t *testing.T) {
+	_, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "tenant-a",
+		"--suspect", "b-stress",
+		"--output", "diagnosis.txt",
+		"--output-dir", "reports",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--output and --output-dir cannot be used together") {
+		t.Fatalf("parseDiagnoseNoisyNeighborArgs() error = %v, want output conflict", err)
+	}
+}

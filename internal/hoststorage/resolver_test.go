@@ -64,6 +64,22 @@ func TestResolveDeviceMapperTopology(t *testing.T) {
 	}
 }
 
+func TestNormalizeBlockDeviceMapper(t *testing.T) {
+	sysfs := buildTestSysfs(t)
+	got := normalizeBlockDeviceWithSysfs("/dev/mapper/test--vg-test--lv", sysfs)
+	if got != "/dev/dm-1" {
+		t.Fatalf("normalizeBlockDeviceWithSysfs() = %q, want /dev/dm-1", got)
+	}
+}
+
+func TestNormalizeBlockDeviceNormalPath(t *testing.T) {
+	sysfs := buildTestSysfs(t)
+	got := normalizeBlockDeviceWithSysfs("/dev/nvme0n1p3", sysfs)
+	if got != "/dev/nvme0n1p3" {
+		t.Fatalf("normalizeBlockDeviceWithSysfs() = %q, want unchanged partition", got)
+	}
+}
+
 func TestResolveNormalPartitionTopology(t *testing.T) {
 	sysfs := buildTestSysfs(t)
 	run := func(name string, _ ...string) ([]byte, error) {

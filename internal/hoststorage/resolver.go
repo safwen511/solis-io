@@ -83,6 +83,23 @@ func sourceForLSBLK(source string) string {
 	return source
 }
 
+// NormalizeBlockDevice converts a device path to its /sys/class/block device name.
+// In particular, /dev/mapper names are converted to their /dev/dm-* paths.
+func NormalizeBlockDevice(device string) string {
+	return normalizeBlockDeviceWithSysfs(device, defaultSysfsBlockPath)
+}
+
+func normalizeBlockDeviceWithSysfs(device, sysfsBlockPath string) string {
+	device = sourceForLSBLK(strings.TrimSpace(device))
+	if !strings.HasPrefix(device, "/dev/") {
+		return ""
+	}
+	if name := kernelBlockName(device, sysfsBlockPath); name != "" {
+		return "/dev/" + name
+	}
+	return device
+}
+
 func parseDeviceList(output []byte) string {
 	var devices []string
 	for _, line := range strings.Split(string(output), "\n") {

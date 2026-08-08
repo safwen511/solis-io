@@ -83,7 +83,7 @@ const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --su
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
-const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
+const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -91,6 +91,8 @@ type timedTargetOptions struct {
 	Suspect         string
 	Duration        time.Duration
 	Interval        time.Duration
+	OutputPath      string
+	OutputDirectory string
 }
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
@@ -153,6 +155,7 @@ func parseTimedWatchOptions(args []string, start int, usage, commandName string)
 		30*time.Second,
 		5*time.Second,
 		false,
+		false,
 	)
 	if err != nil {
 		return "", "", 0, 0, err
@@ -172,6 +175,7 @@ func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		10*time.Second,
 		2*time.Second,
 		true,
+		true,
 	)
 }
 
@@ -183,9 +187,10 @@ func parseTimedTargetOptions(
 	defaultDuration time.Duration,
 	defaultInterval time.Duration,
 	allowReportDirectory bool,
+	allowOutputOptions bool,
 ) (timedTargetOptions, error) {
 	options := timedTargetOptions{Duration: defaultDuration, Interval: defaultInterval}
-	var durationSet, intervalSet bool
+	var durationSet, intervalSet, outputSet, outputDirectorySet bool
 	for i := start; i < len(args); {
 		option := args[i]
 		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
@@ -202,6 +207,24 @@ func parseTimedTargetOptions(
 				return timedTargetOptions{}, fmt.Errorf("%s: --report-dir specified more than once", usage)
 			}
 			options.ReportDirectory = value
+		case "--output":
+			if !allowOutputOptions {
+				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
+			}
+			if outputSet {
+				return timedTargetOptions{}, fmt.Errorf("%s: --output specified more than once", usage)
+			}
+			options.OutputPath = value
+			outputSet = true
+		case "--output-dir":
+			if !allowOutputOptions {
+				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
+			}
+			if outputDirectorySet {
+				return timedTargetOptions{}, fmt.Errorf("%s: --output-dir specified more than once", usage)
+			}
+			options.OutputDirectory = value
+			outputDirectorySet = true
 		case "--victim":
 			if options.Victim != "" {
 				return timedTargetOptions{}, fmt.Errorf("%s: --victim specified more than once", usage)
@@ -246,6 +269,9 @@ func parseTimedTargetOptions(
 	}
 	if options.Suspect == "" {
 		return timedTargetOptions{}, fmt.Errorf("%s: missing --suspect", usage)
+	}
+	if outputSet && outputDirectorySet {
+		return timedTargetOptions{}, fmt.Errorf("%s: --output and --output-dir cannot be used together", usage)
 	}
 	if options.Interval > options.Duration {
 		return timedTargetOptions{}, fmt.Errorf("%s interval %s cannot exceed duration %s", commandName, options.Interval, options.Duration)
@@ -484,7 +510,15 @@ func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
 	}
-	if err := diagnose.Write(w, report); err != nil {
+	if _, err := diagnose.WriteOutput(
+		w,
+		report,
+		diagnose.OutputOptions{
+			Path:      options.OutputPath,
+			Directory: options.OutputDirectory,
+		},
+		time.Now(),
+	); err != nil {
 		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
 	}
 	return nil
@@ -584,7 +618,7 @@ Usage:
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
-  solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
+  solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

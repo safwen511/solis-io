@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -86,30 +87,48 @@ func inventoryChecks(vms []inventory.VM) ([]Check, []inventory.VM) {
 			Check{Status: SKIP, Name: "Running VMs", Detail: "no configured VMs"},
 			Check{Status: SKIP, Name: "VMs with QEMU PID", Detail: "no configured VMs"},
 			Check{Status: SKIP, Name: "VMs with lease IP", Detail: "no configured VMs"},
+			Check{Status: SKIP, Name: "Stopped VMs", Detail: "no configured VMs"},
+			Check{Status: SKIP, Name: "Missing QEMU PID VMs", Detail: "no configured VMs"},
+			Check{Status: SKIP, Name: "Missing lease IP VMs", Detail: "no configured VMs"},
 		)
 		return checks, vms
 	}
 
 	checks = append(checks, Check{Status: OK, Name: "Configured VMs", Detail: fmt.Sprintf("%d", configured)})
 	vms = inventory.Enrich(vms)
+	checks = append(checks, inventoryRuntimeChecks(vms)...)
+	return checks, vms
+}
+
+func inventoryRuntimeChecks(vms []inventory.VM) []Check {
+	configured := len(vms)
 	running, pids, leases := 0, 0, 0
+	var stoppedVMs, missingPIDVMs, missingLeaseVMs []string
 	for _, vm := range vms {
 		if vm.State == "running" {
 			running++
+		} else {
+			stoppedVMs = append(stoppedVMs, vm.Name)
 		}
 		if present(vm.QEMUPID) {
 			pids++
+		} else {
+			missingPIDVMs = append(missingPIDVMs, vm.Name)
 		}
 		if present(vm.IPLease) {
 			leases++
+		} else {
+			missingLeaseVMs = append(missingLeaseVMs, vm.Name)
 		}
 	}
-	checks = append(checks,
+	return []Check{
 		countCheck("Running VMs", running, configured, true, startVMRemedy),
 		countCheck("VMs with QEMU PID", pids, configured, true, "verify libvirt QEMU PID files and running processes"),
 		countCheck("VMs with lease IP", leases, configured, false, "verify libvirt DHCP leases with virsh domifaddr <vm> --source lease"),
-	)
-	return checks, vms
+		missingVMCheck("Stopped VMs", stoppedVMs, startVMRemedy),
+		missingVMCheck("Missing QEMU PID VMs", missingPIDVMs, "start VMs and verify libvirt QEMU PID files"),
+		missingVMCheck("Missing lease IP VMs", missingLeaseVMs, "verify DHCP leases with virsh domifaddr <vm> --source lease"),
+	}
 }
 
 func storageChecks(vms []inventory.VM) []Check {
@@ -281,6 +300,14 @@ func countCheck(name string, count, total int, failIfZero bool, remediation stri
 		status = FAIL
 	}
 	return Check{Status: status, Name: name, Detail: fmt.Sprintf("%d of %d", count, total), Remediation: remediationIfNeeded(status, remediation)}
+}
+
+func missingVMCheck(name string, names []string, remediation string) Check {
+	if len(names) == 0 {
+		return Check{Status: OK, Name: name, Detail: "none"}
+	}
+	sort.Strings(names)
+	return Check{Status: WARN, Name: name, Detail: strings.Join(names, ", "), Remediation: remediation}
 }
 
 func remediationIfNeeded(status Status, remediation string) string {

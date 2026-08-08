@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
+	"github.com/safwen511/solis-io/internal/traceplan"
 )
 
 const defaultConfigPath = "lab/config/vms.csv"
@@ -30,6 +31,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	case "top":
 		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
 		return nil
+	case "trace":
+		victim, suspect, err := parseTracePlanArgs(args)
+		if err != nil {
+			return err
+		}
+		return runTracePlan(victim, suspect, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -60,6 +67,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 }
 
 const incidentExplainUsage = "usage: solis incidents explain <report-dir> --victim <name> --suspect <name>"
+const tracePlanUsage = "usage: solis trace plan --victim <name> --suspect <name>"
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
@@ -67,39 +75,84 @@ func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	}
 
 	reportDir := args[2]
+	victim, suspect, err := parseVictimSuspectOptions(args, 3, incidentExplainUsage)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return reportDir, victim, suspect, nil
+}
+
+func parseTracePlanArgs(args []string) (string, string, error) {
+	if len(args) < 2 || args[1] != "plan" {
+		return "", "", errors.New(tracePlanUsage)
+	}
+
+	return parseVictimSuspectOptions(args, 2, tracePlanUsage)
+}
+
+func parseVictimSuspectOptions(args []string, start int, usage string) (string, string, error) {
 	var victim, suspect string
-	for i := 3; i < len(args); {
+	for i := start; i < len(args); {
 		option := args[i]
 		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
-			return "", "", "", fmt.Errorf("%s: %s requires a value", incidentExplainUsage, option)
+			return "", "", fmt.Errorf("%s: %s requires a value", usage, option)
 		}
 
 		value := args[i+1]
 		switch option {
 		case "--victim":
 			if victim != "" {
-				return "", "", "", fmt.Errorf("%s: --victim specified more than once", incidentExplainUsage)
+				return "", "", fmt.Errorf("%s: --victim specified more than once", usage)
 			}
 			victim = value
 		case "--suspect":
 			if suspect != "" {
-				return "", "", "", fmt.Errorf("%s: --suspect specified more than once", incidentExplainUsage)
+				return "", "", fmt.Errorf("%s: --suspect specified more than once", usage)
 			}
 			suspect = value
 		default:
-			return "", "", "", fmt.Errorf("%s: unknown option %s", incidentExplainUsage, option)
+			return "", "", fmt.Errorf("%s: unknown option %s", usage, option)
 		}
 		i += 2
 	}
 
 	if victim == "" {
-		return "", "", "", fmt.Errorf("%s: missing --victim", incidentExplainUsage)
+		return "", "", fmt.Errorf("%s: missing --victim", usage)
 	}
 	if suspect == "" {
-		return "", "", "", fmt.Errorf("%s: missing --suspect", incidentExplainUsage)
+		return "", "", fmt.Errorf("%s: missing --suspect", usage)
 	}
 
-	return reportDir, victim, suspect, nil
+	return victim, suspect, nil
+}
+
+func runTracePlan(victim, suspect string, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if err != nil {
+		return fmt.Errorf("trace plan error: %w", err)
+	}
+
+	plan, err := traceplan.Resolve(vms, victim, suspect)
+	if err != nil {
+		return fmt.Errorf("trace plan error: %w", err)
+	}
+
+	targets := append([]inventory.VM(nil), plan.VictimTargets...)
+	if _, duplicate := inventory.FindByName(targets, plan.SuspectTarget.Name); !duplicate {
+		targets = append(targets, plan.SuspectTarget)
+	}
+	targets = inventory.Enrich(targets)
+
+	plan, err = traceplan.Resolve(targets, victim, suspect)
+	if err != nil {
+		return fmt.Errorf("trace plan error: %w", err)
+	}
+	if err := traceplan.Write(w, plan); err != nil {
+		return fmt.Errorf("trace plan error: %w", err)
+	}
+
+	return nil
 }
 
 func runIncidentExplanation(reportDir, victim, suspect string, w io.Writer) error {
@@ -166,6 +219,7 @@ Usage:
   solis inspect <vm> [--verbose]
   solis experiment summarize <report-dir>
   solis incidents explain <report-dir> --victim <name> --suspect <name>
+  solis trace plan --victim <name> --suspect <name>
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

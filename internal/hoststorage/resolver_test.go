@@ -2,6 +2,8 @@ package hoststorage
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -20,7 +22,7 @@ func TestResolveWithRunner(t *testing.T) {
 		}
 	}
 
-	mapping := resolveWithRunner("/var/lib/libvirt/images/vm.qcow2", run)
+	mapping := resolveWithRunnerAndSysfs("/var/lib/libvirt/images/vm.qcow2", run, t.TempDir())
 	want := Mapping{
 		DiskPath:     "/var/lib/libvirt/images/vm.qcow2",
 		Mountpoint:   "/",
@@ -40,14 +42,65 @@ func TestResolveWithRunner(t *testing.T) {
 	}
 }
 
+func TestResolveDeviceMapperTopology(t *testing.T) {
+	sysfs := buildTestSysfs(t)
+	run := func(name string, _ ...string) ([]byte, error) {
+		switch name {
+		case "findmnt":
+			return []byte("/ /dev/mapper/test--vg-test--lv ext4\n"), nil
+		case "lsblk":
+			return nil, errors.New("device mapper node unavailable")
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	}
+
+	mapping := resolveWithRunnerAndSysfs("/images/vm.qcow2", run, sysfs)
+	if mapping.ParentDevice != "/dev/nvme0n1p3,/dev/sdb1" {
+		t.Fatalf("ParentDevice = %q, want sorted backing partitions", mapping.ParentDevice)
+	}
+	if mapping.PhysicalDisk != "/dev/nvme0n1,/dev/sdb" {
+		t.Fatalf("PhysicalDisk = %q, want sorted physical disks", mapping.PhysicalDisk)
+	}
+}
+
+func TestResolveNormalPartitionTopology(t *testing.T) {
+	sysfs := buildTestSysfs(t)
+	run := func(name string, _ ...string) ([]byte, error) {
+		switch name {
+		case "findmnt":
+			return []byte("/data /dev/nvme0n1p3 xfs\n"), nil
+		case "lsblk":
+			return []byte("nvme0n1\n"), nil
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	}
+
+	mapping := resolveWithRunnerAndSysfs("/data/vm.qcow2", run, sysfs)
+	if mapping.ParentDevice != "/dev/nvme0n1" {
+		t.Fatalf("ParentDevice = %q, want /dev/nvme0n1", mapping.ParentDevice)
+	}
+	if mapping.PhysicalDisk != "/dev/nvme0n1" {
+		t.Fatalf("PhysicalDisk = %q, want /dev/nvme0n1", mapping.PhysicalDisk)
+	}
+}
+
 func TestResolveReturnsPartialMappingWhenFindmntFails(t *testing.T) {
 	run := func(string, ...string) ([]byte, error) {
 		return nil, errors.New("findmnt failed")
 	}
 
-	mapping := resolveWithRunner("/images/vm.qcow2", run)
+	mapping := resolveWithRunnerAndSysfs("/images/vm.qcow2", run, t.TempDir())
 	if mapping.DiskPath != "/images/vm.qcow2" || mapping.Mountpoint != "" || mapping.SourceDevice != "" {
 		t.Fatalf("mapping = %#v, want only disk path", mapping)
+	}
+}
+
+func TestParseDeviceListSortsAndDeduplicates(t *testing.T) {
+	got := parseDeviceList([]byte("sdb\nnvme0n1\nsdb\n"))
+	if got != "/dev/nvme0n1,/dev/sdb" {
+		t.Fatalf("parseDeviceList() = %q, want sorted unique devices", got)
 	}
 }
 
@@ -61,5 +114,58 @@ func TestSourceForLSBLKStripsSubvolume(t *testing.T) {
 	got := sourceForLSBLK("/dev/nvme0n1p2[/@]")
 	if got != "/dev/nvme0n1p2" {
 		t.Fatalf("sourceForLSBLK() = %q, want /dev/nvme0n1p2", got)
+	}
+}
+
+func buildTestSysfs(t *testing.T) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	sysfs := filepath.Join(tempDir, "class", "block")
+	devices := filepath.Join(tempDir, "devices")
+	if err := os.MkdirAll(sysfs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	createDMDevice(t, sysfs, "dm-1", "test--vg-test--lv", []string{"dm-0", "sdb1"})
+	createDMDevice(t, sysfs, "dm-0", "crypt-test", []string{"nvme0n1p3"})
+	createPhysicalWithPartition(t, sysfs, devices, "nvme0n1", "nvme0n1p3")
+	createPhysicalWithPartition(t, sysfs, devices, "sdb", "sdb1")
+
+	return sysfs
+}
+
+func createDMDevice(t *testing.T, sysfs, device, mapperName string, slaves []string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(sysfs, device, "dm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sysfs, device, "slaves"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sysfs, device, "dm", "name"), []byte(mapperName), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, slave := range slaves {
+		if err := os.Mkdir(filepath.Join(sysfs, device, "slaves", slave), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func createPhysicalWithPartition(t *testing.T, sysfs, devices, disk, partition string) {
+	t.Helper()
+	diskPath := filepath.Join(devices, disk)
+	partitionPath := filepath.Join(diskPath, partition)
+	if err := os.MkdirAll(partitionPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(partitionPath, "partition"), []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(diskPath, filepath.Join(sysfs, disk)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(partitionPath, filepath.Join(sysfs, partition)); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -30,7 +30,7 @@ func Write(dst io.Writer, plan Plan) error {
 	fmt.Fprintln(w)
 
 	fmt.Fprintln(w, "Host storage mapping")
-	fmt.Fprintln(w, "VM\tDISK\tMOUNTPOINT\tSOURCE_DEVICE\tFILESYSTEM\tPARENT_DEVICE")
+	fmt.Fprintln(w, "VM\tDISK\tMOUNTPOINT\tSOURCE_DEVICE\tFILESYSTEM\tPARENT_DEVICE\tPHYSICAL_DISK")
 	for _, vm := range storageTargets(plan) {
 		mapping := plan.HostStorage[vm.Name]
 		diskPath := mapping.DiskPath
@@ -39,13 +39,14 @@ func Write(dst io.Writer, plan Plan) error {
 		}
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			vm.Name,
 			emptyDash(diskPath),
 			emptyDash(mapping.Mountpoint),
 			emptyDash(mapping.SourceDevice),
 			emptyDash(mapping.Filesystem),
 			emptyDash(mapping.ParentDevice),
+			emptyDash(mapping.PhysicalDisk),
 		)
 	}
 	fmt.Fprintln(w)

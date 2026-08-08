@@ -8,4 +8,5 @@ type Mapping struct {
 	SourceDevice string
 	Filesystem   string
 	ParentDevice string
+	PhysicalDisk string
 }

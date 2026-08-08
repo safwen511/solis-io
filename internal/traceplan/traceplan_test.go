@@ -60,6 +60,7 @@ func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 			SourceDevice: "/dev/mapper/vg-images",
 			Filesystem:   "xfs",
 			ParentDevice: "/dev/nvme0n1p3",
+			PhysicalDisk: "/dev/nvme0n1",
 		},
 	}
 
@@ -76,6 +77,7 @@ func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 		"Host storage mapping",
 		"/dev/mapper/vg-images",
 		"/dev/nvme0n1p3",
+		"/dev/nvme0n1",
 		"Host block device backing qcow2 files",
 		"block:block_rq_issue",
 		"block:block_rq_complete",

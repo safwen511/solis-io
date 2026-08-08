@@ -152,6 +152,10 @@ ssh_public_key=$(<"$SSH_PUBLIC_KEY_FILE")
   printf '        %s\n' "$ssh_public_key"
   echo 'ssh_pwauth: false'
   echo 'disable_root: true'
+  echo 'apt:'
+  echo '  conf: |'
+  echo '    Acquire::ForceIPv4 "true";'
+  echo '    Acquire::Retries "5";'
   echo 'package_update: true'
   echo 'packages:'
   printf '  - %s\n' "${packages[@]}"

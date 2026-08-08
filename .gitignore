@@ -1,0 +1,43 @@
+# Go build outputs
+/solis
+/bin/
+/dist/
+*.test
+*.out
+
+# eBPF generated files
+bpf/vmlinux.h
+*.bpf.o
+*.skel.h
+
+# Secrets
+.env
+*.env
+!.env.example
+*.key
+*.pem
+id_rsa
+id_ed25519
+
+# VM images / lab artifacts
+*.qcow2
+*.img
+*.iso
+*.lock
+
+# Runtime data
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+#files 
+CODEX.md

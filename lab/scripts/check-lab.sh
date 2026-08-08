@@ -21,8 +21,7 @@ while IFS=, read -r name _; do
   echo
   echo "--- $name ---"
   if virsh dominfo "$name" >/dev/null 2>&1; then
-    virsh domifaddr "$name" --source agent ||
-      virsh domifaddr "$name" --source lease || true
+    virsh domifaddr "$name" --source lease || true
   else
     echo 'VM is not defined.'
   fi

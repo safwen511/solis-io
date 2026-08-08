@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
@@ -16,6 +17,7 @@ type Plan struct {
 	VictimIsTenant  bool
 	VictimTargets   []inventory.VM
 	SuspectTarget   inventory.VM
+	HostStorage     map[string]hoststorage.Mapping
 }
 
 // Resolve maps victim and suspect selectors to inventory VMs.

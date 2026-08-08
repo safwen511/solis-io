@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
@@ -52,6 +53,15 @@ func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
+	plan.HostStorage = map[string]hoststorage.Mapping{
+		"a-db": {
+			DiskPath:     "/images/a-db.qcow2",
+			Mountpoint:   "/var/lib/libvirt/images",
+			SourceDevice: "/dev/mapper/vg-images",
+			Filesystem:   "xfs",
+			ParentDevice: "/dev/nvme0n1p3",
+		},
+	}
 
 	var output bytes.Buffer
 	if err := Write(&output, plan); err != nil {
@@ -63,6 +73,9 @@ func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 		"likely victim DB VM",
 		"likely victim web VM",
 		"Suspect target",
+		"Host storage mapping",
+		"/dev/mapper/vg-images",
+		"/dev/nvme0n1p3",
 		"Host block device backing qcow2 files",
 		"block:block_rq_issue",
 		"block:block_rq_complete",

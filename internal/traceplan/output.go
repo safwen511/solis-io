@@ -29,6 +29,27 @@ func Write(dst io.Writer, plan Plan) error {
 	writeTarget(w, plan.SuspectTarget, "suspect VM")
 	fmt.Fprintln(w)
 
+	fmt.Fprintln(w, "Host storage mapping")
+	fmt.Fprintln(w, "VM\tDISK\tMOUNTPOINT\tSOURCE_DEVICE\tFILESYSTEM\tPARENT_DEVICE")
+	for _, vm := range storageTargets(plan) {
+		mapping := plan.HostStorage[vm.Name]
+		diskPath := mapping.DiskPath
+		if diskPath == "" {
+			diskPath = vm.Disk
+		}
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
+			vm.Name,
+			emptyDash(diskPath),
+			emptyDash(mapping.Mountpoint),
+			emptyDash(mapping.SourceDevice),
+			emptyDash(mapping.Filesystem),
+			emptyDash(mapping.ParentDevice),
+		)
+	}
+	fmt.Fprintln(w)
+
 	fmt.Fprintln(w, "Host evidence to collect")
 	writeRows(w, [][2]string{
 		{"QEMU PID per target VM", "Attribute host I/O to each victim and suspect process."},
@@ -71,6 +92,16 @@ func Write(dst io.Writer, plan Plan) error {
 	})
 
 	return w.Flush()
+}
+
+func storageTargets(plan Plan) []inventory.VM {
+	targets := append([]inventory.VM(nil), plan.VictimTargets...)
+	for _, vm := range targets {
+		if vm.Name == plan.SuspectTarget.Name {
+			return targets
+		}
+	}
+	return append(targets, plan.SuspectTarget)
 }
 
 func writeTargetHeader(w io.Writer) {

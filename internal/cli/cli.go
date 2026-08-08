@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/safwen511/solis-io/internal/experiment"
+	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
@@ -147,6 +148,13 @@ func runTracePlan(victim, suspect string, w io.Writer) error {
 	plan, err = traceplan.Resolve(targets, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("trace plan error: %w", err)
+	}
+	plan.HostStorage = make(map[string]hoststorage.Mapping)
+	for _, vm := range plan.VictimTargets {
+		plan.HostStorage[vm.Name] = hoststorage.Resolve(vm.Disk)
+	}
+	if _, duplicate := plan.HostStorage[plan.SuspectTarget.Name]; !duplicate {
+		plan.HostStorage[plan.SuspectTarget.Name] = hoststorage.Resolve(plan.SuspectTarget.Disk)
 	}
 	if err := traceplan.Write(w, plan); err != nil {
 		return fmt.Errorf("trace plan error: %w", err)

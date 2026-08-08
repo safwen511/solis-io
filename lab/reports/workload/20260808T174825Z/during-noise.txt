@@ -1,0 +1,6 @@
+=== HTTP load: tenant-a (1000 requests, concurrency 20) ===
+Failed requests:        0
+Requests per second:    133.02 [#/sec] (mean)
+Time per request:       150.359 [ms] (mean)
+Time per request:       7.518 [ms] (mean, across all concurrent requests)
+Transfer rate:          34.56 [Kbytes/sec] received

@@ -37,6 +37,27 @@ func TestParseEBPFBlockWatchArgs(t *testing.T) {
 	}
 }
 
+func TestParseRequiredEBPFDuration(t *testing.T) {
+	duration, err := parseRequiredEBPFDuration(
+		[]string{"ebpf", "block-count", "--duration", "10s"},
+		"block-count",
+		ebpfBlockCountUsage,
+	)
+	if err != nil || duration != 10*time.Second {
+		t.Fatalf("duration = %s, error = %v", duration, err)
+	}
+
+	for _, args := range [][]string{
+		{"ebpf", "block-count"},
+		{"ebpf", "block-count", "--duration", "0s"},
+		{"ebpf", "block-count", "--interval", "1s"},
+	} {
+		if _, err := parseRequiredEBPFDuration(args, "block-count", ebpfBlockCountUsage); err == nil {
+			t.Errorf("args %v: expected error", args)
+		}
+	}
+}
+
 func TestParseQEMUIOWatchArgsDefaults(t *testing.T) {
 	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs([]string{
 		"qemu", "io-watch", "--victim", "tenant-a", "--suspect", "b-stress",

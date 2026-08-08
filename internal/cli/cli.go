@@ -91,8 +91,10 @@ const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>"
-const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>]"
+const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration>"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
+const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
+const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -131,6 +133,17 @@ func parseEBPFBlockWatchArgs(args []string) (time.Duration, error) {
 	duration, err := time.ParseDuration(args[3])
 	if err != nil || duration <= 0 {
 		return 0, fmt.Errorf("%s: invalid --duration %q", ebpfBlockWatchUsage, args[3])
+	}
+	return duration, nil
+}
+
+func parseRequiredEBPFDuration(args []string, command, usage string) (time.Duration, error) {
+	if len(args) != 4 || args[0] != "ebpf" || args[1] != command || args[2] != "--duration" {
+		return 0, errors.New(usage)
+	}
+	duration, err := time.ParseDuration(args[3])
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("%s: invalid --duration %q", usage, args[3])
 	}
 	return duration, nil
 }
@@ -749,6 +762,32 @@ func runEBPFCommand(args []string, w io.Writer) error {
 			return fmt.Errorf("ebpf block-watch error: %w", err)
 		}
 		return nil
+	case "block-events":
+		duration, err := parseRequiredEBPFDuration(args, "block-events", ebpfBlockEventsUsage)
+		if err != nil {
+			return err
+		}
+		formats, err := ebpf.LoadBlockFormats()
+		if err != nil {
+			return err
+		}
+		if err := ebpf.WriteBlockEvents(w, duration, formats); err != nil {
+			return fmt.Errorf("ebpf block-events error: %w", err)
+		}
+		return nil
+	case "block-count":
+		duration, err := parseRequiredEBPFDuration(args, "block-count", ebpfBlockCountUsage)
+		if err != nil {
+			return err
+		}
+		result, err := ebpf.CountBlockEvents(duration)
+		if err != nil {
+			return fmt.Errorf("ebpf block-count error: %w", err)
+		}
+		if err := ebpf.WriteBlockCount(w, result); err != nil {
+			return fmt.Errorf("ebpf block-count error: %w", err)
+		}
+		return nil
 	default:
 		return errors.New(ebpfUsage)
 	}
@@ -776,6 +815,8 @@ Usage:
   solis doctor
   solis ebpf doctor
   solis ebpf block-watch [--duration <duration>]
+  solis ebpf block-events --duration <duration>
+  solis ebpf block-count --duration <duration>
   solis inventory
   solis top
   solis inspect <vm> [--verbose]

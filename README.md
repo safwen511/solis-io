@@ -47,6 +47,8 @@ Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procf
 ./solis doctor
 ./solis ebpf doctor
 ./solis ebpf block-watch --duration 10s
+sudo ./solis ebpf block-events --duration 10s
+sudo ./solis ebpf block-count --duration 10s
 ./solis inventory
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
@@ -209,7 +211,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 ## Current limitations
 
 - No live eBPF block tracing yet.
-- The experimental eBPF commands are readiness checks only; they do not load or attach programs yet.
+- `ebpf doctor` and `ebpf block-watch` are readiness-only. `ebpf block-events` reads tracepoint formats, while `ebpf block-count` temporarily attaches count-only programs; no command measures block latency yet.
 - No per-VM block-latency histograms yet.
 - QEMU process counters require sufficient procfs permissions and reflect process accounting rather than request-level block latency.
 - Experiment and attribution workflows are currently designed around the included lab/demo environment.

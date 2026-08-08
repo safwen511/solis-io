@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/diagnose"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -41,9 +42,22 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 		{"trace-plan.txt", func(w io.Writer) error { return traceplan.Write(w, evidence.TracePlan) }},
 		{"storage-snapshot.txt", func(w io.Writer) error { return storage.Write(w, evidence.Storage) }},
 		{"qemu-io-summary.txt", func(w io.Writer) error { return qemuio.WriteSummary(w, evidence.QEMU) }},
-		{"diagnosis.txt", func(w io.Writer) error { return diagnose.Write(w, evidence.Diagnosis) }},
-		{"metadata.txt", func(w io.Writer) error { return WriteMetadata(w, inputs, timestamp) }},
 	}
+	if inputs.IncludeEBPFLatency {
+		latencyEvidence := ebpf.BlockLatencyEvidence{UnavailableReason: "collector did not return eBPF block latency evidence"}
+		if evidence.EBPFLatency != nil {
+			latencyEvidence = *evidence.EBPFLatency
+		}
+		artifacts = append(artifacts, artifact{
+			"ebpf-block-latency.txt",
+			func(w io.Writer) error { return ebpf.WriteBlockLatencyEvidenceFile(w, latencyEvidence) },
+		})
+	}
+	artifacts = append(
+		artifacts,
+		artifact{"diagnosis.txt", func(w io.Writer) error { return diagnose.Write(w, evidence.Diagnosis) }},
+		artifact{"metadata.txt", func(w io.Writer) error { return WriteMetadata(w, inputs, timestamp) }},
+	)
 
 	result := Result{Directory: directory}
 	for _, artifact := range artifacts {
@@ -67,7 +81,7 @@ func captureDirectoryName(now time.Time, victim, suspect string) string {
 
 // WriteMetadata emits deterministic metadata for one capture.
 func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
-	_, err := fmt.Fprintf(
+	if _, err := fmt.Fprintf(
 		dst,
 		"Solis Capture Metadata\n"+
 			"Capture timestamp UTC: %s\n"+
@@ -84,8 +98,14 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		inputs.Duration,
 		inputs.Interval,
 		commandName,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if inputs.IncludeEBPFLatency {
+		_, err := fmt.Fprintln(dst, "eBPF block latency: ebpf-block-latency.txt (experimental; host/storage-path level)")
+		return err
+	}
+	return nil
 }
 
 func writeArtifact(path string, render func(io.Writer) error) error {

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
@@ -123,5 +125,55 @@ func TestWriteIncludesQEMUSyscallFallbackEvidence(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
 		}
+	}
+}
+
+func TestWriteWithoutEBPFLatencyPreservesExistingOutput(t *testing.T) {
+	var output bytes.Buffer
+	if err := Write(&output, Report{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "eBPF block latency evidence") {
+		t.Fatalf("output unexpectedly contains optional eBPF section:\n%s", output.String())
+	}
+}
+
+func TestWriteIncludesEBPFBlockLatencyEvidence(t *testing.T) {
+	latency := ebpf.BlockLatencyEvidence{Result: ebpf.BlockLatencyResult{
+		Duration:          10 * time.Second,
+		CompletedRequests: 4,
+		TotalLatencyNS:    400_000,
+		MaxLatencyNS:      250_000,
+	}}
+	latency.Result.Histogram[2] = 3
+	latency.Result.Histogram[3] = 1
+	var output bytes.Buffer
+	if err := Write(&output, Report{EBPFLatency: &latency}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"eBPF block latency evidence",
+		"Total completed requests:  4",
+		"Average latency:           100.00 us",
+		"Max latency:               250.00 us",
+		"50-99 us",
+		"eBPF latency is host/storage-path level, not precise per-VM attribution.",
+		"QEMU io-summary is used for VM writer attribution.",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestWriteIncludesEBPFUnavailableWarning(t *testing.T) {
+	latency := ebpf.BlockLatencyEvidence{UnavailableReason: "permission denied loading eBPF\ntry running with sudo"}
+	var output bytes.Buffer
+	if err := Write(&output, Report{EBPFLatency: &latency}); err != nil {
+		t.Fatal(err)
+	}
+	want := "eBPF block latency evidence unavailable: permission denied loading eBPF try running with sudo"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, output.String())
 	}
 }

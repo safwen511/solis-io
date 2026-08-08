@@ -20,10 +20,6 @@ func WriteVMBlockLatency(dst io.Writer, result BlockLatencyResult, context Block
 }
 
 func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockLatencyVMContext) error {
-	averageNS := float64(0)
-	if result.CompletedRequests > 0 {
-		averageNS = float64(result.TotalLatencyNS) / float64(result.CompletedRequests)
-	}
 	if _, err := fmt.Fprintln(dst, "Solis eBPF Block Latency (experimental)"); err != nil {
 		return err
 	}
@@ -31,6 +27,14 @@ func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockL
 		if err := writeBlockLatencyVMContext(dst, *context); err != nil {
 			return err
 		}
+	}
+	return writeBlockLatencyResult(dst, result)
+}
+
+func writeBlockLatencyResult(dst io.Writer, result BlockLatencyResult) error {
+	averageNS := float64(0)
+	if result.CompletedRequests > 0 {
+		averageNS = float64(result.TotalLatencyNS) / float64(result.CompletedRequests)
 	}
 	if _, err := fmt.Fprintf(
 		dst,

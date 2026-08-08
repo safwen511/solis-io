@@ -186,6 +186,22 @@ func TestParseDiagnoseNoisyNeighborArgsDefaults(t *testing.T) {
 	}
 }
 
+func TestParseDiagnoseNoisyNeighborIncludesEBPFLatency(t *testing.T) {
+	options, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--include-ebpf-latency",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.IncludeEBPFLatency {
+		t.Fatal("IncludeEBPFLatency = false, want true")
+	}
+}
+
 func TestParseDiagnoseNoisyNeighborOutputPath(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -232,6 +248,37 @@ func TestParseCaptureNoisyNeighborDefaults(t *testing.T) {
 	}
 	if options.OutputDirectory != "lab/reports/captures" {
 		t.Fatalf("OutputDirectory = %q, want lab/reports/captures", options.OutputDirectory)
+	}
+}
+
+func TestParseCaptureNoisyNeighborIncludesEBPFLatency(t *testing.T) {
+	options, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+		"--include-ebpf-latency",
+		"--output-dir", "captures",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.IncludeEBPFLatency {
+		t.Fatal("IncludeEBPFLatency = false, want true")
+	}
+}
+
+func TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag(t *testing.T) {
+	_, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+		"--include-ebpf-latency",
+		"--include-ebpf-latency",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--include-ebpf-latency specified more than once") {
+		t.Fatalf("error = %v, want duplicate flag error", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
@@ -45,6 +46,7 @@ type Report struct {
 	Impact                   experiment.Impact
 	Storage                  storage.Snapshot
 	QEMU                     qemuio.SummaryReport
+	EBPFLatency              *ebpf.BlockLatencyEvidence
 	StorageTopologyAvailable bool
 	SharedPhysicalDisk       bool
 	Verdict                  string

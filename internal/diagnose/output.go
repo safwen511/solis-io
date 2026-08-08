@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
@@ -68,6 +69,13 @@ func Write(dst io.Writer, report Report) error {
 	fmt.Fprintf(w, "QEMU I/O conclusion:\t%s\n", valueOrDash(report.QEMU.Conclusion))
 	writeQEMUErrors(w, report)
 	fmt.Fprintln(w)
+	if report.EBPFLatency != nil {
+		fmt.Fprintln(w, "eBPF block latency evidence")
+		if err := ebpf.WriteBlockLatencyEvidence(w, *report.EBPFLatency); err != nil {
+			return err
+		}
+		fmt.Fprintln(w)
+	}
 
 	fmt.Fprintln(w, "Verdict")
 	fmt.Fprintln(w, report.Verdict)

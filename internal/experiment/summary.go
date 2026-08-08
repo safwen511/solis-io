@@ -8,21 +8,10 @@ import (
 
 // WriteSummary writes a deterministic, human-readable experiment diagnosis.
 func WriteSummary(dst io.Writer, report Report) error {
-	if report.Baseline.RequestsPerSecond == 0 {
-		return fmt.Errorf("baseline requests per second must be greater than zero")
+	impact, err := CalculateImpact(report)
+	if err != nil {
+		return err
 	}
-	if report.Baseline.TimePerRequestMS == 0 {
-		return fmt.Errorf("baseline time per request must be greater than zero")
-	}
-
-	throughputDrop := percentageChange(
-		report.Baseline.RequestsPerSecond,
-		report.Baseline.RequestsPerSecond-report.DuringNoise.RequestsPerSecond,
-	)
-	latencyIncrease := percentageChange(
-		report.Baseline.TimePerRequestMS,
-		report.DuringNoise.TimePerRequestMS-report.Baseline.TimePerRequestMS,
-	)
 
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "Solis I/O Experiment Summary")
@@ -35,15 +24,15 @@ func WriteSummary(dst io.Writer, report Report) error {
 	writeHTTPRow(w, "Post noise", report.PostNoise)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Impact")
-	fmt.Fprintf(w, "Throughput drop:\t%.2f%%\n", throughputDrop)
-	fmt.Fprintf(w, "Latency increase:\t%.2f%%\n", latencyIncrease)
+	fmt.Fprintf(w, "Throughput drop:\t%.2f%%\n", impact.ThroughputDropPct)
+	fmt.Fprintf(w, "Latency increase:\t%.2f%%\n", impact.LatencyIncreasePct)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "fio noise")
 	fmt.Fprintf(w, "IOPS:\t%s\n", report.FIO.IOPS)
 	fmt.Fprintf(w, "Bandwidth:\t%s\n", report.FIO.Bandwidth)
 	fmt.Fprintf(w, "Disk util:\t%.2f%%\n", report.FIO.DiskUtilPct)
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Conclusion:\t%s\n", conclusion(throughputDrop, latencyIncrease))
+	fmt.Fprintf(w, "Conclusion:\t%s\n", conclusion(impact.ThroughputDropPct, impact.LatencyIncreasePct))
 
 	return w.Flush()
 }
@@ -59,10 +48,6 @@ func writeHTTPRow(w io.Writer, phase string, metrics HTTPMetrics) {
 		metrics.TransferRate,
 		metrics.TransferRateUnit,
 	)
-}
-
-func percentageChange(baseline, difference float64) float64 {
-	return difference / baseline * 100
 }
 
 func conclusion(throughputDrop, latencyIncrease float64) string {

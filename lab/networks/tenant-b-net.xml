@@ -1,0 +1,10 @@
+<network>
+  <name>tenant-b-net</name>
+  <bridge name='virbr140'/>
+  <forward mode='nat'/>
+  <ip address='192.168.140.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.140.100' end='192.168.140.200'/>
+    </dhcp>
+  </ip>
+</network>

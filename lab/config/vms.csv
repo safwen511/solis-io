@@ -1,0 +1,9 @@
+name,tenant,network,ip,memory_mb,vcpus,disk_gb,role
+a-client,tenant-a,tenant-a-net,192.168.130.10,768,1,8,client
+a-web,tenant-a,tenant-a-net,192.168.130.20,1024,1,12,web
+a-db,tenant-a,tenant-a-net,192.168.130.30,2048,2,20,db
+a-stress,tenant-a,tenant-a-net,192.168.130.40,1024,1,15,stress
+b-client,tenant-b,tenant-b-net,192.168.140.10,768,1,8,client
+b-web,tenant-b,tenant-b-net,192.168.140.20,1024,1,12,web
+b-db,tenant-b,tenant-b-net,192.168.140.30,2048,2,20,db
+b-stress,tenant-b,tenant-b-net,192.168.140.40,1024,1,15,stress

@@ -1,0 +1,27 @@
+QEMU I/O Summary
+Victim selector:   a-web
+Suspect selector:  b-stress
+Duration:          10s
+Interval:          2s
+
+VM targets
+TARGET   VM        TENANT    ROLE    QEMU_PID  DISK
+victim   a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2
+suspect  b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2
+
+Per-VM averages
+TARGET   VM        AVG_READ_MIB/S  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  TOTAL_READ_MIB  TOTAL_WRITTEN_MIB  AVG_SYSCR/S  AVG_SYSCW/S  MAX_SYSCW/S  ERROR
+victim   a-web     0.00            0.00             0.00             0.00            0.00               0.00         0.00         0.00         -
+suspect  b-stress  0.00            0.00             0.01             0.00            0.02               0.20         0.80         4.00         -
+
+Diagnosis
+Victim average write MiB/s:      0.00
+Suspect average write MiB/s:     0.00
+Suspect/victim write ratio:      -
+Dominant writer:                 -
+Victim average syscw/s:          0.00
+Suspect average syscw/s:         0.80
+Suspect/victim syscw ratio:      -
+Suspect write syscall pressure:  NONE
+Dominant write syscall source:   -
+Conclusion:                      No meaningful QEMU write pressure observed during the observation window.

@@ -1,0 +1,19 @@
+Solis I/O Experiment Summary
+Report directory:  lab/reports/workload/20260808T174825Z
+
+HTTP workload
+PHASE         REQ/S   LATENCY_MS  FAILED  TRANSFER_RATE
+Baseline      174.14  114.850     0       45.13 Kbytes/sec
+During noise  133.02  150.359     0       34.56 Kbytes/sec
+Post noise    150.88  132.560     0       39.18 Kbytes/sec
+
+Impact
+Throughput drop:   23.61%
+Latency increase:  30.92%
+
+fio noise
+IOPS:       59.9k
+Bandwidth:  234MiB/s
+Disk util:  84.86%
+
+Conclusion:  Noisy-neighbor impact observed: throughput decreased and latency increased during fio noise.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
@@ -45,6 +46,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runStorageCommand(args, stdout)
 	case "qemu":
 		return runQEMUCommand(args, stdout)
+	case "diagnose":
+		return runDiagnoseCommand(args, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -80,6 +83,15 @@ const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --su
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
+const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
+
+type timedTargetOptions struct {
+	ReportDirectory string
+	Victim          string
+	Suspect         string
+	Duration        time.Duration
+	Interval        time.Duration
+}
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
@@ -133,65 +145,113 @@ func parseQEMUIOSummaryArgs(args []string) (string, string, time.Duration, time.
 }
 
 func parseTimedWatchOptions(args []string, start int, usage, commandName string) (string, string, time.Duration, time.Duration, error) {
-	duration := 30 * time.Second
-	interval := 5 * time.Second
-	var victim, suspect string
+	options, err := parseTimedTargetOptions(
+		args,
+		start,
+		usage,
+		commandName,
+		30*time.Second,
+		5*time.Second,
+		false,
+	)
+	if err != nil {
+		return "", "", 0, 0, err
+	}
+	return options.Victim, options.Suspect, options.Duration, options.Interval, nil
+}
+
+func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
+	if len(args) < 2 || args[1] != "noisy-neighbor" {
+		return timedTargetOptions{}, errors.New(diagnoseNoisyNeighborUsage)
+	}
+	return parseTimedTargetOptions(
+		args,
+		2,
+		diagnoseNoisyNeighborUsage,
+		"diagnose noisy-neighbor",
+		10*time.Second,
+		2*time.Second,
+		true,
+	)
+}
+
+func parseTimedTargetOptions(
+	args []string,
+	start int,
+	usage string,
+	commandName string,
+	defaultDuration time.Duration,
+	defaultInterval time.Duration,
+	allowReportDirectory bool,
+) (timedTargetOptions, error) {
+	options := timedTargetOptions{Duration: defaultDuration, Interval: defaultInterval}
 	var durationSet, intervalSet bool
 	for i := start; i < len(args); {
 		option := args[i]
 		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
-			return "", "", 0, 0, fmt.Errorf("%s: %s requires a value", usage, option)
+			return timedTargetOptions{}, fmt.Errorf("%s: %s requires a value", usage, option)
 		}
 		value := args[i+1]
 
 		switch option {
+		case "--report-dir":
+			if !allowReportDirectory {
+				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
+			}
+			if options.ReportDirectory != "" {
+				return timedTargetOptions{}, fmt.Errorf("%s: --report-dir specified more than once", usage)
+			}
+			options.ReportDirectory = value
 		case "--victim":
-			if victim != "" {
-				return "", "", 0, 0, fmt.Errorf("%s: --victim specified more than once", usage)
+			if options.Victim != "" {
+				return timedTargetOptions{}, fmt.Errorf("%s: --victim specified more than once", usage)
 			}
-			victim = value
+			options.Victim = value
 		case "--suspect":
-			if suspect != "" {
-				return "", "", 0, 0, fmt.Errorf("%s: --suspect specified more than once", usage)
+			if options.Suspect != "" {
+				return timedTargetOptions{}, fmt.Errorf("%s: --suspect specified more than once", usage)
 			}
-			suspect = value
+			options.Suspect = value
 		case "--duration":
 			if durationSet {
-				return "", "", 0, 0, fmt.Errorf("%s: --duration specified more than once", usage)
+				return timedTargetOptions{}, fmt.Errorf("%s: --duration specified more than once", usage)
 			}
 			parsed, err := time.ParseDuration(value)
 			if err != nil || parsed <= 0 {
-				return "", "", 0, 0, fmt.Errorf("%s: invalid --duration %q", usage, value)
+				return timedTargetOptions{}, fmt.Errorf("%s: invalid --duration %q", usage, value)
 			}
-			duration = parsed
+			options.Duration = parsed
 			durationSet = true
 		case "--interval":
 			if intervalSet {
-				return "", "", 0, 0, fmt.Errorf("%s: --interval specified more than once", usage)
+				return timedTargetOptions{}, fmt.Errorf("%s: --interval specified more than once", usage)
 			}
 			parsed, err := time.ParseDuration(value)
 			if err != nil || parsed <= 0 {
-				return "", "", 0, 0, fmt.Errorf("%s: invalid --interval %q", usage, value)
+				return timedTargetOptions{}, fmt.Errorf("%s: invalid --interval %q", usage, value)
 			}
-			interval = parsed
+			options.Interval = parsed
 			intervalSet = true
 		default:
-			return "", "", 0, 0, fmt.Errorf("%s: unknown option %s", usage, option)
+			return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
 		}
 		i += 2
 	}
 
-	if victim == "" {
-		return "", "", 0, 0, fmt.Errorf("%s: missing --victim", usage)
+	if allowReportDirectory && options.ReportDirectory == "" {
+		return timedTargetOptions{}, fmt.Errorf("%s: missing --report-dir", usage)
 	}
-	if suspect == "" {
-		return "", "", 0, 0, fmt.Errorf("%s: missing --suspect", usage)
+	if options.Victim == "" {
+		return timedTargetOptions{}, fmt.Errorf("%s: missing --victim", usage)
 	}
-	if interval > duration {
-		return "", "", 0, 0, fmt.Errorf("%s interval %s cannot exceed duration %s", commandName, interval, duration)
+	if options.Suspect == "" {
+		return timedTargetOptions{}, fmt.Errorf("%s: missing --suspect", usage)
+	}
+	if options.Interval > options.Duration {
+		return timedTargetOptions{}, fmt.Errorf("%s interval %s cannot exceed duration %s", commandName, options.Interval, options.Duration)
 	}
 
-	return victim, suspect, duration, interval, nil
+	return options, nil
 }
 
 func parseVictimSuspectOptions(args []string, start int, usage string) (string, string, error) {
@@ -374,6 +434,62 @@ func runQEMUIOSummary(victim, suspect string, duration, interval time.Duration, 
 	return nil
 }
 
+func runDiagnoseCommand(args []string, w io.Writer) error {
+	options, err := parseDiagnoseNoisyNeighborArgs(args)
+	if err != nil {
+		return err
+	}
+	return runNoisyNeighborDiagnosis(options, w)
+}
+
+func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
+	experimentReport, err := experiment.Load(options.ReportDirectory)
+	if err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+
+	plan, err := loadEnrichedTargetPlan(options.Victim, options.Suspect)
+	if err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+	storageSnapshot := storage.Capture(
+		plan.VictimSelector,
+		plan.SuspectSelector,
+		plan.VictimTargets,
+		plan.SuspectTarget,
+	)
+	qemuPlan := qemuio.NewPlan(
+		plan.VictimSelector,
+		plan.SuspectSelector,
+		plan.VictimTargets,
+		plan.SuspectTarget,
+	)
+	qemuReport, err := qemuio.CollectSummary(qemuPlan, options.Duration, options.Interval)
+	if err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+
+	report, err := diagnose.NewReport(
+		diagnose.Inputs{
+			ReportDirectory: experimentReport.Directory,
+			Victim:          options.Victim,
+			Suspect:         options.Suspect,
+			Duration:        options.Duration,
+			Interval:        options.Interval,
+		},
+		experimentReport,
+		storageSnapshot,
+		qemuReport,
+	)
+	if err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+	if err := diagnose.Write(w, report); err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+	return nil
+}
+
 func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
 	vms, err := inventory.LoadFromConfig(defaultConfigPath)
 	if err != nil {
@@ -468,6 +584,7 @@ Usage:
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
+  solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

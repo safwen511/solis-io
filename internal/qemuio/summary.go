@@ -42,6 +42,8 @@ type SummaryReport struct {
 	SuspectAverageWriteMiBPerSecond float64
 	VictimDataAvailable             bool
 	SuspectDataAvailable            bool
+	MeaningfulSuspectWritePressure  bool
+	SuspectDominant                 bool
 	WriteRatio                      string
 	DominantWriter                  string
 	Conclusion                      string
@@ -143,11 +145,17 @@ func summarizeSamples(plan Plan, duration, interval time.Duration, samples []int
 		report.SuspectAverageWriteMiBPerSecond,
 		report.VictimAverageWriteMiBPerSecond,
 	)
+	report.MeaningfulSuspectWritePressure =
+		report.SuspectAverageWriteMiBPerSecond >= minimumMeaningfulWriteMiBPerSecond
+	report.SuspectDominant = suspectIsDominant(
+		report.VictimAverageWriteMiBPerSecond,
+		report.SuspectAverageWriteMiBPerSecond,
+	)
 	report.Conclusion = conclusionForRates(
 		report.VictimAverageWriteMiBPerSecond,
 		report.SuspectAverageWriteMiBPerSecond,
 	)
-	if report.Conclusion == dominantConclusion {
+	if report.SuspectDominant {
 		report.DominantWriter = plan.SuspectSelector
 	} else {
 		report.DominantWriter = "-"

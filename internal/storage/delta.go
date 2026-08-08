@@ -11,24 +11,51 @@ func CalculateDelta(previous, current DeviceStats, interval time.Duration) (Devi
 		return DeviceDelta{}, fmt.Errorf("sample interval must be greater than zero")
 	}
 
-	physicalDisk := current.PhysicalDisk
-	if physicalDisk == "" {
-		physicalDisk = previous.PhysicalDisk
+	device := current.PhysicalDisk
+	if device == "" {
+		device = previous.PhysicalDisk
 	}
+	readsPerSecond := counterRate(previous.ReadsCompleted, current.ReadsCompleted, interval)
+	writesPerSecond := counterRate(previous.WritesCompleted, current.WritesCompleted, interval)
+	sectorsReadPerSecond := counterRate(previous.SectorsRead, current.SectorsRead, interval)
+	sectorsWritePerSecond := counterRate(previous.SectorsWritten, current.SectorsWritten, interval)
+	ioTimeDelta, ioTimeAvailable := counterDelta(previous.IOTimeMS, current.IOTimeMS)
 	weightedDelta, weightedAvailable := counterDelta(previous.WeightedIOTimeMS, current.WeightedIOTimeMS)
+	utilPercent := Rate{}
+	if ioTimeAvailable {
+		intervalMS := float64(interval) / float64(time.Millisecond)
+		utilPercent = Rate{
+			Value:     float64(ioTimeDelta) / intervalMS * 100,
+			Available: true,
+		}
+	}
 
 	return DeviceDelta{
-		PhysicalDisk:          physicalDisk,
-		ReadsPerSecond:        counterRate(previous.ReadsCompleted, current.ReadsCompleted, interval),
-		WritesPerSecond:       counterRate(previous.WritesCompleted, current.WritesCompleted, interval),
-		SectorsReadPerSecond:  counterRate(previous.SectorsRead, current.SectorsRead, interval),
-		SectorsWritePerSecond: counterRate(previous.SectorsWritten, current.SectorsWritten, interval),
+		Device:                device,
+		ReadsPerSecond:        readsPerSecond,
+		WritesPerSecond:       writesPerSecond,
+		SectorsReadPerSecond:  sectorsReadPerSecond,
+		SectorsWritePerSecond: sectorsWritePerSecond,
+		ReadMiBPerSecond:      scaleRate(sectorsReadPerSecond, 1.0/2048.0),
+		WriteMiBPerSecond:     scaleRate(sectorsWritePerSecond, 1.0/2048.0),
 		IOInProgress:          current.IOInProgress,
+		IOTimeDeltaMS: Counter{
+			Value:     ioTimeDelta,
+			Available: ioTimeAvailable,
+		},
 		WeightedIODeltaMS: Counter{
 			Value:     weightedDelta,
 			Available: weightedAvailable,
 		},
+		UtilPercent: utilPercent,
 	}, nil
+}
+
+func scaleRate(rate Rate, scale float64) Rate {
+	if !rate.Available {
+		return Rate{}
+	}
+	return Rate{Value: rate.Value * scale, Available: true}
 }
 
 func counterRate(previous, current Counter, interval time.Duration) Rate {

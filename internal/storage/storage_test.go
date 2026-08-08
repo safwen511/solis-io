@@ -25,6 +25,7 @@ func TestParseBlockStat(t *testing.T) {
 		{"sectors read", stats.SectorsRead, 30},
 		{"sectors written", stats.SectorsWritten, 70},
 		{"I/O in progress", stats.IOInProgress, 90},
+		{"I/O time", stats.IOTimeMS, 100},
 		{"weighted I/O time", stats.WeightedIOTimeMS, 110},
 	}
 	for _, check := range checks {
@@ -48,15 +49,17 @@ func TestCalculateDelta(t *testing.T) {
 		SectorsRead:      knownCounter(300),
 		SectorsWritten:   knownCounter(400),
 		IOInProgress:     knownCounter(1),
+		IOTimeMS:         knownCounter(600),
 		WeightedIOTimeMS: knownCounter(500),
 	}
 	current := DeviceStats{
 		PhysicalDisk:     "/dev/nvme0n1",
 		ReadsCompleted:   knownCounter(120),
 		WritesCompleted:  knownCounter(240),
-		SectorsRead:      knownCounter(360),
-		SectorsWritten:   knownCounter(480),
+		SectorsRead:      knownCounter(4396),
+		SectorsWritten:   knownCounter(8592),
 		IOInProgress:     knownCounter(3),
+		IOTimeMS:         knownCounter(1600),
 		WeightedIOTimeMS: knownCounter(550),
 	}
 
@@ -67,11 +70,14 @@ func TestCalculateDelta(t *testing.T) {
 	if delta.ReadsPerSecond.Value != 10 || delta.WritesPerSecond.Value != 20 {
 		t.Fatalf("operation rates = %#v, want 10 reads/s and 20 writes/s", delta)
 	}
-	if delta.SectorsReadPerSecond.Value != 30 || delta.SectorsWritePerSecond.Value != 40 {
-		t.Fatalf("sector rates = %#v, want 30 read/s and 40 written/s", delta)
+	if delta.ReadMiBPerSecond.Value != 1 || delta.WriteMiBPerSecond.Value != 2 {
+		t.Fatalf("MiB rates = %#v, want 1 MiB/s read and 2 MiB/s write", delta)
 	}
-	if delta.IOInProgress.Value != 3 || delta.WeightedIODeltaMS.Value != 50 {
-		t.Fatalf("gauge/delta = %#v, want io in progress 3 and weighted delta 50", delta)
+	if delta.IOInProgress.Value != 3 || delta.IOTimeDeltaMS.Value != 1000 || delta.WeightedIODeltaMS.Value != 50 {
+		t.Fatalf("gauge/deltas = %#v, want io in progress 3, io delta 1000, weighted delta 50", delta)
+	}
+	if delta.UtilPercent.Value != 50 || !delta.UtilPercent.Available {
+		t.Fatalf("UtilPercent = %#v, want 50%%", delta.UtilPercent)
 	}
 }
 
@@ -111,6 +117,43 @@ func TestCaptureSortsAndDeduplicatesPhysicalDisks(t *testing.T) {
 	}
 	if len(snapshot.Devices) != 2 || snapshot.Devices[0].PhysicalDisk != "/dev/nvme0n1" || snapshot.Devices[1].PhysicalDisk != "/dev/sdb" {
 		t.Fatalf("Devices = %#v, want sorted unique physical disks", snapshot.Devices)
+	}
+}
+
+func TestWatchLayerSamplesNormalizesAndDeduplicates(t *testing.T) {
+	targets := []VMTarget{
+		{Storage: hoststorage.Mapping{
+			SourceDevice: "/dev/mapper/vg-lv",
+			ParentDevice: "/dev/nvme0n1p3",
+			PhysicalDisk: "/dev/nvme0n1",
+		}},
+		{Storage: hoststorage.Mapping{
+			SourceDevice: "/dev/mapper/vg-lv",
+			ParentDevice: "/dev/nvme0n1p3",
+			PhysicalDisk: "/dev/nvme0n1",
+		}},
+	}
+	normalize := func(device string) string {
+		if device == "/dev/mapper/vg-lv" {
+			return "/dev/dm-1"
+		}
+		return device
+	}
+	read := func(device string) DeviceStats { return DeviceStats{PhysicalDisk: device} }
+
+	samples := watchLayerSamplesWith(targets, normalize, read)
+	if len(samples) != 3 {
+		t.Fatalf("len(samples) = %d, want one source, parent, and physical row", len(samples))
+	}
+	want := []layerSample{
+		{LayerType: "source", Device: "/dev/dm-1", Stats: DeviceStats{PhysicalDisk: "/dev/dm-1"}},
+		{LayerType: "parent", Device: "/dev/nvme0n1p3", Stats: DeviceStats{PhysicalDisk: "/dev/nvme0n1p3"}},
+		{LayerType: "physical", Device: "/dev/nvme0n1", Stats: DeviceStats{PhysicalDisk: "/dev/nvme0n1"}},
+	}
+	for i := range want {
+		if samples[i].LayerType != want[i].LayerType || samples[i].Device != want[i].Device {
+			t.Errorf("samples[%d] = %#v, want %#v", i, samples[i], want[i])
+		}
 	}
 }
 

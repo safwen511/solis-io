@@ -39,7 +39,7 @@ func parseBlockStat(line string) (DeviceStats, error) {
 		return DeviceStats{}, fmt.Errorf("block stat has %d fields, need at least 11", len(fields))
 	}
 
-	indexes := []int{0, 4, 2, 6, 8, 10}
+	indexes := []int{0, 4, 2, 6, 8, 9, 10}
 	values := make([]uint64, len(indexes))
 	for i, index := range indexes {
 		value, err := strconv.ParseUint(fields[index], 10, 64)
@@ -55,7 +55,8 @@ func parseBlockStat(line string) (DeviceStats, error) {
 		SectorsRead:      knownCounter(values[2]),
 		SectorsWritten:   knownCounter(values[3]),
 		IOInProgress:     knownCounter(values[4]),
-		WeightedIOTimeMS: knownCounter(values[5]),
+		IOTimeMS:         knownCounter(values[5]),
+		WeightedIOTimeMS: knownCounter(values[6]),
 	}, nil
 }
 

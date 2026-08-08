@@ -22,6 +22,7 @@ type DeviceStats struct {
 	SectorsRead      Counter
 	SectorsWritten   Counter
 	IOInProgress     Counter
+	IOTimeMS         Counter
 	WeightedIOTimeMS Counter
 }
 
@@ -46,14 +47,19 @@ type Rate struct {
 	Available bool
 }
 
-// DeviceDelta contains one interval of block activity for a physical disk.
+// DeviceDelta contains one interval of block activity for a storage-layer device.
 type DeviceDelta struct {
 	Elapsed               time.Duration
-	PhysicalDisk          string
+	LayerType             string
+	Device                string
 	ReadsPerSecond        Rate
 	WritesPerSecond       Rate
 	SectorsReadPerSecond  Rate
 	SectorsWritePerSecond Rate
+	ReadMiBPerSecond      Rate
+	WriteMiBPerSecond     Rate
 	IOInProgress          Counter
+	IOTimeDeltaMS         Counter
 	WeightedIODeltaMS     Counter
+	UtilPercent           Rate
 }

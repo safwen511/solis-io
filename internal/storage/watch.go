@@ -3,10 +3,21 @@ package storage
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/safwen511/solis-io/internal/hoststorage"
 )
 
-// Watch repeatedly samples the snapshot's physical disks and writes interval deltas.
+type layerSample struct {
+	LayerType string
+	Device    string
+	Stats     DeviceStats
+}
+
+// Watch repeatedly samples the snapshot's source, parent, and physical devices
+// and writes interval deltas.
 func Watch(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) error {
 	if duration <= 0 {
 		return fmt.Errorf("duration must be greater than zero")
@@ -22,7 +33,10 @@ func Watch(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) e
 		return err
 	}
 
-	previous := append([]DeviceStats(nil), snapshot.Devices...)
+	previous := watchLayerSamples(snapshot.Targets)
+	if len(previous) == 0 {
+		previous = []layerSample{{LayerType: "-", Device: "-", Stats: DeviceStats{}}}
+	}
 	scheduledElapsed := time.Duration(0)
 	for scheduledElapsed < duration {
 		step := interval
@@ -35,21 +49,76 @@ func Watch(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) e
 		actualInterval := time.Since(started)
 		scheduledElapsed += step
 
-		for i, previousStats := range previous {
-			currentStats := readDeviceStats(previousStats.PhysicalDisk)
-			delta, err := CalculateDelta(previousStats, currentStats, actualInterval)
+		for i, previousSample := range previous {
+			currentStats := readDeviceStats(previousSample.Device)
+			delta, err := CalculateDelta(previousSample.Stats, currentStats, actualInterval)
 			if err != nil {
 				return err
 			}
 			delta.Elapsed = scheduledElapsed
+			delta.LayerType = previousSample.LayerType
+			delta.Device = previousSample.Device
 			if err := writeWatchDelta(dst, delta); err != nil {
 				return err
 			}
-			previous[i] = currentStats
+			previous[i].Stats = currentStats
 		}
 	}
 
 	return nil
+}
+
+func watchLayerSamples(targets []VMTarget) []layerSample {
+	return watchLayerSamplesWith(targets, hoststorage.NormalizeBlockDevice, readDeviceStats)
+}
+
+func watchLayerSamplesWith(
+	targets []VMTarget,
+	normalize func(string) string,
+	readStats func(string) DeviceStats,
+) []layerSample {
+	layerOrder := map[string]int{"source": 0, "parent": 1, "physical": 2}
+	devices := make(map[string]layerSample)
+	for _, target := range targets {
+		layers := []struct {
+			name    string
+			devices string
+		}{
+			{"source", target.Storage.SourceDevice},
+			{"parent", target.Storage.ParentDevice},
+			{"physical", target.Storage.PhysicalDisk},
+		}
+		for _, layer := range layers {
+			for _, device := range strings.Split(layer.devices, ",") {
+				device = strings.TrimSpace(device)
+				if device == "" || device == "-" {
+					continue
+				}
+				normalized := normalize(device)
+				if normalized == "" {
+					normalized = device
+				}
+				key := layer.name + "\x00" + normalized
+				devices[key] = layerSample{LayerType: layer.name, Device: normalized}
+			}
+		}
+	}
+
+	samples := make([]layerSample, 0, len(devices))
+	for _, sample := range devices {
+		samples = append(samples, sample)
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		if layerOrder[samples[i].LayerType] != layerOrder[samples[j].LayerType] {
+			return layerOrder[samples[i].LayerType] < layerOrder[samples[j].LayerType]
+		}
+		return samples[i].Device < samples[j].Device
+	})
+	for i := range samples {
+		samples[i].Stats = readStats(samples[i].Device)
+	}
+
+	return samples
 }
 
 func writeWatchHeader(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) error {
@@ -74,15 +143,18 @@ func writeWatchHeader(dst io.Writer, snapshot Snapshot, duration, interval time.
 	}
 	_, err := fmt.Fprintf(
 		dst,
-		"%-10s  %-18s  %12s  %12s  %16s  %19s  %14s  %20s\n",
+		"%-10s  %-8s  %-18s  %10s  %10s  %12s  %12s  %14s  %16s  %22s  %10s\n",
 		"ELAPSED_S",
-		"PHYSICAL_DISK",
+		"LAYER",
+		"DEVICE",
 		"READS/S",
 		"WRITES/S",
-		"SECTORS_READ/S",
-		"SECTORS_WRITTEN/S",
+		"READ_MIB/S",
+		"WRITE_MIB/S",
 		"IO_IN_PROGRESS",
+		"IO_TIME_DELTA_MS",
 		"WEIGHTED_IO_DELTA_MS",
+		"UTIL_PCT",
 	)
 	return err
 }
@@ -90,17 +162,27 @@ func writeWatchHeader(dst io.Writer, snapshot Snapshot, duration, interval time.
 func writeWatchDelta(dst io.Writer, delta DeviceDelta) error {
 	_, err := fmt.Fprintf(
 		dst,
-		"%-10.3f  %-18s  %12s  %12s  %16s  %19s  %14s  %20s\n",
+		"%-10.3f  %-8s  %-18s  %10s  %10s  %12s  %12s  %14s  %16s  %22s  %10s\n",
 		delta.Elapsed.Seconds(),
-		emptyDash(delta.PhysicalDisk),
+		emptyDash(delta.LayerType),
+		emptyDash(delta.Device),
 		rateText(delta.ReadsPerSecond),
 		rateText(delta.WritesPerSecond),
-		rateText(delta.SectorsReadPerSecond),
-		rateText(delta.SectorsWritePerSecond),
+		rateText(delta.ReadMiBPerSecond),
+		rateText(delta.WriteMiBPerSecond),
 		counterText(delta.IOInProgress),
+		counterText(delta.IOTimeDeltaMS),
 		counterText(delta.WeightedIODeltaMS),
+		percentText(delta.UtilPercent),
 	)
 	return err
+}
+
+func percentText(rate Rate) string {
+	if !rate.Available {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f%%", rate.Value)
 }
 
 func rateText(rate Rate) string {

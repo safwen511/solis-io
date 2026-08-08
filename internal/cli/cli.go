@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
 )
@@ -27,6 +28,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	case "top":
 		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
 		return nil
+	case "experiment":
+		if len(args) != 3 || args[1] != "summarize" {
+			return errors.New("usage: solis experiment summarize <report-dir>")
+		}
+		return runExperimentSummary(args[2], stdout)
 	case "inspect":
 		if len(args) < 2 || args[1] == "--verbose" {
 			return errors.New("usage: solis inspect <vm>")
@@ -43,6 +49,19 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		printUsage(stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func runExperimentSummary(reportDir string, w io.Writer) error {
+	report, err := experiment.Load(reportDir)
+	if err != nil {
+		return fmt.Errorf("experiment summarize error: %w", err)
+	}
+
+	if err := experiment.WriteSummary(w, report); err != nil {
+		return fmt.Errorf("experiment summarize error: %w", err)
+	}
+
+	return nil
 }
 
 func runInventory(w io.Writer) error {
@@ -77,6 +96,7 @@ Usage:
   solis inventory
   solis top
   solis inspect <vm> [--verbose]
+  solis experiment summarize <report-dir>
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

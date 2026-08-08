@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/capture"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
@@ -48,6 +49,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runQEMUCommand(args, stdout)
 	case "diagnose":
 		return runDiagnoseCommand(args, stdout)
+	case "capture":
+		return runCaptureCommand(args, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -84,6 +87,7 @@ const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect 
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
+const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>"
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -177,6 +181,32 @@ func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		true,
 		true,
 	)
+}
+
+func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
+	if len(args) < 2 || args[1] != "noisy-neighbor" {
+		return timedTargetOptions{}, errors.New(captureNoisyNeighborUsage)
+	}
+	options, err := parseTimedTargetOptions(
+		args,
+		2,
+		captureNoisyNeighborUsage,
+		"capture noisy-neighbor",
+		10*time.Second,
+		2*time.Second,
+		true,
+		true,
+	)
+	if err != nil {
+		return timedTargetOptions{}, err
+	}
+	if options.OutputPath != "" {
+		return timedTargetOptions{}, fmt.Errorf("%s: --output is not supported; use --output-dir", captureNoisyNeighborUsage)
+	}
+	if options.OutputDirectory == "" {
+		return timedTargetOptions{}, fmt.Errorf("%s: missing --output-dir", captureNoisyNeighborUsage)
+	}
+	return options, nil
 }
 
 func parseTimedTargetOptions(
@@ -468,15 +498,94 @@ func runDiagnoseCommand(args []string, w io.Writer) error {
 	return runNoisyNeighborDiagnosis(options, w)
 }
 
+type noisyNeighborEvidence struct {
+	Experiment experiment.Report
+	Incident   incident.Explanation
+	TracePlan  traceplan.Plan
+	Storage    storage.Snapshot
+	QEMU       qemuio.SummaryReport
+	Diagnosis  diagnose.Report
+}
+
 func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
-	experimentReport, err := experiment.Load(options.ReportDirectory)
+	evidence, err := collectNoisyNeighborEvidence(options)
 	if err != nil {
 		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+	if _, err := diagnose.WriteOutput(
+		w,
+		evidence.Diagnosis,
+		diagnose.OutputOptions{
+			Path:      options.OutputPath,
+			Directory: options.OutputDirectory,
+		},
+		time.Now(),
+	); err != nil {
+		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+	}
+	return nil
+}
+
+func runCaptureCommand(args []string, w io.Writer) error {
+	options, err := parseCaptureNoisyNeighborArgs(args)
+	if err != nil {
+		return err
+	}
+	evidence, err := collectNoisyNeighborEvidence(options)
+	if err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+
+	result, err := capture.Write(
+		capture.Inputs{
+			OutputDirectory: options.OutputDirectory,
+			ReportDirectory: evidence.Experiment.Directory,
+			Victim:          options.Victim,
+			Suspect:         options.Suspect,
+			Duration:        options.Duration,
+			Interval:        options.Interval,
+		},
+		capture.Evidence{
+			Experiment: evidence.Experiment,
+			Incident:   evidence.Incident,
+			TracePlan:  evidence.TracePlan,
+			Storage:    evidence.Storage,
+			QEMU:       evidence.QEMU,
+			Diagnosis:  evidence.Diagnosis,
+		},
+		time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(w, "Solis capture written to %s\n", result.Directory); err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "Generated files:"); err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+	for _, path := range result.Files {
+		if _, err := fmt.Fprintf(w, "- %s\n", path); err != nil {
+			return fmt.Errorf("capture noisy-neighbor error: %w", err)
+		}
+	}
+	return nil
+}
+
+func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvidence, error) {
+	experimentReport, err := experiment.Load(options.ReportDirectory)
+	if err != nil {
+		return noisyNeighborEvidence{}, err
+	}
+	explanation, err := incident.NewExplanation(experimentReport, options.Victim, options.Suspect)
+	if err != nil {
+		return noisyNeighborEvidence{}, err
 	}
 
 	plan, err := loadEnrichedTargetPlan(options.Victim, options.Suspect)
 	if err != nil {
-		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+		return noisyNeighborEvidence{}, err
 	}
 	storageSnapshot := storage.Capture(
 		plan.VictimSelector,
@@ -484,6 +593,11 @@ func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
 		plan.VictimTargets,
 		plan.SuspectTarget,
 	)
+	plan.HostStorage = make(map[string]hoststorage.Mapping, len(storageSnapshot.Targets))
+	for _, target := range storageSnapshot.Targets {
+		plan.HostStorage[target.VM.Name] = target.Storage
+	}
+
 	qemuPlan := qemuio.NewPlan(
 		plan.VictimSelector,
 		plan.SuspectSelector,
@@ -492,10 +606,9 @@ func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
 	)
 	qemuReport, err := qemuio.CollectSummary(qemuPlan, options.Duration, options.Interval)
 	if err != nil {
-		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+		return noisyNeighborEvidence{}, err
 	}
-
-	report, err := diagnose.NewReport(
+	diagnosisReport, err := diagnose.NewReport(
 		diagnose.Inputs{
 			ReportDirectory: experimentReport.Directory,
 			Victim:          options.Victim,
@@ -508,20 +621,17 @@ func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
 		qemuReport,
 	)
 	if err != nil {
-		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
+		return noisyNeighborEvidence{}, err
 	}
-	if _, err := diagnose.WriteOutput(
-		w,
-		report,
-		diagnose.OutputOptions{
-			Path:      options.OutputPath,
-			Directory: options.OutputDirectory,
-		},
-		time.Now(),
-	); err != nil {
-		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
-	}
-	return nil
+
+	return noisyNeighborEvidence{
+		Experiment: experimentReport,
+		Incident:   explanation,
+		TracePlan:  plan,
+		Storage:    storageSnapshot,
+		QEMU:       qemuReport,
+		Diagnosis:  diagnosisReport,
+	}, nil
 }
 
 func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
@@ -619,6 +729,7 @@ Usage:
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]
+  solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

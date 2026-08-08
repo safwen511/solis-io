@@ -1,0 +1,28 @@
+QEMU I/O Summary
+Victim selector:   tenant-a
+Suspect selector:  b-stress
+Duration:          10s
+Interval:          2s
+
+VM targets
+TARGET   VM        TENANT    ROLE    QEMU_PID  DISK
+victim   a-client  tenant-a  client  24501     /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2
+victim   a-db      tenant-a  db      24633     /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2
+victim   a-stress  tenant-a  stress  24700     /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2
+victim   a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2
+suspect  b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2
+
+Per-VM averages
+TARGET   VM        AVG_READ_MIB/S  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  TOTAL_READ_MIB  TOTAL_WRITTEN_MIB  AVG_SYSCR/S  AVG_SYSCW/S  ERROR
+victim   a-client  0.00            0.01             0.06             0.00            0.12               1.00         0.60         -
+victim   a-db      0.00            0.00             0.00             0.00            0.00               0.20         0.00         -
+victim   a-stress  0.00            0.00             0.00             0.00            0.00               0.20         0.00         -
+victim   a-web     0.00            0.40             2.02             0.00            4.04               2.70         6.20         -
+suspect  b-stress  0.00            121.75           176.56           0.00            1218.05            102638.49    122401.18    -
+
+Diagnosis
+Victim average write MiB/s:   0.42
+Suspect average write MiB/s:  121.75
+Suspect/victim write ratio:   292.79x
+Dominant writer:              b-stress
+Conclusion:                   Suspect QEMU process is the dominant writer during the observation window.

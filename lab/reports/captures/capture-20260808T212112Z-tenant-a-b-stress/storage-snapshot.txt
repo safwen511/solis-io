@@ -1,0 +1,15 @@
+Storage Snapshot
+Victim selector:   tenant-a
+Suspect selector:  b-stress
+
+VM storage targets
+TARGET   VM        TENANT    ROLE    QEMU_PID  DISK                                                               SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+victim   a-client  tenant-a  client  24501     /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim   a-db      tenant-a  db      24633     /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2          /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim   a-stress  tenant-a  stress  24700     /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+victim   a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+suspect  b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+
+Host device snapshot
+PHYSICAL_DISK  READS_COMPLETED  WRITES_COMPLETED  SECTORS_READ  SECTORS_WRITTEN  IO_IN_PROGRESS  WEIGHTED_IO_TIME_MS
+/dev/nvme0n1   75439            1834797           6952675       54868018         0               21316258

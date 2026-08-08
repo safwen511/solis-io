@@ -1,0 +1,8 @@
+Solis Capture Metadata
+Capture timestamp UTC: 20260808T212112Z
+Report directory: lab/reports/workload/20260808T174825Z
+Victim: tenant-a
+Suspect: b-stress
+Duration: 10s
+Interval: 2s
+Solis command: solis capture noisy-neighbor

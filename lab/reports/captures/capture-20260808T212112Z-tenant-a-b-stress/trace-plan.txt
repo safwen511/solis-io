@@ -1,0 +1,49 @@
+Trace Plan
+Victim selector:   tenant-a
+Suspect selector:  b-stress
+
+Victim targets
+NAME      TENANT    ROLE    PLAN_IP         LEASE_IP        QEMU_PID  DISK                                                               NOTE
+a-client  tenant-a  client  192.168.130.10  192.168.130.10  24501     /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2  tenant VM
+a-db      tenant-a  db      192.168.130.30  192.168.130.30  24633     /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2          likely victim DB VM
+a-stress  tenant-a  stress  192.168.130.40  192.168.130.40  24700     /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2  tenant VM
+a-web     tenant-a  web     192.168.130.20  192.168.130.20  24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        likely victim web VM
+
+Suspect target
+NAME      TENANT    ROLE    PLAN_IP         LEASE_IP        QEMU_PID  DISK                                                               NOTE
+b-stress  tenant-b  stress  192.168.140.40  192.168.140.40  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  suspect VM
+
+Host storage mapping
+VM        DISK                                                               MOUNTPOINT  SOURCE_DEVICE                      FILESYSTEM  PARENT_DEVICE   PHYSICAL_DISK
+a-client  /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2  /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+a-db      /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2          /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+a-stress  /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2  /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+a-web     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+b-stress  /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+
+Host evidence to collect
+ITEM / SIGNAL                            PURPOSE / CLASSIFICATION
+QEMU PID per target VM                   Attribute host I/O to each victim and suspect process.
+Disk path per target VM                  Map each VM to its qcow2 backing file.
+Host block device backing qcow2 files    Resolve qcow2 files to the shared physical or logical device.
+Per-VM read/write rate                   Compare victim I/O demand with suspect write pressure.
+Per-VM latency histogram                 Measure latency distribution and tail amplification by VM.
+Host disk utilization                    Identify saturation during the incident window.
+Queue depth / await / svctm equivalents  Collect available host queueing and service-time metrics.
+Application latency correlation          Correlate storage evidence with application latency over time.
+
+Future eBPF probes
+ITEM / SIGNAL              PURPOSE / CLASSIFICATION
+block:block_rq_issue       Record block request issue timestamps.
+block:block_rq_complete    Record completions and calculate request latency.
+QEMU process PID filters   Restrict attribution to victim and suspect QEMU processes.
+Latency histogram per VM   Aggregate completion latency into per-VM buckets.
+Bytes per VM               Aggregate transferred bytes for each VM.
+Operation type read/write  Separate read traffic from write traffic.
+Timestamp correlation      Align block events with application-latency timestamps.
+
+Interpretation logic
+ITEM / SIGNAL                                                         PURPOSE / CLASSIFICATION
+Victim latency rises; suspect write rate and host block latency rise  Classify as probable noisy-neighbor storage interference.
+Victim app latency rises; host block latency does not                 Classify as likely guest/app/internal bottleneck.
+Host block latency rises; no single suspect dominates                 Classify as shared infrastructure pressure.

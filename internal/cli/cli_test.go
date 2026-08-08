@@ -6,6 +6,37 @@ import (
 	"time"
 )
 
+func TestParseEBPFBlockWatchArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "default", args: []string{"ebpf", "block-watch"}, want: 10 * time.Second},
+		{name: "explicit", args: []string{"ebpf", "block-watch", "--duration", "2.5s"}, want: 2500 * time.Millisecond},
+		{name: "invalid", args: []string{"ebpf", "block-watch", "--duration", "0s"}, wantErr: "invalid --duration"},
+		{name: "unknown option", args: []string{"ebpf", "block-watch", "--interval", "1s"}, wantErr: ebpfBlockWatchUsage},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseEBPFBlockWatchArgs(test.args)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseEBPFBlockWatchArgs() error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("duration = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseQEMUIOWatchArgsDefaults(t *testing.T) {
 	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs([]string{
 		"qemu", "io-watch", "--victim", "tenant-a", "--suspect", "b-stress",

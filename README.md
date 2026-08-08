@@ -35,6 +35,7 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
 - Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
+- Perform read-only BTF, tracefs/debugfs, and block-tracepoint readiness checks with the experimental `ebpf` commands.
 
 The `top` command remains a placeholder.
 
@@ -44,6 +45,8 @@ Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procf
 
 ```text
 ./solis doctor
+./solis ebpf doctor
+./solis ebpf block-watch --duration 10s
 ./solis inventory
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
@@ -206,6 +209,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 ## Current limitations
 
 - No live eBPF block tracing yet.
+- The experimental eBPF commands are readiness checks only; they do not load or attach programs yet.
 - No per-VM block-latency histograms yet.
 - QEMU process counters require sufficient procfs permissions and reflect process accounting rather than request-level block latency.
 - Experiment and attribution workflows are currently designed around the included lab/demo environment.

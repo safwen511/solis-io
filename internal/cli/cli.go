@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/capture"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/doctor"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
@@ -32,6 +33,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "doctor":
 		return runDoctor(stdout)
+	case "ebpf":
+		return runEBPFCommand(args, stdout)
 	case "inventory":
 		return runInventory(stdout)
 	case "top":
@@ -88,6 +91,8 @@ const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>"
+const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>]"
+const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -111,6 +116,23 @@ func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	}
 
 	return reportDir, victim, suspect, nil
+}
+
+func parseEBPFBlockWatchArgs(args []string) (time.Duration, error) {
+	if len(args) < 2 || args[0] != "ebpf" || args[1] != "block-watch" {
+		return 0, errors.New(ebpfBlockWatchUsage)
+	}
+	if len(args) == 2 {
+		return 10 * time.Second, nil
+	}
+	if len(args) != 4 || args[2] != "--duration" {
+		return 0, errors.New(ebpfBlockWatchUsage)
+	}
+	duration, err := time.ParseDuration(args[3])
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("%s: invalid --duration %q", ebpfBlockWatchUsage, args[3])
+	}
+	return duration, nil
 }
 
 func parseTracePlanArgs(args []string) (string, string, error) {
@@ -705,6 +727,33 @@ func runDoctor(w io.Writer) error {
 	return nil
 }
 
+func runEBPFCommand(args []string, w io.Writer) error {
+	if len(args) < 2 {
+		return errors.New(ebpfUsage)
+	}
+	switch args[1] {
+	case "doctor":
+		if len(args) != 2 {
+			return errors.New("usage: solis ebpf doctor")
+		}
+		if err := ebpf.WriteDoctor(w, ebpf.Inspect()); err != nil {
+			return fmt.Errorf("ebpf doctor error: %w", err)
+		}
+		return nil
+	case "block-watch":
+		duration, err := parseEBPFBlockWatchArgs(args)
+		if err != nil {
+			return err
+		}
+		if err := ebpf.WriteBlockWatch(w, duration, ebpf.Inspect()); err != nil {
+			return fmt.Errorf("ebpf block-watch error: %w", err)
+		}
+		return nil
+	default:
+		return errors.New(ebpfUsage)
+	}
+}
+
 func runInspect(name string, verbose bool, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(defaultConfigPath)
 	if err != nil {
@@ -725,6 +774,8 @@ func printUsage(w io.Writer) {
 
 Usage:
   solis doctor
+  solis ebpf doctor
+  solis ebpf block-watch [--duration <duration>]
   solis inventory
   solis top
   solis inspect <vm> [--verbose]

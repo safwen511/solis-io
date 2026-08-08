@@ -12,6 +12,7 @@ import (
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
+	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
 )
@@ -42,6 +43,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runTracePlan(victim, suspect, stdout)
 	case "storage":
 		return runStorageCommand(args, stdout)
+	case "qemu":
+		return runQEMUCommand(args, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -75,6 +78,7 @@ const incidentExplainUsage = "usage: solis incidents explain <report-dir> --vict
 const tracePlanUsage = "usage: solis trace plan --victim <name> --suspect <name>"
 const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --suspect <name>"
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
+const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
@@ -110,63 +114,73 @@ func parseStorageWatchArgs(args []string) (string, string, time.Duration, time.D
 	if len(args) < 2 || args[1] != "watch" {
 		return "", "", 0, 0, errors.New(storageWatchUsage)
 	}
+	return parseTimedWatchOptions(args, 2, storageWatchUsage, "storage watch")
+}
 
+func parseQEMUIOWatchArgs(args []string) (string, string, time.Duration, time.Duration, error) {
+	if len(args) < 2 || args[1] != "io-watch" {
+		return "", "", 0, 0, errors.New(qemuIOWatchUsage)
+	}
+	return parseTimedWatchOptions(args, 2, qemuIOWatchUsage, "qemu io-watch")
+}
+
+func parseTimedWatchOptions(args []string, start int, usage, commandName string) (string, string, time.Duration, time.Duration, error) {
 	duration := 30 * time.Second
 	interval := 5 * time.Second
 	var victim, suspect string
 	var durationSet, intervalSet bool
-	for i := 2; i < len(args); {
+	for i := start; i < len(args); {
 		option := args[i]
 		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
-			return "", "", 0, 0, fmt.Errorf("%s: %s requires a value", storageWatchUsage, option)
+			return "", "", 0, 0, fmt.Errorf("%s: %s requires a value", usage, option)
 		}
 		value := args[i+1]
 
 		switch option {
 		case "--victim":
 			if victim != "" {
-				return "", "", 0, 0, fmt.Errorf("%s: --victim specified more than once", storageWatchUsage)
+				return "", "", 0, 0, fmt.Errorf("%s: --victim specified more than once", usage)
 			}
 			victim = value
 		case "--suspect":
 			if suspect != "" {
-				return "", "", 0, 0, fmt.Errorf("%s: --suspect specified more than once", storageWatchUsage)
+				return "", "", 0, 0, fmt.Errorf("%s: --suspect specified more than once", usage)
 			}
 			suspect = value
 		case "--duration":
 			if durationSet {
-				return "", "", 0, 0, fmt.Errorf("%s: --duration specified more than once", storageWatchUsage)
+				return "", "", 0, 0, fmt.Errorf("%s: --duration specified more than once", usage)
 			}
 			parsed, err := time.ParseDuration(value)
 			if err != nil || parsed <= 0 {
-				return "", "", 0, 0, fmt.Errorf("%s: invalid --duration %q", storageWatchUsage, value)
+				return "", "", 0, 0, fmt.Errorf("%s: invalid --duration %q", usage, value)
 			}
 			duration = parsed
 			durationSet = true
 		case "--interval":
 			if intervalSet {
-				return "", "", 0, 0, fmt.Errorf("%s: --interval specified more than once", storageWatchUsage)
+				return "", "", 0, 0, fmt.Errorf("%s: --interval specified more than once", usage)
 			}
 			parsed, err := time.ParseDuration(value)
 			if err != nil || parsed <= 0 {
-				return "", "", 0, 0, fmt.Errorf("%s: invalid --interval %q", storageWatchUsage, value)
+				return "", "", 0, 0, fmt.Errorf("%s: invalid --interval %q", usage, value)
 			}
 			interval = parsed
 			intervalSet = true
 		default:
-			return "", "", 0, 0, fmt.Errorf("%s: unknown option %s", storageWatchUsage, option)
+			return "", "", 0, 0, fmt.Errorf("%s: unknown option %s", usage, option)
 		}
 		i += 2
 	}
 
 	if victim == "" {
-		return "", "", 0, 0, fmt.Errorf("%s: missing --victim", storageWatchUsage)
+		return "", "", 0, 0, fmt.Errorf("%s: missing --victim", usage)
 	}
 	if suspect == "" {
-		return "", "", 0, 0, fmt.Errorf("%s: missing --suspect", storageWatchUsage)
+		return "", "", 0, 0, fmt.Errorf("%s: missing --suspect", usage)
 	}
 	if interval > duration {
-		return "", "", 0, 0, fmt.Errorf("storage watch interval %s cannot exceed duration %s", interval, duration)
+		return "", "", 0, 0, fmt.Errorf("%s interval %s cannot exceed duration %s", commandName, interval, duration)
 	}
 
 	return victim, suspect, duration, interval, nil
@@ -289,6 +303,39 @@ func runStorageWatch(victim, suspect string, duration, interval time.Duration, w
 	return nil
 }
 
+func runQEMUCommand(args []string, w io.Writer) error {
+	if len(args) < 2 {
+		return errors.New(qemuIOWatchUsage)
+	}
+	if args[1] != "io-watch" {
+		return fmt.Errorf("unknown qemu command %q; expected io-watch", args[1])
+	}
+
+	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs(args)
+	if err != nil {
+		return err
+	}
+	return runQEMUIOWatch(victim, suspect, duration, interval, w)
+}
+
+func runQEMUIOWatch(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(victim, suspect)
+	if err != nil {
+		return fmt.Errorf("qemu io-watch error: %w", err)
+	}
+
+	watchPlan := qemuio.NewPlan(
+		plan.VictimSelector,
+		plan.SuspectSelector,
+		plan.VictimTargets,
+		plan.SuspectTarget,
+	)
+	if err := qemuio.Watch(w, watchPlan, duration, interval); err != nil {
+		return fmt.Errorf("qemu io-watch error: %w", err)
+	}
+	return nil
+}
+
 func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
 	vms, err := inventory.LoadFromConfig(defaultConfigPath)
 	if err != nil {
@@ -381,6 +428,7 @@ Usage:
   solis trace plan --victim <name> --suspect <name>
   solis storage snapshot --victim <name> --suspect <name>
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
+  solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

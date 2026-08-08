@@ -9,6 +9,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/capture"
 	"github.com/safwen511/solis-io/internal/diagnose"
+	"github.com/safwen511/solis-io/internal/doctor"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
@@ -30,8 +31,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 	switch args[0] {
 	case "doctor":
-		fmt.Fprintln(stdout, "solis doctor: compatibility checks will be implemented here")
-		return nil
+		return runDoctor(stdout)
 	case "inventory":
 		return runInventory(stdout)
 	case "top":
@@ -696,6 +696,13 @@ func runInventory(w io.Writer) error {
 	}
 
 	return output.InventoryTable(w, inventory.Enrich(vms))
+}
+
+func runDoctor(w io.Writer) error {
+	if err := doctor.Write(w, doctor.Run(".")); err != nil {
+		return fmt.Errorf("doctor error: %w", err)
+	}
+	return nil
 }
 
 func runInspect(name string, verbose bool, w io.Writer) error {

@@ -33,8 +33,32 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Watch and summarize per-QEMU I/O using `/proc/<qemu-pid>/io`.
 - Combine experiment, storage-topology, and QEMU-process evidence into a noisy-neighbor verdict.
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
+- Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
+- Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
 
-The `doctor` and `top` commands currently remain placeholders.
+The `top` command remains a placeholder.
+
+## Current command set
+
+Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procfs file is commonly protected when QEMU runs under another account. Solis never invokes `sudo` itself.
+
+```text
+./solis doctor
+./solis inventory
+./solis inspect <vm> [--verbose]
+./solis experiment summarize <report-dir>
+./solis incidents explain <report-dir> --victim <name> --suspect <name>
+./solis trace plan --victim <name> --suspect <name>
+./solis storage snapshot --victim <name> --suspect <name>
+./solis storage watch --victim <name> --suspect <name> --duration 10s --interval 2s
+sudo ./solis qemu io-watch --victim <name> --suspect <name> --duration 10s --interval 2s
+sudo ./solis qemu io-summary --victim <name> --suspect <name> --duration 10s --interval 2s
+sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s
+sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/diagnosis
+sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/captures
+```
+
+For `--victim`, a tenant selector includes all configured VMs belonging to that tenant; a VM selector targets only that VM. The suspect must resolve to one VM.
 
 ## Architecture
 
@@ -81,6 +105,7 @@ From the repository root:
 ```bash
 go test ./...
 go build -o solis ./cmd/solis
+./solis doctor
 ./solis inventory
 ```
 
@@ -122,6 +147,30 @@ Solis itself never invokes `sudo`. These examples use it because Linux commonly 
 
 To save a combined diagnosis, add either `--output <path>` or `--output-dir <dir>`. The latter generates a UTC timestamped filename and will not overwrite an existing report with the same name.
 
+## Run the demo diagnosis
+
+The manual demo starts the existing fio workload inside `b-stress`, allows it to become active, and samples QEMU process I/O while diagnosing `tenant-a`. Run these commands from the repository root:
+
+```bash
+./lab/scripts/run-fio-noise.sh b-stress 20 > /tmp/solis-fio-diagnose.txt 2>&1 &
+fio_pid=$!
+sleep 3
+sudo ./solis diagnose noisy-neighbor --report-dir lab/reports/workload/20260808T174825Z --victim tenant-a --suspect b-stress --duration 10s --interval 2s
+wait "$fio_pid"
+```
+
+The fio helper uses the configured lab SSH access to run the workload in the stress guest. The Solis diagnosis remains provider-side and does not log in to the victim tenant VMs.
+
+## Create a capture package
+
+Create a timestamped incident directory containing the experiment summary, incident explanation, trace plan, storage snapshot, QEMU I/O summary, combined diagnosis, and capture metadata:
+
+```bash
+sudo ./solis capture noisy-neighbor --report-dir lab/reports/workload/20260808T174825Z --victim tenant-a --suspect b-stress --duration 10s --interval 2s --output-dir lab/reports/captures
+```
+
+The generated directory is written beneath `lab/reports/captures/`. If QEMU procfs counters cannot be read, capture still preserves the other evidence and records the permission error in the relevant files.
+
 ## Run the full demo
 
 The demo runner builds Solis, starts the existing fio workload on `b-stress`, waits for noise to become active, runs the combined diagnosis, and saves the result under `lab/reports/diagnosis/`. It then waits for fio, prints its summary, and reports the generated diagnosis path.
@@ -138,7 +187,8 @@ In the included lab experiment and a corresponding live QEMU I/O sample:
 
 - HTTP throughput dropped **23.61%** during storage noise.
 - HTTP latency increased **30.92%**.
-- `b-stress` was the dominant QEMU writer.
+- The victim and suspect shared physical disk `/dev/nvme0n1`.
+- `b-stress` was the dominant QEMU writer during fio.
 - Verdict: **Probable noisy-neighbor storage interference.**
 
 This is evidence from a controlled demo, not a guarantee that the same conclusion applies to unrelated production incidents.
@@ -151,6 +201,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 - Uses provider-visible VM metadata, disk topology, experiment summaries, kernel block counters, and QEMU process counters.
 - Collection commands are read-only and do not create, stop, start, or modify VMs.
 - Does not bypass host permissions or invoke `sudo` internally.
+- QEMU I/O commands may need to be launched with `sudo` because Linux can protect `/proc/<qemu-pid>/io` from other users.
 
 ## Current limitations
 

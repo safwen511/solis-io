@@ -36,7 +36,7 @@ readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
 
 echo "=== fio noise: ${vm_name} (${seconds} seconds) ==="
 ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
-  fio --name=solis-noise \
+  fio --name=solis-noise --ioengine=libaio \
   --filename=/home/flint/solis-noise.dat \
   --size=2G \
   --rw=randwrite \

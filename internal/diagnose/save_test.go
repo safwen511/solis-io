@@ -98,8 +98,8 @@ func TestSanitizeFilenamePart(t *testing.T) {
 		"":              "_",
 	}
 	for input, want := range tests {
-		if got := sanitizeFilenamePart(input); got != want {
-			t.Errorf("sanitizeFilenamePart(%q) = %q, want %q", input, got, want)
+		if got := SanitizeFilenamePart(input); got != want {
+			t.Errorf("SanitizeFilenamePart(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

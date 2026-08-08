@@ -39,9 +39,9 @@ func WriteOutput(stdout io.Writer, report Report, options OutputOptions, now tim
 	if options.Directory != "" {
 		filename := fmt.Sprintf(
 			"diagnosis-%s-%s-%s.txt",
-			now.UTC().Format(diagnosisTimestampFormat),
-			sanitizeFilenamePart(report.Inputs.Victim),
-			sanitizeFilenamePart(report.Inputs.Suspect),
+			FormatUTCTimestamp(now),
+			SanitizeFilenamePart(report.Inputs.Victim),
+			SanitizeFilenamePart(report.Inputs.Suspect),
 		)
 		path = filepath.Join(options.Directory, filename)
 		exclusive = true
@@ -80,7 +80,13 @@ func writeDiagnosisFile(path string, data []byte, exclusive bool) error {
 	return nil
 }
 
-func sanitizeFilenamePart(value string) string {
+// FormatUTCTimestamp formats artifact timestamps in compact UTC form.
+func FormatUTCTimestamp(value time.Time) string {
+	return value.UTC().Format(diagnosisTimestampFormat)
+}
+
+// SanitizeFilenamePart replaces characters outside the portable Solis name set.
+func SanitizeFilenamePart(value string) string {
 	var sanitized strings.Builder
 	for _, char := range value {
 		switch {

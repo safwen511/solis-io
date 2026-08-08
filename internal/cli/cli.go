@@ -28,10 +28,17 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
 		return nil
 	case "inspect":
-		if len(args) < 2 {
+		if len(args) < 2 || args[1] == "--verbose" {
 			return errors.New("usage: solis inspect <vm>")
 		}
-		return runInspect(args[1], stdout)
+		verbose := false
+		if len(args) > 2 {
+			if len(args) != 3 || args[2] != "--verbose" {
+				return errors.New("usage: solis inspect <vm> [--verbose]")
+			}
+			verbose = true
+		}
+		return runInspect(args[1], verbose, stdout)
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -47,7 +54,7 @@ func runInventory(w io.Writer) error {
 	return output.InventoryTable(w, inventory.Enrich(vms))
 }
 
-func runInspect(name string, w io.Writer) error {
+func runInspect(name string, verbose bool, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(defaultConfigPath)
 	if err != nil {
 		return fmt.Errorf("inspect error: %w", err)
@@ -59,7 +66,7 @@ func runInspect(name string, w io.Writer) error {
 		return fmt.Errorf("VM not found: %s", name)
 	}
 
-	return output.VMDetail(w, *vm)
+	return output.VMDetail(w, *vm, verbose)
 }
 
 func printUsage(w io.Writer) {
@@ -69,7 +76,7 @@ Usage:
   solis doctor
   solis inventory
   solis top
-  solis inspect <vm>
+  solis inspect <vm> [--verbose]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

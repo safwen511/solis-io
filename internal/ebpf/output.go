@@ -8,6 +8,45 @@ import (
 	"time"
 )
 
+// WriteBlockLatency writes a host-wide block request latency summary.
+func WriteBlockLatency(dst io.Writer, result BlockLatencyResult) error {
+	averageNS := float64(0)
+	if result.CompletedRequests > 0 {
+		averageNS = float64(result.TotalLatencyNS) / float64(result.CompletedRequests)
+	}
+	if _, err := fmt.Fprintln(dst, "Solis eBPF Block Latency (experimental)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(
+		dst,
+		"\nDuration:                 %s\nCorrelation key:           dev + sector (best effort)\nTotal completed requests:  %d\nAverage latency:           %.2f us\nMax latency:               %.2f us\n\nLatency histogram:\n",
+		result.Duration,
+		result.CompletedRequests,
+		averageNS/1000,
+		float64(result.MaxLatencyNS)/1000,
+	); err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "LATENCY RANGE\tREQUESTS\tPERCENT"); err != nil {
+		return err
+	}
+	for index, label := range latencyBucketLabels {
+		percent := float64(0)
+		if result.CompletedRequests > 0 {
+			percent = float64(result.Histogram[index]) / float64(result.CompletedRequests) * 100
+		}
+		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f%%\n", label, result.Histogram[index], percent); err != nil {
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(dst, "\nSafety: temporary tracepoint programs detached; no payloads or process memory inspected")
+	return err
+}
+
 // WriteBlockEvents writes parsed block tracepoint formats.
 func WriteBlockEvents(dst io.Writer, duration time.Duration, formats []TracepointFormat) error {
 	if _, err := fmt.Fprintln(dst, "Solis eBPF Block Events (experimental)"); err != nil {

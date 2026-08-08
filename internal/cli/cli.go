@@ -91,10 +91,11 @@ const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] --output-dir <dir>"
-const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration>"
+const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency --duration <duration>"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
+const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency --duration <duration>"
 
 type timedTargetOptions struct {
 	ReportDirectory string
@@ -788,6 +789,19 @@ func runEBPFCommand(args []string, w io.Writer) error {
 			return fmt.Errorf("ebpf block-count error: %w", err)
 		}
 		return nil
+	case "block-latency":
+		duration, err := parseRequiredEBPFDuration(args, "block-latency", ebpfBlockLatencyUsage)
+		if err != nil {
+			return err
+		}
+		result, err := ebpf.MeasureBlockLatency(duration)
+		if err != nil {
+			return fmt.Errorf("ebpf block-latency error: %w", err)
+		}
+		if err := ebpf.WriteBlockLatency(w, result); err != nil {
+			return fmt.Errorf("ebpf block-latency error: %w", err)
+		}
+		return nil
 	default:
 		return errors.New(ebpfUsage)
 	}
@@ -817,6 +831,7 @@ Usage:
   solis ebpf block-watch [--duration <duration>]
   solis ebpf block-events --duration <duration>
   solis ebpf block-count --duration <duration>
+  solis ebpf block-latency --duration <duration>
   solis inventory
   solis top
   solis inspect <vm> [--verbose]

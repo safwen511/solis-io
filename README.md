@@ -35,13 +35,13 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
 - Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
-- Perform read-only BTF, tracefs/debugfs, and block-tracepoint readiness checks with the experimental `ebpf` commands.
+- Check eBPF readiness, inspect tracepoint formats, count block events, and collect an experimental host-wide block latency histogram.
 
 The `top` command remains a placeholder.
 
 ## Current command set
 
-Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procfs file is commonly protected when QEMU runs under another account. Solis never invokes `sudo` itself.
+Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procfs file is commonly protected when QEMU runs under another account. Experimental eBPF inspection and attachment may also require elevated capabilities. Solis never invokes `sudo` itself.
 
 ```text
 ./solis doctor
@@ -49,6 +49,7 @@ Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procf
 ./solis ebpf block-watch --duration 10s
 sudo ./solis ebpf block-events --duration 10s
 sudo ./solis ebpf block-count --duration 10s
+sudo ./solis ebpf block-latency --duration 10s
 ./solis inventory
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
@@ -210,8 +211,8 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 
 ## Current limitations
 
-- No live eBPF block tracing yet.
-- `ebpf doctor` and `ebpf block-watch` are readiness-only. `ebpf block-events` reads tracepoint formats, while `ebpf block-count` temporarily attaches count-only programs; no command measures block latency yet.
+- Experimental host-wide eBPF block latency measurement is available, but it does not yet attribute latency histograms to individual VMs.
+- `ebpf doctor` and `ebpf block-watch` are readiness-only. `ebpf block-events` reads tracepoint formats, while `ebpf block-count` and `ebpf block-latency` temporarily attach limited-purpose programs.
 - No per-VM block-latency histograms yet.
 - QEMU process counters require sufficient procfs permissions and reflect process accounting rather than request-level block latency.
 - Experiment and attribution workflows are currently designed around the included lab/demo environment.
@@ -220,7 +221,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 
 ## Roadmap
 
-- eBPF block latency tracing.
+- Per-VM eBPF block latency attribution and production hardening.
 - Per-VM latency histograms.
 - Live incident windows and time correlation.
 - Prometheus/export support.

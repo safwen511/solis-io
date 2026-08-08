@@ -58,6 +58,20 @@ func TestParseRequiredEBPFDuration(t *testing.T) {
 	}
 }
 
+func TestParseRequiredEBPFBlockLatencyDuration(t *testing.T) {
+	duration, err := parseRequiredEBPFDuration(
+		[]string{"ebpf", "block-latency", "--duration", "750ms"},
+		"block-latency",
+		ebpfBlockLatencyUsage,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duration != 750*time.Millisecond {
+		t.Fatalf("duration = %s, want 750ms", duration)
+	}
+}
+
 func TestParseQEMUIOWatchArgsDefaults(t *testing.T) {
 	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs([]string{
 		"qemu", "io-watch", "--victim", "tenant-a", "--suspect", "b-stress",

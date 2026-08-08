@@ -60,6 +60,12 @@ func Write(dst io.Writer, report Report) error {
 	fmt.Fprintf(w, "Suspect average write MiB/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageWriteMiBPerSecond, report.QEMU.SuspectDataAvailable))
 	fmt.Fprintf(w, "Suspect/victim write ratio:\t%s\n", valueOrDash(report.QEMU.WriteRatio))
 	fmt.Fprintf(w, "Dominant writer:\t%s\n", valueOrDash(report.QEMU.DominantWriter))
+	fmt.Fprintf(w, "Victim average syscw/s:\t%s\n", qemuValue(report.QEMU.VictimAverageSyscwPerSecond, report.QEMU.VictimDataAvailable))
+	fmt.Fprintf(w, "Suspect average syscw/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageSyscwPerSecond, report.QEMU.SuspectDataAvailable))
+	fmt.Fprintf(w, "Suspect/victim syscw ratio:\t%s\n", valueOrDash(report.QEMU.SyscwRatio))
+	fmt.Fprintf(w, "Suspect write syscall pressure:\t%s\n", valueOrDash(report.QEMU.WriteSyscallPressure))
+	fmt.Fprintf(w, "Dominant write syscall source:\t%s\n", valueOrDash(report.QEMU.DominantWriteSyscallSource))
+	fmt.Fprintf(w, "QEMU I/O conclusion:\t%s\n", valueOrDash(report.QEMU.Conclusion))
 	writeQEMUErrors(w, report)
 	fmt.Fprintln(w)
 

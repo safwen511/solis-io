@@ -29,6 +29,9 @@ func TestSummarizeSamplesCalculatesTimeWeightedAverages(t *testing.T) {
 	if got.AverageSyscrPerSecond != 25 || got.AverageSyscwPerSecond != 35 {
 		t.Fatalf("syscall averages = %#v, want 25 syscr/s and 35 syscw/s", got)
 	}
+	if got.MaxSyscwPerSecond != 40 {
+		t.Fatalf("MaxSyscwPerSecond = %v, want 40", got.MaxSyscwPerSecond)
+	}
 }
 
 func TestFormatWriteRatio(t *testing.T) {
@@ -45,21 +48,66 @@ func TestFormatWriteRatio(t *testing.T) {
 
 func TestConclusionLogic(t *testing.T) {
 	tests := []struct {
-		name    string
-		victim  float64
-		suspect float64
-		want    string
+		name         string
+		victimWrite  float64
+		suspectWrite float64
+		suspectSyscw float64
+		want         string
 	}{
-		{"high suspect, low victim", 0, 147, dominantConclusion},
-		{"low suspect, zero victim", 0, 0.27, noWritePressureConclusion},
-		{"similar meaningful rates", 20, 21, noDominantConclusion},
+		{"high suspect write bytes", 0, 147, 0, dominantConclusion},
+		{"low bytes but high suspect syscw", 0, 0, 122364, syscallPressureConclusion},
+		{"no byte or syscall pressure", 0, 0.27, 0, noWritePressureConclusion},
+		{"similar meaningful byte rates", 20, 21, 0, noDominantConclusion},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := conclusionForRates(test.victim, test.suspect); got != test.want {
-				t.Fatalf("conclusionForRates(%v, %v) = %q, want %q", test.victim, test.suspect, got, test.want)
+			if got := conclusionForSignals(test.victimWrite, test.suspectWrite, test.suspectSyscw); got != test.want {
+				t.Fatalf("conclusionForSignals() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestSyscallFallbackMarksDominantSuspect(t *testing.T) {
+	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
+	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
+	plan := Plan{VictimSelector: "tenant-a", SuspectSelector: "b-stress", Targets: []Target{victim, suspect}}
+	report := summarizeSamples(plan, time.Second, time.Second, []intervalSample{
+		{Target: victim, Interval: time.Second, Rates: Rates{SyscwPerSecond: 500}},
+		{Target: suspect, Interval: time.Second, Rates: Rates{SyscwPerSecond: 122364}},
+	})
+
+	if report.MeaningfulSuspectWritePressure {
+		t.Fatal("byte-based pressure = true, want false")
+	}
+	if !report.MeaningfulSuspectSyscwPressure || !report.SuspectSyscwDominant {
+		t.Fatalf("syscall pressure fields = %#v", report)
+	}
+	if report.DominantWriter != "-" || report.DominantWriteSyscallSource != "b-stress" {
+		t.Fatalf("dominant sources = writer %q, syscall %q", report.DominantWriter, report.DominantWriteSyscallSource)
+	}
+	if report.WriteSyscallPressure != "HIGH" || report.Conclusion != syscallPressureConclusion {
+		t.Fatalf("classification/conclusion = %q, %q", report.WriteSyscallPressure, report.Conclusion)
+	}
+}
+
+func TestSyscallComparisonDoesNotMarkSimilarRatesDominant(t *testing.T) {
+	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
+	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
+	plan := Plan{VictimSelector: "tenant-a", SuspectSelector: "b-stress", Targets: []Target{victim, suspect}}
+	report := summarizeSamples(plan, time.Second, time.Second, []intervalSample{
+		{Target: victim, Interval: time.Second, Rates: Rates{SyscwPerSecond: 80000}},
+		{Target: suspect, Interval: time.Second, Rates: Rates{SyscwPerSecond: 100000}},
+	})
+
+	if !report.MeaningfulSuspectSyscwPressure || report.SuspectSyscwDominant {
+		t.Fatalf("syscall pressure fields = %#v", report)
+	}
+	if report.SyscwRatio != "1.25x" || report.DominantWriteSyscallSource != "-" {
+		t.Fatalf("syscall comparison = ratio %q, source %q", report.SyscwRatio, report.DominantWriteSyscallSource)
+	}
+	if report.Conclusion != syscallPressureConclusion {
+		t.Fatalf("Conclusion = %q, want %q", report.Conclusion, syscallPressureConclusion)
 	}
 }
 

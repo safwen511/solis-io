@@ -1,6 +1,12 @@
 package diagnose
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/safwen511/solis-io/internal/qemuio"
+)
 
 func TestVerdict(t *testing.T) {
 	tests := []struct {
@@ -17,6 +23,18 @@ func TestVerdict(t *testing.T) {
 				QEMUDataAvailable:              true,
 				MeaningfulSuspectWritePressure: true,
 				SuspectDominant:                true,
+			},
+			want: ProbableVerdict,
+		},
+		{
+			name: "syscall fallback supports noisy-neighbor verdict",
+			evidence: Evidence{
+				SlowdownObserved:               true,
+				StorageTopologyAvailable:       true,
+				SharedPhysicalDisk:             true,
+				QEMUDataAvailable:              true,
+				MeaningfulSuspectSyscwPressure: true,
+				SuspectSyscwDominant:           true,
 			},
 			want: ProbableVerdict,
 		},
@@ -72,5 +90,38 @@ func TestVerdict(t *testing.T) {
 				t.Fatalf("Verdict() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestWriteIncludesQEMUSyscallFallbackEvidence(t *testing.T) {
+	report := Report{
+		QEMU: qemuio.SummaryReport{
+			VictimDataAvailable:            true,
+			SuspectDataAvailable:           true,
+			VictimAverageSyscwPerSecond:    500,
+			SuspectAverageSyscwPerSecond:   122364.35,
+			SyscwRatio:                     "244.73x",
+			WriteSyscallPressure:           "HIGH",
+			DominantWriteSyscallSource:     "b-stress",
+			Conclusion:                     "QEMU write syscall pressure observed, but byte counters did not advance meaningfully.",
+			MeaningfulSuspectSyscwPressure: true,
+			SuspectSyscwDominant:           true,
+		},
+	}
+	var output bytes.Buffer
+	if err := Write(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Victim average syscw/s:",
+		"Suspect average syscw/s:",
+		"122364.35",
+		"Dominant write syscall source:",
+		"b-stress",
+		"QEMU write syscall pressure observed, but byte counters did not advance meaningfully.",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
 	}
 }

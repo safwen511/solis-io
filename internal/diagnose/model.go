@@ -34,6 +34,8 @@ type Evidence struct {
 	QEMUDataAvailable              bool
 	MeaningfulSuspectWritePressure bool
 	SuspectDominant                bool
+	MeaningfulSuspectSyscwPressure bool
+	SuspectSyscwDominant           bool
 }
 
 // Report contains all evidence required for deterministic output.
@@ -63,6 +65,8 @@ func NewReport(inputs Inputs, experimentReport experiment.Report, storageSnapsho
 		QEMUDataAvailable:              qemuReport.VictimDataAvailable && qemuReport.SuspectDataAvailable,
 		MeaningfulSuspectWritePressure: qemuReport.MeaningfulSuspectWritePressure,
 		SuspectDominant:                qemuReport.SuspectDominant,
+		MeaningfulSuspectSyscwPressure: qemuReport.MeaningfulSuspectSyscwPressure,
+		SuspectSyscwDominant:           qemuReport.SuspectSyscwDominant,
 	}
 
 	return Report{
@@ -82,13 +86,17 @@ func Verdict(evidence Evidence) string {
 	if !evidence.SlowdownObserved {
 		return InsufficientVerdict
 	}
-	if evidence.QEMUDataAvailable && !evidence.MeaningfulSuspectWritePressure {
+	if evidence.QEMUDataAvailable && !evidence.MeaningfulSuspectWritePressure && !evidence.MeaningfulSuspectSyscwPressure {
 		return LowPressureVerdict
 	}
 	if evidence.StorageTopologyAvailable && !evidence.SharedPhysicalDisk {
 		return TopologyMismatchVerdict
 	}
-	if evidence.SharedPhysicalDisk && evidence.QEMUDataAvailable && evidence.SuspectDominant {
+	dominant := evidence.SuspectDominant
+	if !evidence.MeaningfulSuspectWritePressure {
+		dominant = evidence.MeaningfulSuspectSyscwPressure && evidence.SuspectSyscwDominant
+	}
+	if evidence.SharedPhysicalDisk && evidence.QEMUDataAvailable && dominant {
 		return ProbableVerdict
 	}
 	return InsufficientVerdict

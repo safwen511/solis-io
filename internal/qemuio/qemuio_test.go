@@ -2,7 +2,7 @@ package qemuio
 
 import (
 	"bytes"
-	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -95,11 +95,24 @@ func TestNewPlanSortsAndCombinesTargets(t *testing.T) {
 	}
 }
 
-func TestWriteWatchRowRendersSampleError(t *testing.T) {
+func TestPermissionDeniedReadError(t *testing.T) {
+	path := "/proc/123/io"
+	err := formatProcessIOReadError(path, &os.PathError{Op: "open", Path: path, Err: os.ErrPermission})
+	want := "permission denied reading /proc/123/io; try running with sudo"
+	if err.Error() != want {
+		t.Fatalf("formatProcessIOReadError() = %q, want %q", err, want)
+	}
+}
+
+func TestWriteWatchRowRendersPermissionDenied(t *testing.T) {
 	var output bytes.Buffer
 	target := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db", QEMUPID: "123"}}
-	writeWatchRow(&output, 2*time.Second, target, Rates{}, errors.New("permission denied"))
-	if !strings.Contains(output.String(), "permission denied") {
-		t.Fatalf("writeWatchRow() output = %q, want per-VM error", output.String())
+	err := formatProcessIOReadError("/proc/123/io", os.ErrPermission)
+	if writeErr := writeWatchRow(&output, 2*time.Second, target, Rates{}, err); writeErr != nil {
+		t.Fatalf("writeWatchRow() error = %v", writeErr)
+	}
+	want := "permission denied reading /proc/123/io; try running with sudo"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("writeWatchRow() output = %q, want %q", output.String(), want)
 	}
 }

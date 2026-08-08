@@ -2,6 +2,7 @@ package qemuio
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,10 +91,7 @@ func readProcessIOFrom(pid, procPath string) (Counters, error) {
 	path := filepath.Join(procPath, pid, "io")
 	file, err := os.Open(path)
 	if err != nil {
-		if pathErr, ok := err.(*os.PathError); ok {
-			err = pathErr.Err
-		}
-		return Counters{}, fmt.Errorf("read %s: %w", path, err)
+		return Counters{}, formatProcessIOReadError(path, err)
 	}
 	defer file.Close()
 
@@ -102,4 +100,14 @@ func readProcessIOFrom(pid, procPath string) (Counters, error) {
 		return Counters{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	return counters, nil
+}
+
+func formatProcessIOReadError(path string, err error) error {
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("permission denied reading %s; try running with sudo", path)
+	}
+	if pathErr, ok := err.(*os.PathError); ok {
+		err = pathErr.Err
+	}
+	return fmt.Errorf("read %s: %w", path, err)
 }

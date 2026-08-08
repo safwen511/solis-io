@@ -11,6 +11,7 @@ import (
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
+	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
 )
 
@@ -38,6 +39,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return runTracePlan(victim, suspect, stdout)
+	case "storage":
+		victim, suspect, err := parseStorageSnapshotArgs(args)
+		if err != nil {
+			return err
+		}
+		return runStorageSnapshot(victim, suspect, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -69,6 +76,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 const incidentExplainUsage = "usage: solis incidents explain <report-dir> --victim <name> --suspect <name>"
 const tracePlanUsage = "usage: solis trace plan --victim <name> --suspect <name>"
+const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --suspect <name>"
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
@@ -90,6 +98,14 @@ func parseTracePlanArgs(args []string) (string, string, error) {
 	}
 
 	return parseVictimSuspectOptions(args, 2, tracePlanUsage)
+}
+
+func parseStorageSnapshotArgs(args []string) (string, string, error) {
+	if len(args) < 2 || args[1] != "snapshot" {
+		return "", "", errors.New(storageSnapshotUsage)
+	}
+
+	return parseVictimSuspectOptions(args, 2, storageSnapshotUsage)
 }
 
 func parseVictimSuspectOptions(args []string, start int, usage string) (string, string, error) {
@@ -129,26 +145,11 @@ func parseVictimSuspectOptions(args []string, start int, usage string) (string, 
 }
 
 func runTracePlan(victim, suspect string, w io.Writer) error {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	plan, err := loadEnrichedTargetPlan(victim, suspect)
 	if err != nil {
 		return fmt.Errorf("trace plan error: %w", err)
 	}
 
-	plan, err := traceplan.Resolve(vms, victim, suspect)
-	if err != nil {
-		return fmt.Errorf("trace plan error: %w", err)
-	}
-
-	targets := append([]inventory.VM(nil), plan.VictimTargets...)
-	if _, duplicate := inventory.FindByName(targets, plan.SuspectTarget.Name); !duplicate {
-		targets = append(targets, plan.SuspectTarget)
-	}
-	targets = inventory.Enrich(targets)
-
-	plan, err = traceplan.Resolve(targets, victim, suspect)
-	if err != nil {
-		return fmt.Errorf("trace plan error: %w", err)
-	}
 	plan.HostStorage = make(map[string]hoststorage.Mapping)
 	for _, vm := range plan.VictimTargets {
 		plan.HostStorage[vm.Name] = hoststorage.Resolve(vm.Disk)
@@ -161,6 +162,50 @@ func runTracePlan(victim, suspect string, w io.Writer) error {
 	}
 
 	return nil
+}
+
+func runStorageSnapshot(victim, suspect string, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(victim, suspect)
+	if err != nil {
+		return fmt.Errorf("storage snapshot error: %w", err)
+	}
+
+	snapshot := storage.Capture(
+		plan.VictimSelector,
+		plan.SuspectSelector,
+		plan.VictimTargets,
+		plan.SuspectTarget,
+	)
+	if err := storage.Write(w, snapshot); err != nil {
+		return fmt.Errorf("storage snapshot error: %w", err)
+	}
+
+	return nil
+}
+
+func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
+	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if err != nil {
+		return traceplan.Plan{}, err
+	}
+
+	plan, err := traceplan.Resolve(vms, victim, suspect)
+	if err != nil {
+		return traceplan.Plan{}, err
+	}
+
+	targets := append([]inventory.VM(nil), plan.VictimTargets...)
+	if _, duplicate := inventory.FindByName(targets, plan.SuspectTarget.Name); !duplicate {
+		targets = append(targets, plan.SuspectTarget)
+	}
+	targets = inventory.Enrich(targets)
+
+	plan, err = traceplan.Resolve(targets, victim, suspect)
+	if err != nil {
+		return traceplan.Plan{}, err
+	}
+
+	return plan, nil
 }
 
 func runIncidentExplanation(reportDir, victim, suspect string, w io.Writer) error {
@@ -228,6 +273,7 @@ Usage:
   solis experiment summarize <report-dir>
   solis incidents explain <report-dir> --victim <name> --suspect <name>
   solis trace plan --victim <name> --suspect <name>
+  solis storage snapshot --victim <name> --suspect <name>
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

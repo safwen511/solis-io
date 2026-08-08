@@ -79,6 +79,7 @@ const tracePlanUsage = "usage: solis trace plan --victim <name> --suspect <name>
 const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --suspect <name>"
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
+const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
@@ -122,6 +123,13 @@ func parseQEMUIOWatchArgs(args []string) (string, string, time.Duration, time.Du
 		return "", "", 0, 0, errors.New(qemuIOWatchUsage)
 	}
 	return parseTimedWatchOptions(args, 2, qemuIOWatchUsage, "qemu io-watch")
+}
+
+func parseQEMUIOSummaryArgs(args []string) (string, string, time.Duration, time.Duration, error) {
+	if len(args) < 2 || args[1] != "io-summary" {
+		return "", "", 0, 0, errors.New(qemuIOSummaryUsage)
+	}
+	return parseTimedWatchOptions(args, 2, qemuIOSummaryUsage, "qemu io-summary")
 }
 
 func parseTimedWatchOptions(args []string, start int, usage, commandName string) (string, string, time.Duration, time.Duration, error) {
@@ -305,17 +313,25 @@ func runStorageWatch(victim, suspect string, duration, interval time.Duration, w
 
 func runQEMUCommand(args []string, w io.Writer) error {
 	if len(args) < 2 {
-		return errors.New(qemuIOWatchUsage)
-	}
-	if args[1] != "io-watch" {
-		return fmt.Errorf("unknown qemu command %q; expected io-watch", args[1])
+		return fmt.Errorf("usage: solis qemu io-watch|io-summary [options]")
 	}
 
-	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs(args)
-	if err != nil {
-		return err
+	switch args[1] {
+	case "io-watch":
+		victim, suspect, duration, interval, err := parseQEMUIOWatchArgs(args)
+		if err != nil {
+			return err
+		}
+		return runQEMUIOWatch(victim, suspect, duration, interval, w)
+	case "io-summary":
+		victim, suspect, duration, interval, err := parseQEMUIOSummaryArgs(args)
+		if err != nil {
+			return err
+		}
+		return runQEMUIOSummary(victim, suspect, duration, interval, w)
+	default:
+		return fmt.Errorf("unknown qemu command %q; expected io-watch or io-summary", args[1])
 	}
-	return runQEMUIOWatch(victim, suspect, duration, interval, w)
 }
 
 func runQEMUIOWatch(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
@@ -332,6 +348,28 @@ func runQEMUIOWatch(victim, suspect string, duration, interval time.Duration, w 
 	)
 	if err := qemuio.Watch(w, watchPlan, duration, interval); err != nil {
 		return fmt.Errorf("qemu io-watch error: %w", err)
+	}
+	return nil
+}
+
+func runQEMUIOSummary(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(victim, suspect)
+	if err != nil {
+		return fmt.Errorf("qemu io-summary error: %w", err)
+	}
+
+	watchPlan := qemuio.NewPlan(
+		plan.VictimSelector,
+		plan.SuspectSelector,
+		plan.VictimTargets,
+		plan.SuspectTarget,
+	)
+	report, err := qemuio.CollectSummary(watchPlan, duration, interval)
+	if err != nil {
+		return fmt.Errorf("qemu io-summary error: %w", err)
+	}
+	if err := qemuio.WriteSummary(w, report); err != nil {
+		return fmt.Errorf("qemu io-summary error: %w", err)
 	}
 	return nil
 }
@@ -429,6 +467,7 @@ Usage:
   solis storage snapshot --victim <name> --suspect <name>
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
+  solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

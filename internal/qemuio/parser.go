@@ -82,6 +82,16 @@ func readProcessIO(pid string) (Counters, error) {
 	return readProcessIOFrom(pid, defaultProcPath)
 }
 
+// ReadProcessIO reads one QEMU process's cumulative procfs I/O counters.
+func ReadProcessIO(pid string) (Counters, error) {
+	return readProcessIO(pid)
+}
+
+// IsPermissionDenied reports whether a procfs read failed due to permissions.
+func IsPermissionDenied(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "permission denied reading ")
+}
+
 func readProcessIOFrom(pid, procPath string) (Counters, error) {
 	pid = strings.TrimSpace(pid)
 	if pid == "" || pid == "-" {

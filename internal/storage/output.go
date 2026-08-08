@@ -16,24 +16,7 @@ func Write(dst io.Writer, snapshot Snapshot) error {
 	fmt.Fprintf(w, "Suspect selector:\t%s\n", snapshot.SuspectSelector)
 	fmt.Fprintln(w)
 
-	fmt.Fprintln(w, "VM storage targets")
-	fmt.Fprintln(w, "TARGET\tVM\tTENANT\tROLE\tQEMU_PID\tDISK\tSOURCE_DEVICE\tPARENT_DEVICE\tPHYSICAL_DISK")
-	for _, target := range snapshot.Targets {
-		fmt.Fprintf(
-			w,
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			emptyDash(target.TargetType),
-			emptyDash(target.VM.Name),
-			emptyDash(target.VM.Tenant),
-			emptyDash(target.VM.Role),
-			emptyDash(target.VM.QEMUPID),
-			emptyDash(target.VM.Disk),
-			emptyDash(target.Storage.SourceDevice),
-			emptyDash(target.Storage.ParentDevice),
-			emptyDash(target.Storage.PhysicalDisk),
-		)
-	}
-	fmt.Fprintln(w)
+	writeVMTargetRows(w, snapshot.Targets)
 
 	fmt.Fprintln(w, "Host device snapshot")
 	fmt.Fprintln(w, "PHYSICAL_DISK\tREADS_COMPLETED\tWRITES_COMPLETED\tSECTORS_READ\tSECTORS_WRITTEN\tIO_IN_PROGRESS\tWEIGHTED_IO_TIME_MS")
@@ -52,6 +35,33 @@ func Write(dst io.Writer, snapshot Snapshot) error {
 	}
 
 	return w.Flush()
+}
+
+func writeVMTargets(dst io.Writer, targets []VMTarget) error {
+	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
+	writeVMTargetRows(w, targets)
+	return w.Flush()
+}
+
+func writeVMTargetRows(w io.Writer, targets []VMTarget) {
+	fmt.Fprintln(w, "VM storage targets")
+	fmt.Fprintln(w, "TARGET\tVM\tTENANT\tROLE\tQEMU_PID\tDISK\tSOURCE_DEVICE\tPARENT_DEVICE\tPHYSICAL_DISK")
+	for _, target := range targets {
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			emptyDash(target.TargetType),
+			emptyDash(target.VM.Name),
+			emptyDash(target.VM.Tenant),
+			emptyDash(target.VM.Role),
+			emptyDash(target.VM.QEMUPID),
+			emptyDash(target.VM.Disk),
+			emptyDash(target.Storage.SourceDevice),
+			emptyDash(target.Storage.ParentDevice),
+			emptyDash(target.Storage.PhysicalDisk),
+		)
+	}
+	fmt.Fprintln(w)
 }
 
 func counterText(counter Counter) string {

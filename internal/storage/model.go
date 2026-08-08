@@ -2,6 +2,8 @@
 package storage
 
 import (
+	"time"
+
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 )
@@ -36,4 +38,22 @@ type Snapshot struct {
 	SuspectSelector string
 	Targets         []VMTarget
 	Devices         []DeviceStats
+}
+
+// Rate is a per-second counter delta that may be unavailable.
+type Rate struct {
+	Value     float64
+	Available bool
+}
+
+// DeviceDelta contains one interval of block activity for a physical disk.
+type DeviceDelta struct {
+	Elapsed               time.Duration
+	PhysicalDisk          string
+	ReadsPerSecond        Rate
+	WritesPerSecond       Rate
+	SectorsReadPerSecond  Rate
+	SectorsWritePerSecond Rate
+	IOInProgress          Counter
+	WeightedIODeltaMS     Counter
 }

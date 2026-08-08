@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
@@ -36,6 +37,54 @@ func TestParseBlockStat(t *testing.T) {
 func TestParseBlockStatRejectsShortLine(t *testing.T) {
 	if _, err := parseBlockStat("1 2 3"); err == nil {
 		t.Fatal("parseBlockStat() accepted a short line")
+	}
+}
+
+func TestCalculateDelta(t *testing.T) {
+	previous := DeviceStats{
+		PhysicalDisk:     "/dev/nvme0n1",
+		ReadsCompleted:   knownCounter(100),
+		WritesCompleted:  knownCounter(200),
+		SectorsRead:      knownCounter(300),
+		SectorsWritten:   knownCounter(400),
+		IOInProgress:     knownCounter(1),
+		WeightedIOTimeMS: knownCounter(500),
+	}
+	current := DeviceStats{
+		PhysicalDisk:     "/dev/nvme0n1",
+		ReadsCompleted:   knownCounter(120),
+		WritesCompleted:  knownCounter(240),
+		SectorsRead:      knownCounter(360),
+		SectorsWritten:   knownCounter(480),
+		IOInProgress:     knownCounter(3),
+		WeightedIOTimeMS: knownCounter(550),
+	}
+
+	delta, err := CalculateDelta(previous, current, 2*time.Second)
+	if err != nil {
+		t.Fatalf("CalculateDelta() error = %v", err)
+	}
+	if delta.ReadsPerSecond.Value != 10 || delta.WritesPerSecond.Value != 20 {
+		t.Fatalf("operation rates = %#v, want 10 reads/s and 20 writes/s", delta)
+	}
+	if delta.SectorsReadPerSecond.Value != 30 || delta.SectorsWritePerSecond.Value != 40 {
+		t.Fatalf("sector rates = %#v, want 30 read/s and 40 written/s", delta)
+	}
+	if delta.IOInProgress.Value != 3 || delta.WeightedIODeltaMS.Value != 50 {
+		t.Fatalf("gauge/delta = %#v, want io in progress 3 and weighted delta 50", delta)
+	}
+}
+
+func TestCalculateDeltaRejectsCounterReset(t *testing.T) {
+	previous := DeviceStats{ReadsCompleted: knownCounter(10)}
+	current := DeviceStats{ReadsCompleted: knownCounter(5)}
+
+	delta, err := CalculateDelta(previous, current, time.Second)
+	if err != nil {
+		t.Fatalf("CalculateDelta() error = %v", err)
+	}
+	if delta.ReadsPerSecond.Available {
+		t.Fatalf("ReadsPerSecond = %#v, want unavailable after reset", delta.ReadsPerSecond)
 	}
 }
 

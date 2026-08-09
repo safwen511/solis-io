@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -178,11 +179,12 @@ const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspe
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>"
 const watchNoisyNeighborUsage = "usage: solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]"
-const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
+const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration> | solis ebpf vm-block-latency [options] --json"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
+const ebpfVMBlockLatencyUsage = "usage: solis ebpf vm-block-latency [--duration <duration>] [--interval <duration>] [--device <block-device-name>] [--victim <vm>] [--suspect <vm>] [--all-vms] [--output <path>] --json"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
 const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
@@ -196,6 +198,17 @@ type ebpfBlockLatencyOptions struct {
 	Victim   string
 	Suspect  string
 	Duration time.Duration
+}
+
+type ebpfVMBlockLatencyOptions struct {
+	Duration time.Duration
+	Interval time.Duration
+	Device   string
+	Victim   string
+	Suspect  string
+	AllVMs   bool
+	Output   string
+	JSON     bool
 }
 
 type timedTargetOptions struct {
@@ -607,6 +620,86 @@ func parseEBPFBlockLatencyArgs(args []string) (ebpfBlockLatencyOptions, error) {
 		return ebpfBlockLatencyOptions{}, fmt.Errorf("%s: --victim and --suspect must be provided together", ebpfBlockLatencyUsage)
 	}
 	return options, nil
+}
+
+func parseEBPFVMBlockLatencyArgs(args []string) (ebpfVMBlockLatencyOptions, error) {
+	if len(args) < 2 || args[0] != "ebpf" || args[1] != "vm-block-latency" {
+		return ebpfVMBlockLatencyOptions{}, errors.New(ebpfVMBlockLatencyUsage)
+	}
+	options := ebpfVMBlockLatencyOptions{Duration: 10 * time.Second, Interval: time.Second}
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); index++ {
+		option := args[index]
+		if seen[option] {
+			return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: duplicate option %s", ebpfVMBlockLatencyUsage, option)
+		}
+		seen[option] = true
+		switch option {
+		case "--json":
+			options.JSON = true
+		case "--all-vms":
+			options.AllVMs = true
+		case "--duration", "--interval", "--device", "--victim", "--suspect", "--output":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: missing value for %s", ebpfVMBlockLatencyUsage, option)
+			}
+			index++
+			value := strings.TrimSpace(args[index])
+			if value == "" {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: empty value for %s", ebpfVMBlockLatencyUsage, option)
+			}
+			switch option {
+			case "--duration":
+				duration, err := time.ParseDuration(value)
+				if err != nil || duration <= 0 {
+					return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: invalid --duration %q", ebpfVMBlockLatencyUsage, value)
+				}
+				options.Duration = duration
+			case "--interval":
+				interval, err := time.ParseDuration(value)
+				if err != nil || interval <= 0 {
+					return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: invalid --interval %q", ebpfVMBlockLatencyUsage, value)
+				}
+				options.Interval = interval
+			case "--device":
+				if !validBlockDeviceName(value) {
+					return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: invalid --device %q; use a block device name such as nvme0n1 or dm-0", ebpfVMBlockLatencyUsage, value)
+				}
+				options.Device = value
+			case "--victim":
+				options.Victim = value
+			case "--suspect":
+				options.Suspect = value
+			case "--output":
+				options.Output = value
+			}
+		default:
+			return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: unknown option %s", ebpfVMBlockLatencyUsage, option)
+		}
+	}
+	if !options.JSON {
+		return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: --json is required", ebpfVMBlockLatencyUsage)
+	}
+	if options.Interval > options.Duration {
+		return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: --interval must not exceed --duration", ebpfVMBlockLatencyUsage)
+	}
+	if options.AllVMs && (options.Victim != "" || options.Suspect != "") {
+		return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: --all-vms cannot be combined with --victim or --suspect", ebpfVMBlockLatencyUsage)
+	}
+	return options, nil
+}
+
+func validBlockDeviceName(value string) bool {
+	if value == "" || strings.Contains(value, "/") || value == "." || value == ".." {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseTracePlanArgs(args []string) (string, string, error) {
@@ -1916,9 +2009,91 @@ func runEBPFCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Write
 			return fmt.Errorf("ebpf block-latency error: %w", err)
 		}
 		return nil
+	case "vm-block-latency":
+		options, err := parseEBPFVMBlockLatencyArgs(args)
+		if err != nil {
+			return err
+		}
+		return runEBPFVMBlockLatency(runtimeConfig, options, w)
 	default:
 		return errors.New(ebpfUsage)
 	}
+}
+
+func runEBPFVMBlockLatency(runtimeConfig solisconfig.Runtime, options ebpfVMBlockLatencyOptions, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return fmt.Errorf("ebpf vm-block-latency error: %w", err)
+	}
+	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(runtimeConfig))
+	targets, err := selectVMBlockLatencyTargets(vms, options)
+	if err != nil {
+		return fmt.Errorf("ebpf vm-block-latency error: %w", err)
+	}
+	mappings, err := ebpf.BuildVMCgroupMappings(targets)
+	if err != nil {
+		return fmt.Errorf("ebpf vm-block-latency error: map libvirt cgroups: %w", err)
+	}
+	report := ebpf.CollectVMBlockLatencyReportForPlatform(context.Background(), ebpf.VMBlockLatencyCollectOptions{
+		Duration: options.Duration, Interval: options.Interval, DeviceFilter: options.Device,
+	}, mappings, runtime.GOOS)
+	if options.Output != "" {
+		parent := filepath.Dir(options.Output)
+		if parent != "." {
+			if err := os.MkdirAll(parent, 0o700); err != nil {
+				return fmt.Errorf("ebpf vm-block-latency error: create output directory: %w", err)
+			}
+		}
+		file, err := os.OpenFile(options.Output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return fmt.Errorf("ebpf vm-block-latency error: open output %q: %w", options.Output, err)
+		}
+		if err := file.Chmod(0o600); err != nil {
+			file.Close()
+			return fmt.Errorf("ebpf vm-block-latency error: secure output %q: %w", options.Output, err)
+		}
+		if err := ebpf.WriteVMBlockLatencyJSON(file, report); err != nil {
+			file.Close()
+			return fmt.Errorf("ebpf vm-block-latency error: write output %q: %w", options.Output, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("ebpf vm-block-latency error: close output %q: %w", options.Output, err)
+		}
+	}
+	if err := ebpf.WriteVMBlockLatencyJSON(w, report); err != nil {
+		return fmt.Errorf("ebpf vm-block-latency error: %w", err)
+	}
+	return nil
+}
+
+func selectVMBlockLatencyTargets(vms []inventory.VM, options ebpfVMBlockLatencyOptions) ([]inventory.VM, error) {
+	requested := []string{}
+	if options.Victim != "" {
+		requested = append(requested, options.Victim)
+	}
+	if options.Suspect != "" && options.Suspect != options.Victim {
+		requested = append(requested, options.Suspect)
+	}
+	if len(requested) == 0 {
+		targets := make([]inventory.VM, 0, len(vms))
+		for _, vm := range vms {
+			if strings.EqualFold(strings.TrimSpace(vm.State), "running") && strings.TrimSpace(vm.QEMUPID) != "" {
+				targets = append(targets, vm)
+			}
+		}
+		sort.Slice(targets, func(i, j int) bool { return targets[i].Name < targets[j].Name })
+		return targets, nil
+	}
+	targets := make([]inventory.VM, 0, len(requested))
+	for _, name := range requested {
+		vm, ok := inventory.FindByName(vms, name)
+		if !ok {
+			return nil, fmt.Errorf("VM not found: %s", name)
+		}
+		targets = append(targets, *vm)
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].Name < targets[j].Name })
+	return targets, nil
 }
 
 func runInspect(runtimeConfig solisconfig.Runtime, name string, verbose bool, w io.Writer) error {
@@ -2418,6 +2593,7 @@ Commands:
   solis ebpf block-events --duration <duration>
   solis ebpf block-count --duration <duration>
   solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
+  solis ebpf vm-block-latency [--duration <duration>] [--interval <duration>] [--device <name>] [--victim <vm>] [--suspect <vm>] [--all-vms] [--output <path>] --json
   solis inventory
   solis host status --json
   solis guest status --vm <name> --json

@@ -34,6 +34,7 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Run report-backed or live-only noisy-neighbor diagnosis.
 - Monitor live noisy-neighbor conditions in repeated windows, alert on likely pressure, and optionally create cooldown-controlled capture bundles.
 - Collect experimental host/storage-path eBPF block latency counts and histograms, with optional victim/suspect topology context.
+- Expose an experimental per-VM block-latency JSON report contract, libvirt cgroup-inode mapper, fake-event aggregation path, and validation parsers; the privileged typed-BTF request-pointer attachment is deliberately not implemented yet.
 - Produce private, atomically finalized capture bundles containing text evidence, a human-readable `incident-report.md`, machine-readable `evidence-summary.json`, and a SHA-256 integrity manifest.
 - Expose live VM status as a terminal table or JSON document.
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
@@ -62,6 +63,8 @@ sudo ./solis ebpf block-events --duration 10s
 sudo ./solis ebpf block-count --duration 10s
 sudo ./solis ebpf block-latency --duration 10s
 sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
+sudo ./solis ebpf vm-block-latency --duration 5s --interval 1s --all-vms --json
+sudo ./solis ebpf vm-block-latency --victim a-web --suspect b-stress --duration 5s --interval 1s --json
 ./solis inventory
 ./solis host status --json
 ./solis --config ./solis.json guest status --vm a-web --json
@@ -115,6 +118,27 @@ The experiment package parses existing ApacheBench and fio text reports. It calc
 ### QEMU process I/O accounting
 
 Solis samples Linux process counters from `/proc/<qemu-pid>/io` and calculates per-interval and observation-window read/write rates. Byte counters remain the primary attribution signal. When they are zero or low, Solis uses `AVG_SYSCW/S` and `MAX_SYSCW/S` as a conservative write-syscall pressure signal; those syscall rates indicate activity, not exact bytes written. Access is controlled by normal Linux procfs permissions, and Solis does not elevate privileges internally.
+
+### Experimental per-VM block latency
+
+The host-wide `ebpf block-latency` command measures a shared host/storage-path histogram using a best-effort device-and-sector correlation key. QEMU I/O commands instead measure process accounting and writer pressure; they do not measure block request latency. Cgroup v2 `io.stat` supplies per-cgroup byte and operation counters, while `virsh domstats --block` supplies virtual-disk counters and cumulative timing. Neither is a host physical-device latency histogram.
+
+`ebpf vm-block-latency` defines the experimental per-VM JSON report, maps known libvirt QEMU processes to cgroup v2 inode IDs without reading command lines or environments, aggregates fake request-pointer event streams in tests, and parses `io.stat` and `virsh domstats` validation counters without combining stacked block-device layers. Its intended kernel attribution path is:
+
+```text
+block_rq_issue request pointer
+  -> request bio
+  -> bio blkcg ownership
+  -> libvirt cgroup inode ID
+  -> VM
+  -> block_rq_complete request pointer latency
+```
+
+The actual typed-BTF request-pointer attachment is currently deferred because the standard-library loader does not yet implement BTF/CO-RE relocation for nested `request -> bio -> blkcg` reads. The command therefore returns a structured `experimental_not_implemented` availability status instead of pretending that runtime attribution succeeded. JSON can still be emitted successfully with exit code 0 in this state: automation must inspect `availability.available` and `availability.status`, not process exit status alone. When implemented, it will require elevated BPF/tracepoint permissions; Solis will not invoke `sudo` internally.
+
+Use `--all-vms` to make the all-running-VM selection explicit, or select one or two exact inventory VM names with `--victim` and `--suspect`. `--device` accepts a kernel block name such as `nvme0n1` or `dm-0`. `--output` writes the same JSON document to a mode-`0600` file while retaining JSON on stdout.
+
+Per-VM attribution will remain experimental because request merging, requeues, flush requests, missing bio/blkcg ownership, stacked devices, kernel/BTF compatibility, and unmapped cgroups can produce unattributed or ambiguous events. Validation against cgroup `io.stat`, `virsh domstats --block`, and QEMU pressure is correlation evidence, not proof of exact VM latency or customer impact.
 
 ### Noisy-neighbor diagnosis
 
@@ -577,7 +601,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 ## Current limitations
 
 - Solis is currently a lab/demo project and is not production-ready.
-- Experimental eBPF block latency is attributed to the host or shared storage path, not to an individual VM. Per-VM block-latency histograms are not implemented.
+- Working eBPF block latency is attributed to the host or shared storage path, not to an individual VM. The experimental `vm-block-latency` model, mapper, parsers, and fake-event aggregation exist, but its privileged typed-BTF request-pointer attachment and real per-VM histograms are not implemented yet.
 - QEMU process I/O counters require sufficient procfs permissions. Write-syscall pressure is an activity signal and must not be interpreted as an exact byte count.
 - Live-only diagnosis can identify likely provider-side storage-neighbor pressure, but it cannot prove application-level slowdown without report or external application evidence.
 - Inventory configuration, bundled workload reports, doctor lab checks, and demo scripts still reflect the included lab environment.
@@ -587,7 +611,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 
 ## Roadmap
 
-- Per-VM eBPF block-latency attribution and per-VM latency histograms.
+- Implement and verifier-test the typed-BTF request-pointer plus bio/blkcg loader, then validate experimental per-VM latency histograms against cgroup and libvirt counters.
 - Cross-signal timestamp correlation across application, QEMU, and host block evidence.
 - Durable incident timelines and longer-running observation storage.
 - Prometheus metrics and external exporter integrations.

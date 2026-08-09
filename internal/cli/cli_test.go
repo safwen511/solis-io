@@ -144,6 +144,44 @@ func TestParseObserveSnapshotDefaults(t *testing.T) {
 	}
 }
 
+func TestParseEBPFVMBlockLatency(t *testing.T) {
+	options, err := parseEBPFVMBlockLatencyArgs([]string{
+		"ebpf", "vm-block-latency", "--victim", "a-web", "--suspect", "b-stress",
+		"--duration", "5s", "--interval", "1s", "--device", "nvme0n1", "--output", "/tmp/report.json", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Victim != "a-web" || options.Suspect != "b-stress" || options.Duration != 5*time.Second || options.Interval != time.Second || options.Device != "nvme0n1" || options.Output != "/tmp/report.json" || !options.JSON {
+		t.Fatalf("options = %#v", options)
+	}
+	defaults, err := parseEBPFVMBlockLatencyArgs([]string{"ebpf", "vm-block-latency", "--all-vms", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Duration != 10*time.Second || defaults.Interval != time.Second || !defaults.AllVMs {
+		t.Fatalf("defaults = %#v", defaults)
+	}
+}
+
+func TestParseEBPFVMBlockLatencyValidation(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ebpf", "vm-block-latency"}, "--json is required"},
+		{[]string{"ebpf", "vm-block-latency", "--json", "--interval", "11s"}, "must not exceed"},
+		{[]string{"ebpf", "vm-block-latency", "--json", "--device", "/dev/nvme0n1"}, "invalid --device"},
+		{[]string{"ebpf", "vm-block-latency", "--json", "--all-vms", "--victim", "a-web"}, "cannot be combined"},
+		{[]string{"ebpf", "vm-block-latency", "--json", "--json"}, "duplicate option"},
+	}
+	for _, test := range tests {
+		if _, err := parseEBPFVMBlockLatencyArgs(test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("parse(%v) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
 func TestParseObserveSnapshotValidation(t *testing.T) {
 	tests := []struct {
 		name string

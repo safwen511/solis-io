@@ -1,4 +1,5 @@
-// Package ebpf performs read-only readiness checks for future eBPF tracing.
+// Package ebpf provides experimental, temporary eBPF block observability and
+// privacy-safe models for future per-VM attribution.
 package ebpf
 
 // Status is the outcome of one eBPF readiness check.

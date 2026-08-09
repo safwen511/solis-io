@@ -405,3 +405,88 @@ func TestParseCaptureNoisyNeighborRequiresOutputDirectory(t *testing.T) {
 		t.Fatalf("parseCaptureNoisyNeighborArgs() error = %v, want missing output directory", err)
 	}
 }
+
+func TestParseWatchNoisyNeighbor(t *testing.T) {
+	options, err := parseWatchNoisyNeighborArgs([]string{
+		"watch", "noisy-neighbor",
+		"--victim", "a-web",
+		"--discover-suspects",
+		"--window", "8s",
+		"--every", "20s",
+		"--iterations", "3",
+		"--include-ebpf-latency",
+		"--capture-on-alert",
+		"--cooldown", "90s",
+		"--output-dir", "captures",
+		"--verbose",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Victim != "a-web" || !options.DiscoverSuspects || options.Suspect != "" {
+		t.Fatalf("selectors = %#v", options)
+	}
+	if options.Window != 8*time.Second || options.Every != 20*time.Second || options.Iterations != 3 {
+		t.Fatalf("timing = %#v", options)
+	}
+	if !options.IncludeEBPFLatency || !options.CaptureOnAlert || !options.Verbose {
+		t.Fatalf("flags = %#v", options)
+	}
+	if options.Cooldown != 90*time.Second || options.OutputDirectory != "captures" {
+		t.Fatalf("capture options = %#v", options)
+	}
+}
+
+func TestParseWatchNoisyNeighborDefaults(t *testing.T) {
+	options, err := parseWatchNoisyNeighborArgs([]string{
+		"watch", "noisy-neighbor",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Window != 10*time.Second || options.Every != 30*time.Second || options.Cooldown != 2*time.Minute {
+		t.Fatalf("defaults = %#v", options)
+	}
+	if options.OutputDirectory != "lab/reports/captures" || options.Iterations != 0 {
+		t.Fatalf("defaults = %#v", options)
+	}
+}
+
+func TestParseWatchNoisyNeighborSelectorValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing victim",
+			args: []string{"watch", "noisy-neighbor", "--discover-suspects"},
+			want: "missing --victim",
+		},
+		{
+			name: "missing suspect mode",
+			args: []string{"watch", "noisy-neighbor", "--victim", "a-web"},
+			want: "provide either --suspect <vm> or --discover-suspects",
+		},
+		{
+			name: "conflicting suspect mode",
+			args: []string{
+				"watch", "noisy-neighbor",
+				"--victim", "a-web",
+				"--suspect", "b-stress",
+				"--discover-suspects",
+			},
+			want: "--suspect and --discover-suspects cannot be used together",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseWatchNoisyNeighborArgs(test.args)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

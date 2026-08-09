@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/safwen511/solis-io/internal/capture"
@@ -20,6 +26,7 @@ import (
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
+	watcher "github.com/safwen511/solis-io/internal/watch"
 )
 
 const defaultConfigPath = "lab/config/vms.csv"
@@ -55,6 +62,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runDiagnoseCommand(args, stdout)
 	case "capture":
 		return runCaptureCommand(args, stdout)
+	case "watch":
+		return runWatchCommand(args, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -92,6 +101,7 @@ const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>"
+const watchNoisyNeighborUsage = "usage: solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]"
 const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
@@ -114,6 +124,20 @@ type timedTargetOptions struct {
 	OutputDirectory    string
 	IncludeEBPFLatency bool
 	DiscoverSuspects   bool
+}
+
+type watchNoisyNeighborOptions struct {
+	Victim             string
+	Suspect            string
+	DiscoverSuspects   bool
+	Window             time.Duration
+	Every              time.Duration
+	Iterations         int
+	IncludeEBPFLatency bool
+	CaptureOnAlert     bool
+	OutputDirectory    string
+	Cooldown           time.Duration
+	Verbose            bool
 }
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
@@ -298,6 +322,97 @@ func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 	}
 	if options.OutputDirectory == "" {
 		return timedTargetOptions{}, fmt.Errorf("%s: missing --output-dir", captureNoisyNeighborUsage)
+	}
+	return options, nil
+}
+
+func parseWatchNoisyNeighborArgs(args []string) (watchNoisyNeighborOptions, error) {
+	if len(args) < 2 || args[1] != "noisy-neighbor" {
+		return watchNoisyNeighborOptions{}, errors.New(watchNoisyNeighborUsage)
+	}
+	options := watchNoisyNeighborOptions{
+		Window:          10 * time.Second,
+		Every:           30 * time.Second,
+		OutputDirectory: "lab/reports/captures",
+		Cooldown:        2 * time.Minute,
+	}
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); {
+		option := args[index]
+		if seen[option] {
+			return watchNoisyNeighborOptions{}, fmt.Errorf("%s: %s specified more than once", watchNoisyNeighborUsage, option)
+		}
+		seen[option] = true
+		switch option {
+		case "--discover-suspects":
+			options.DiscoverSuspects = true
+			index++
+			continue
+		case "--include-ebpf-latency":
+			options.IncludeEBPFLatency = true
+			index++
+			continue
+		case "--capture-on-alert":
+			options.CaptureOnAlert = true
+			index++
+			continue
+		case "--verbose":
+			options.Verbose = true
+			index++
+			continue
+		}
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+			return watchNoisyNeighborOptions{}, fmt.Errorf("%s: %s requires a value", watchNoisyNeighborUsage, option)
+		}
+		value := args[index+1]
+		switch option {
+		case "--victim":
+			options.Victim = value
+		case "--suspect":
+			options.Suspect = value
+		case "--window":
+			parsed, err := time.ParseDuration(value)
+			if err != nil || parsed <= 0 {
+				return watchNoisyNeighborOptions{}, fmt.Errorf("%s: invalid --window %q", watchNoisyNeighborUsage, value)
+			}
+			options.Window = parsed
+		case "--every":
+			parsed, err := time.ParseDuration(value)
+			if err != nil || parsed <= 0 {
+				return watchNoisyNeighborOptions{}, fmt.Errorf("%s: invalid --every %q", watchNoisyNeighborUsage, value)
+			}
+			options.Every = parsed
+		case "--iterations":
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed <= 0 {
+				return watchNoisyNeighborOptions{}, fmt.Errorf("%s: invalid --iterations %q", watchNoisyNeighborUsage, value)
+			}
+			options.Iterations = parsed
+		case "--cooldown":
+			parsed, err := time.ParseDuration(value)
+			if err != nil || parsed <= 0 {
+				return watchNoisyNeighborOptions{}, fmt.Errorf("%s: invalid --cooldown %q", watchNoisyNeighborUsage, value)
+			}
+			options.Cooldown = parsed
+		case "--output-dir":
+			options.OutputDirectory = value
+		default:
+			return watchNoisyNeighborOptions{}, fmt.Errorf("%s: unknown option %s", watchNoisyNeighborUsage, option)
+		}
+		index += 2
+	}
+
+	if options.Victim == "" {
+		return watchNoisyNeighborOptions{}, fmt.Errorf("%s: missing --victim", watchNoisyNeighborUsage)
+	}
+	if options.Suspect != "" && options.DiscoverSuspects {
+		return watchNoisyNeighborOptions{}, fmt.Errorf("%s: --suspect and --discover-suspects cannot be used together", watchNoisyNeighborUsage)
+	}
+	if options.Suspect == "" && !options.DiscoverSuspects {
+		return watchNoisyNeighborOptions{}, fmt.Errorf("%s: provide either --suspect <vm> or --discover-suspects", watchNoisyNeighborUsage)
+	}
+	if strings.TrimSpace(options.OutputDirectory) == "" {
+		return watchNoisyNeighborOptions{}, fmt.Errorf("%s: --output-dir must not be empty", watchNoisyNeighborUsage)
 	}
 	return options, nil
 }
@@ -666,9 +781,7 @@ func runCaptureCommand(args []string, w io.Writer) error {
 		return err
 	}
 	var evidence noisyNeighborEvidence
-	mode := "pairwise"
 	if options.DiscoverSuspects {
-		mode = "discover-suspects"
 		evidence, err = collectDiscoveredNoisyNeighborEvidence(options)
 	} else {
 		evidence, err = collectNoisyNeighborEvidence(options)
@@ -677,7 +790,31 @@ func runCaptureCommand(args []string, w io.Writer) error {
 		return fmt.Errorf("capture noisy-neighbor error: %w", err)
 	}
 
-	result, err := capture.Write(
+	result, err := writeNoisyNeighborCapture(options, evidence, time.Now())
+	if err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(w, "Solis capture written to %s\n", result.Directory); err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "Generated files:"); err != nil {
+		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	}
+	for _, path := range result.Files {
+		if _, err := fmt.Fprintf(w, "- %s\n", path); err != nil {
+			return fmt.Errorf("capture noisy-neighbor error: %w", err)
+		}
+	}
+	return nil
+}
+
+func writeNoisyNeighborCapture(options timedTargetOptions, evidence noisyNeighborEvidence, now time.Time) (capture.Result, error) {
+	mode := "pairwise"
+	if options.DiscoverSuspects {
+		mode = "discover-suspects"
+	}
+	return capture.Write(
 		capture.Inputs{
 			OutputDirectory:    options.OutputDirectory,
 			ReportDirectory:    evidence.Experiment.Directory,
@@ -698,24 +835,156 @@ func runCaptureCommand(args []string, w io.Writer) error {
 			Discovery:   evidence.Discovery,
 			Diagnosis:   evidence.Diagnosis,
 		},
-		time.Now(),
+		now,
 	)
-	if err != nil {
-		return fmt.Errorf("capture noisy-neighbor error: %w", err)
-	}
+}
 
-	if _, err := fmt.Fprintf(w, "Solis capture written to %s\n", result.Directory); err != nil {
-		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+func runWatchCommand(args []string, w io.Writer) error {
+	options, err := parseWatchNoisyNeighborArgs(args)
+	if err != nil {
+		return err
 	}
-	if _, err := fmt.Fprintln(w, "Generated files:"); err != nil {
-		return fmt.Errorf("capture noisy-neighbor error: %w", err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	stats := watcher.FinalSummary{}
+	err = runNoisyNeighborWatch(ctx, options, w, &stats)
+	if summaryErr := watcher.WriteFinal(w, stats); err == nil && summaryErr != nil {
+		err = summaryErr
 	}
-	for _, path := range result.Files {
-		if _, err := fmt.Fprintf(w, "- %s\n", path); err != nil {
-			return fmt.Errorf("capture noisy-neighbor error: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("watch noisy-neighbor error: %w", err)
 	}
 	return nil
+}
+
+func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOptions, w io.Writer, stats *watcher.FinalSummary) error {
+	if err := writeWatchHeader(w, options); err != nil {
+		return err
+	}
+	diagnosisOptions := timedTargetOptions{
+		Victim:             options.Victim,
+		Suspect:            options.Suspect,
+		Duration:           options.Window,
+		Interval:           watchSamplingInterval(options.Window),
+		IncludeEBPFLatency: options.IncludeEBPFLatency,
+		DiscoverSuspects:   options.DiscoverSuspects,
+		OutputDirectory:    options.OutputDirectory,
+	}
+	nextStart := time.Now()
+	var lastCapture time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		iterationTime := time.Now().UTC()
+		var evidence noisyNeighborEvidence
+		var err error
+		if options.DiscoverSuspects {
+			evidence, err = collectDiscoveredNoisyNeighborEvidence(diagnosisOptions)
+		} else {
+			evidence, err = collectNoisyNeighborEvidence(diagnosisOptions)
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		stats.Iterations++
+		summary := watcher.NewIterationSummary(iterationTime, evidence.Diagnosis)
+		if err := watcher.WriteIteration(w, summary); err != nil {
+			return err
+		}
+		if options.Verbose {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+			if err := diagnose.Write(w, evidence.Diagnosis); err != nil {
+				return err
+			}
+		}
+
+		if watcher.IsAlert(evidence.Diagnosis.Verdict) {
+			stats.Alerts++
+			if err := watcher.WriteAlert(w, summary); err != nil {
+				return err
+			}
+			captureTime := time.Now().UTC()
+			if options.CaptureOnAlert && watcher.CaptureAllowed(captureTime, lastCapture, options.Cooldown) {
+				result, err := writeNoisyNeighborCapture(diagnosisOptions, evidence, captureTime)
+				if err != nil {
+					return err
+				}
+				lastCapture = captureTime
+				stats.Captures++
+				if _, err := fmt.Fprintf(w, "Capture directory: %s\n", result.Directory); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(w, "Incident report: %s\n", filepath.Join(result.Directory, "incident-report.md")); err != nil {
+					return err
+				}
+			} else if options.CaptureOnAlert {
+				if _, err := fmt.Fprintln(w, "Capture suppressed by cooldown."); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+
+		if options.Iterations > 0 && stats.Iterations >= options.Iterations {
+			return nil
+		}
+		nextStart = nextStart.Add(options.Every)
+		wait := time.Until(nextStart)
+		if wait <= 0 {
+			continue
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+}
+
+func writeWatchHeader(w io.Writer, options watchNoisyNeighborOptions) error {
+	mode := "pairwise"
+	if options.DiscoverSuspects {
+		mode = "discover-suspects"
+	}
+	_, err := fmt.Fprintf(
+		w,
+		"Solis Noisy Neighbor Watch\n"+
+			"Victim: %s\n"+
+			"Suspect mode: %s\n"+
+			"Window: %s\n"+
+			"Every: %s\n"+
+			"Cooldown: %s\n\n",
+		options.Victim,
+		mode,
+		options.Window,
+		options.Every,
+		options.Cooldown,
+	)
+	return err
+}
+
+func watchSamplingInterval(window time.Duration) time.Duration {
+	const defaultInterval = 2 * time.Second
+	if window < defaultInterval {
+		return window
+	}
+	return defaultInterval
 }
 
 func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvidence, error) {
@@ -1152,6 +1421,7 @@ Usage:
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]
   solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>
+  solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

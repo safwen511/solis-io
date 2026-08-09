@@ -33,6 +33,7 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Watch and summarize per-QEMU I/O using `/proc/<qemu-pid>/io`.
 - Combine experiment, storage-topology, and QEMU-process evidence into a noisy-neighbor verdict.
 - Discover a dominant same-storage suspect automatically when only the victim VM is known.
+- Periodically monitor live noisy-neighbor evidence, alert on likely storage-neighbor pressure, and optionally capture alert evidence with cooldown protection.
 - Optionally include an experimental host/storage-path eBPF block-latency histogram in diagnoses and captures.
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
 - Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
@@ -71,6 +72,7 @@ sudo ./solis capture noisy-neighbor [--report-dir <dir>] --victim <name> --suspe
 sudo ./solis capture noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
 sudo ./solis capture noisy-neighbor --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
+sudo ./solis watch noisy-neighbor --victim <vm> --discover-suspects --window 10s --every 30s --include-ebpf-latency --capture-on-alert --output-dir lab/reports/captures
 ```
 
 For `--victim`, a tenant selector includes all configured VMs belonging to that tenant; a VM selector targets only that VM. The suspect must resolve to one VM.
@@ -199,6 +201,25 @@ sudo ./solis capture noisy-neighbor --victim a-web --discover-suspects --duratio
 ```
 
 Live-only captures mark application evidence unavailable in `diagnosis.txt`, `experiment-summary.txt`, and `incident-report.md`; they do not print zero-valued application metrics as evidence.
+
+## Watch live noisy-neighbor evidence
+
+Watch mode repeats the live-only provider-side diagnosis for a known victim VM. By default, it samples a 10-second window every 30 seconds and continues until interrupted:
+
+```bash
+sudo ./solis watch noisy-neighbor \
+  --victim a-web \
+  --discover-suspects \
+  --window 10s \
+  --every 30s \
+  --include-ebpf-latency \
+  --capture-on-alert \
+  --output-dir lab/reports/captures
+```
+
+Each iteration prints only the selected suspect, writer metrics, discovery reason, and live verdict. Add `--verbose` to include the full diagnosis. Use `--iterations <n>` for a bounded run; otherwise press Ctrl-C to stop and print the final iteration, alert, and capture counters.
+
+An alert fires only for the cautious live verdict `Likely storage-neighbor pressure observed during live sampling.` With `--capture-on-alert`, the same already-sampled evidence is written as a live-only capture bundle. Repeated alerts continue to print, but captures default to a two-minute cooldown; change it with `--cooldown <duration>`.
 
 The generated directory is written beneath `lab/reports/captures/`. If QEMU procfs counters cannot be read, capture still preserves the other evidence and records the permission error in the relevant files.
 

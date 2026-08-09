@@ -2,7 +2,11 @@ package capture
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +78,7 @@ func TestWriteMetadata(t *testing.T) {
 		"Incident report: incident-report.md",
 		"Evidence JSON: evidence-summary.json",
 		"Observe snapshot: observe-snapshot.json",
+		"Manifest: manifest.json",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(output.String(), line) {
@@ -101,6 +106,7 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 		"evidence-summary.json",
 		"incident-report.md",
 		"metadata.txt",
+		"manifest.json",
 	}
 	if len(result.Files) != len(want) {
 		t.Fatalf("files = %v, want %v", result.Files, want)
@@ -108,6 +114,160 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 	for index, name := range want {
 		if filepath.Base(result.Files[index]) != name {
 			t.Fatalf("file %d = %q, want %q", index, filepath.Base(result.Files[index]), name)
+		}
+	}
+}
+
+func TestCaptureBundlePermissionsAndManifest(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.IncludeEBPFLatency = false
+	now := time.Date(2026, 8, 9, 11, 12, 13, 123456789, time.UTC)
+	result, err := Write(inputs, testCaptureEvidence(nil), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directoryInfo, err := os.Stat(result.Directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := directoryInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("capture directory mode = %04o, want 0700", got)
+	}
+	for _, path := range result.Files {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %04o, want 0600", filepath.Base(path), got)
+		}
+	}
+
+	manifestPath := filepath.Join(result.Directory, manifestFilename)
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("manifest.json is invalid: %v\n%s", err, content)
+	}
+	if manifest.SchemaVersion != manifestSchemaVersion || manifest.CaptureID != filepath.Base(result.Directory) {
+		t.Fatalf("manifest identity = %#v", manifest)
+	}
+	if manifest.CreatedAtUTC != now.Format(time.RFC3339Nano) {
+		t.Fatalf("created_at_utc = %q, want %q", manifest.CreatedAtUTC, now.Format(time.RFC3339Nano))
+	}
+
+	expected := make(map[string]string, len(result.Files)-1)
+	for _, path := range result.Files {
+		name := filepath.Base(path)
+		if name == manifestFilename {
+			continue
+		}
+		value, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(value)
+		expected[name] = fmt.Sprintf("%x", sum)
+	}
+	if len(manifest.Files) != len(expected) {
+		t.Fatalf("manifest files = %d, want %d", len(manifest.Files), len(expected))
+	}
+	for _, entry := range manifest.Files {
+		wantHash, ok := expected[entry.Path]
+		if !ok {
+			t.Errorf("manifest contains unexpected artifact %q", entry.Path)
+			continue
+		}
+		artifactPath := filepath.Join(result.Directory, entry.Path)
+		info, err := os.Stat(artifactPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.SizeBytes != info.Size() {
+			t.Errorf("%s size = %d, want %d", entry.Path, entry.SizeBytes, info.Size())
+		}
+		if entry.SHA256 != wantHash {
+			t.Errorf("%s sha256 = %q, want %q", entry.Path, entry.SHA256, wantHash)
+		}
+		if entry.Mode != "0600" || entry.Mode != fmt.Sprintf("%04o", info.Mode().Perm()) {
+			t.Errorf("%s manifest mode = %q, actual %04o", entry.Path, entry.Mode, info.Mode().Perm())
+		}
+	}
+}
+
+func TestCaptureFinalDirectoryIsInvisibleUntilFinalized(t *testing.T) {
+	parent := t.TempDir()
+	finalDirectory := filepath.Join(parent, "capture-atomic-test")
+	observedHidden := false
+	observedPrivateStaging := false
+	artifacts := []artifact{{name: "evidence.txt", render: func(dst io.Writer) error {
+		if _, err := os.Stat(finalDirectory); !os.IsNotExist(err) {
+			return fmt.Errorf("final directory visible during render: %v", err)
+		}
+		file, ok := dst.(*os.File)
+		if !ok {
+			return fmt.Errorf("artifact writer type = %T, want *os.File", dst)
+		}
+		info, err := os.Stat(filepath.Dir(file.Name()))
+		if err != nil {
+			return err
+		}
+		if info.Mode().Perm() != 0o700 {
+			return fmt.Errorf("temporary directory mode = %04o, want 0700", info.Mode().Perm())
+		}
+		observedHidden = true
+		observedPrivateStaging = true
+		_, err = fmt.Fprintln(dst, "complete evidence")
+		return err
+	}}}
+
+	result, err := writeBundle(finalDirectory, filepath.Base(finalDirectory), time.Now(), artifacts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observedHidden {
+		t.Fatal("artifact renderer did not observe the pre-finalization state")
+	}
+	if !observedPrivateStaging {
+		t.Fatal("artifact renderer did not observe private staging permissions")
+	}
+	if result.Directory != finalDirectory {
+		t.Fatalf("result directory = %q, want %q", result.Directory, finalDirectory)
+	}
+	if _, err := os.Stat(filepath.Join(finalDirectory, "evidence.txt")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFailedCaptureDoesNotLeaveFinalOrTemporaryDirectory(t *testing.T) {
+	parent := t.TempDir()
+	finalDirectory := filepath.Join(parent, "capture-failure-test")
+	sentinel := errors.New("fixture render failure")
+	artifacts := []artifact{
+		{name: "complete.txt", render: func(dst io.Writer) error {
+			_, err := fmt.Fprintln(dst, "complete")
+			return err
+		}},
+		{name: "failure.txt", render: func(io.Writer) error { return sentinel }},
+	}
+
+	if _, err := writeBundle(finalDirectory, filepath.Base(finalDirectory), time.Now(), artifacts); !errors.Is(err, sentinel) {
+		t.Fatalf("writeBundle() error = %v, want %v", err, sentinel)
+	}
+	if _, err := os.Stat(finalDirectory); !os.IsNotExist(err) {
+		t.Fatalf("failed capture left final directory: %v", err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp-") {
+			t.Errorf("failed capture left temporary directory %q", entry.Name())
 		}
 	}
 }
@@ -203,6 +363,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"Incident report: incident-report.md",
 		"Evidence JSON: evidence-summary.json",
 		"Observe snapshot: observe-snapshot.json",
+		"Manifest: manifest.json",
 	} {
 		if !strings.Contains(string(metadata), want) {
 			t.Errorf("metadata missing %q:\n%s", want, metadata)
@@ -227,6 +388,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"  - incident-report.md",
 		"  - evidence-summary.json",
 		"  - observe-snapshot.json",
+		"  - manifest.json",
 	} {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("incident report missing %q:\n%s", want, report)
@@ -265,6 +427,7 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 		"evidence-summary.json",
 		"incident-report.md",
 		"metadata.txt",
+		"manifest.json",
 	} {
 		if _, err := os.Stat(filepath.Join(result.Directory, name)); err != nil {
 			t.Errorf("missing %s: %v", name, err)

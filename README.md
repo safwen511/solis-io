@@ -34,7 +34,7 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Run report-backed or live-only noisy-neighbor diagnosis.
 - Monitor live noisy-neighbor conditions in repeated windows, alert on likely pressure, and optionally create cooldown-controlled capture bundles.
 - Collect experimental host/storage-path eBPF block latency counts and histograms, with optional victim/suspect topology context.
-- Produce timestamped capture bundles containing text evidence, a human-readable `incident-report.md`, and machine-readable `evidence-summary.json`.
+- Produce private, atomically finalized capture bundles containing text evidence, a human-readable `incident-report.md`, machine-readable `evidence-summary.json`, and a SHA-256 integrity manifest.
 - Expose live VM status as a terminal table or JSON document.
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
 - Collect opt-in guest resource, listening-port, process-pressure, configured systemd unit, and HTTP health metadata through fixed allowlisted SSH commands.
@@ -429,6 +429,7 @@ Create a timestamped incident directory containing:
 - `metadata.txt`
 - `incident-report.md`
 - `evidence-summary.json`
+- `manifest.json`, containing size, mode, and SHA-256 metadata for every other artifact
 - `suspect-discovery.txt` when discovery mode is used
 - `ebpf-block-latency.txt` when eBPF latency is requested, containing either collected evidence or an availability warning
 
@@ -445,6 +446,8 @@ sudo ./solis capture noisy-neighbor --victim a-web --discover-suspects --duratio
 Live-only captures mark application evidence unavailable in `diagnosis.txt`, `experiment-summary.txt`, and `incident-report.md`; they do not print zero-valued application metrics as evidence.
 
 `observe-snapshot.json` contains the unified host, VM/QEMU, storage, and configured optional observability view collected for the capture. If that collection is unavailable, capture still completes and the file contains a structured error and evidence-quality record rather than fabricated metrics. Both `metadata.txt` and `incident-report.md` reference the artifact.
+
+Capture bundles are assembled in a private `0700` staging directory under the configured output root. Artifacts and `manifest.json` are written with mode `0600`; only after every artifact and checksum succeeds does Solis atomically rename the staging directory to its final capture name. Failed writes therefore do not expose a normal-looking partial bundle. The manifest intentionally lists every other artifact rather than itself, because a stable manifest self-checksum is not possible.
 
 ## Watch live noisy-neighbor evidence
 

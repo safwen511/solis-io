@@ -35,9 +35,6 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 	if err := os.MkdirAll(inputs.OutputDirectory, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create capture output directory %q: %w", inputs.OutputDirectory, err)
 	}
-	if err := os.Mkdir(directory, 0o755); err != nil {
-		return Result{}, fmt.Errorf("create capture directory %q: %w", directory, err)
-	}
 
 	var artifacts []artifact
 	if evidence.Diagnosis.ExperimentAvailable {
@@ -100,20 +97,13 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 		}},
 		artifact{"metadata.txt", func(w io.Writer) error { return WriteMetadata(w, inputs, timestamp) }},
 	)
-	generatedFiles = make([]string, 0, len(artifacts))
+	generatedFiles = make([]string, 0, len(artifacts)+1)
 	for _, artifact := range artifacts {
 		generatedFiles = append(generatedFiles, artifact.name)
 	}
+	generatedFiles = append(generatedFiles, manifestFilename)
 
-	result := Result{Directory: directory}
-	for _, artifact := range artifacts {
-		path := filepath.Join(directory, artifact.name)
-		if err := writeArtifact(path, artifact.render); err != nil {
-			return result, err
-		}
-		result.Files = append(result.Files, path)
-	}
-	return result, nil
+	return writeBundle(directory, filepath.Base(directory), now, artifacts)
 }
 
 func captureDirectoryName(now time.Time, victim, suspect string) string {
@@ -158,7 +148,8 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Discovery file: %s\n"+
 			"Incident report: incident-report.md\n"+
 			"Evidence JSON: evidence-summary.json\n"+
-			"Observe snapshot: observe-snapshot.json\n",
+			"Observe snapshot: observe-snapshot.json\n"+
+			"Manifest: manifest.json\n",
 		timestamp,
 		valueOrDash(inputs.ReportDirectory),
 		evidenceMode,
@@ -262,16 +253,108 @@ func valueOrDash(value string) string {
 }
 
 func writeArtifact(path string, render func(io.Writer) error) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create capture artifact %q: %w", path, err)
 	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("secure capture artifact %q: %w", path, err)
+	}
 	if err := render(file); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("render capture artifact %q: %w", path, err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync capture artifact %q: %w", path, err)
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close capture artifact %q: %w", path, err)
 	}
 	return nil
+}
+
+func writeBundle(finalDirectory, captureID string, createdAt time.Time, artifacts []artifact) (result Result, err error) {
+	seenNames := make(map[string]struct{}, len(artifacts))
+	for _, item := range artifacts {
+		if err := validateArtifactName(item.name); err != nil {
+			return Result{}, err
+		}
+		if item.render == nil {
+			return Result{}, fmt.Errorf("capture artifact %q has no renderer", item.name)
+		}
+		if _, exists := seenNames[item.name]; exists {
+			return Result{}, fmt.Errorf("duplicate capture artifact name %q", item.name)
+		}
+		seenNames[item.name] = struct{}{}
+	}
+	if _, statErr := os.Lstat(finalDirectory); statErr == nil {
+		return Result{}, fmt.Errorf("capture directory already exists: %q", finalDirectory)
+	} else if !os.IsNotExist(statErr) {
+		return Result{}, fmt.Errorf("check capture directory %q: %w", finalDirectory, statErr)
+	}
+
+	parent := filepath.Dir(finalDirectory)
+	temporaryDirectory, err := os.MkdirTemp(parent, "."+filepath.Base(finalDirectory)+".tmp-")
+	if err != nil {
+		return Result{}, fmt.Errorf("create temporary capture directory in %q: %w", parent, err)
+	}
+	if err := os.Chmod(temporaryDirectory, 0o700); err != nil {
+		_ = os.RemoveAll(temporaryDirectory)
+		return Result{}, fmt.Errorf("secure temporary capture directory %q: %w", temporaryDirectory, err)
+	}
+	finalized := false
+	defer func() {
+		if !finalized {
+			_ = os.RemoveAll(temporaryDirectory)
+		}
+	}()
+
+	artifactNames := make([]string, 0, len(artifacts))
+	for _, item := range artifacts {
+		path := filepath.Join(temporaryDirectory, item.name)
+		if err := writeArtifact(path, item.render); err != nil {
+			return Result{}, err
+		}
+		artifactNames = append(artifactNames, item.name)
+	}
+
+	manifest, err := buildManifest(temporaryDirectory, captureID, createdAt, artifactNames)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := writeArtifact(filepath.Join(temporaryDirectory, manifestFilename), func(dst io.Writer) error {
+		return WriteManifest(dst, manifest)
+	}); err != nil {
+		return Result{}, err
+	}
+	if err := syncDirectory(temporaryDirectory); err != nil {
+		return Result{}, fmt.Errorf("sync temporary capture directory %q: %w", temporaryDirectory, err)
+	}
+	if _, statErr := os.Lstat(finalDirectory); statErr == nil {
+		return Result{}, fmt.Errorf("capture directory already exists: %q", finalDirectory)
+	} else if !os.IsNotExist(statErr) {
+		return Result{}, fmt.Errorf("check capture directory %q before finalization: %w", finalDirectory, statErr)
+	}
+	if err := os.Rename(temporaryDirectory, finalDirectory); err != nil {
+		return Result{}, fmt.Errorf("finalize capture directory %q: %w", finalDirectory, err)
+	}
+	finalized = true
+
+	result = Result{Directory: finalDirectory, Files: make([]string, 0, len(artifactNames)+1)}
+	for _, name := range artifactNames {
+		result.Files = append(result.Files, filepath.Join(finalDirectory, name))
+	}
+	result.Files = append(result.Files, filepath.Join(finalDirectory, manifestFilename))
+	return result, nil
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }

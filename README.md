@@ -58,6 +58,7 @@ sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis inventory
 sudo ./solis status
 sudo ./solis status --duration 3s --interval 1s --json
+sudo ./solis status --watch --duration 1s --interval 1s --every 2s
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
 ./solis incidents explain <report-dir> --victim <name> --suspect <name>
@@ -146,6 +147,14 @@ sudo ./solis status --duration 3s --interval 1s --json
 ```
 
 The defaults are a three-second observation window and a one-second sampling interval. Solis does not elevate privileges internally; `sudo` is shown because Linux commonly protects QEMU processes' `/proc/<pid>/io` counters. No guest payloads, guest files, process memory, or application contents are inspected.
+
+Use the live-refresh terminal view before reaching for a longer diagnosis:
+
+```bash
+sudo ./solis status --watch --duration 1s --interval 1s --every 2s
+```
+
+Watch mode clears the terminal before each refresh by default and runs until interrupted. Use `--iterations 3` for a bounded view, `--no-clear` to preserve prior frames, or `--sort pressure` to show high-pressure VMs first. Other sort fields are `name`, `tenant`, `role`, `write`, and `syscw`. Watch mode does not support `--json` yet.
 
 ## Demo commands
 

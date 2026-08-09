@@ -516,8 +516,45 @@ func TestParseStatusArgsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Duration != 3*time.Second || options.Interval != time.Second || options.JSON {
+	if options.Duration != 3*time.Second || options.Interval != time.Second || options.JSON || options.Watch {
 		t.Fatalf("options = %#v", options)
+	}
+	if options.Every != 2*time.Second || options.Iterations != 0 || !options.Clear || options.Sort != "name" {
+		t.Fatalf("watch defaults = %#v", options)
+	}
+}
+
+func TestParseStatusWatchArgs(t *testing.T) {
+	options, err := parseStatusArgs([]string{
+		"status",
+		"--watch",
+		"--duration", "1s",
+		"--interval", "1s",
+		"--every", "2s",
+		"--iterations", "3",
+		"--no-clear",
+		"--sort", "pressure",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.Watch || options.Every != 2*time.Second || options.Iterations != 3 || options.Clear || options.Sort != "pressure" {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseStatusWatchRejectsJSON(t *testing.T) {
+	_, err := parseStatusArgs([]string{"status", "--watch", "--json"})
+	want := "solis status --watch does not support --json yet"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
+func TestParseStatusRejectsInvalidSort(t *testing.T) {
+	_, err := parseStatusArgs([]string{"status", "--watch", "--sort", "latency"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort field \"latency\"") {
+		t.Fatalf("error = %v, want invalid sort field", err)
 	}
 }
 

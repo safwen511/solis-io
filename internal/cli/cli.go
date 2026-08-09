@@ -114,7 +114,7 @@ const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
-const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json]"
+const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -149,13 +149,24 @@ type watchNoisyNeighborOptions struct {
 }
 
 type statusOptions struct {
-	Duration time.Duration
-	Interval time.Duration
-	JSON     bool
+	Duration   time.Duration
+	Interval   time.Duration
+	JSON       bool
+	Watch      bool
+	Every      time.Duration
+	Iterations int
+	Clear      bool
+	Sort       string
 }
 
 func parseStatusArgs(args []string) (statusOptions, error) {
-	options := statusOptions{Duration: 3 * time.Second, Interval: time.Second}
+	options := statusOptions{
+		Duration: 3 * time.Second,
+		Interval: time.Second,
+		Every:    2 * time.Second,
+		Clear:    true,
+		Sort:     "name",
+	}
 	if len(args) == 0 || args[0] != "status" {
 		return statusOptions{}, errors.New(statusUsage)
 	}
@@ -169,20 +180,43 @@ func parseStatusArgs(args []string) (statusOptions, error) {
 		switch option {
 		case "--json":
 			options.JSON = true
-		case "--duration", "--interval":
+		case "--watch":
+			options.Watch = true
+		case "--clear":
+			options.Clear = true
+		case "--no-clear":
+			options.Clear = false
+		case "--duration", "--interval", "--every", "--iterations", "--sort":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return statusOptions{}, fmt.Errorf("%s: %s requires a value", statusUsage, option)
 			}
 			value := args[index+1]
 			index++
-			duration, err := time.ParseDuration(value)
-			if err != nil || duration <= 0 {
-				return statusOptions{}, fmt.Errorf("%s: invalid %s %q", statusUsage, option, value)
-			}
-			if option == "--duration" {
-				options.Duration = duration
-			} else {
-				options.Interval = duration
+			switch option {
+			case "--duration", "--interval", "--every":
+				duration, err := time.ParseDuration(value)
+				if err != nil || duration <= 0 {
+					return statusOptions{}, fmt.Errorf("%s: invalid %s %q", statusUsage, option, value)
+				}
+				switch option {
+				case "--duration":
+					options.Duration = duration
+				case "--interval":
+					options.Interval = duration
+				case "--every":
+					options.Every = duration
+				}
+			case "--iterations":
+				iterations, err := strconv.Atoi(value)
+				if err != nil || iterations <= 0 {
+					return statusOptions{}, fmt.Errorf("%s: invalid --iterations %q", statusUsage, value)
+				}
+				options.Iterations = iterations
+			case "--sort":
+				if !statusview.ValidSortField(value) {
+					return statusOptions{}, fmt.Errorf("%s: invalid --sort field %q; allowed: name, tenant, role, pressure, write, syscw", statusUsage, value)
+				}
+				options.Sort = strings.ToLower(value)
 			}
 		default:
 			return statusOptions{}, fmt.Errorf("%s: unknown option %s", statusUsage, option)
@@ -190,6 +224,15 @@ func parseStatusArgs(args []string) (statusOptions, error) {
 	}
 	if options.Interval > options.Duration {
 		return statusOptions{}, fmt.Errorf("%s: interval %s cannot exceed duration %s", statusUsage, options.Interval, options.Duration)
+	}
+	if options.Watch && options.JSON {
+		return statusOptions{}, errors.New("solis status --watch does not support --json yet")
+	}
+	if seen["--clear"] && seen["--no-clear"] {
+		return statusOptions{}, fmt.Errorf("%s: --clear and --no-clear cannot be used together", statusUsage)
+	}
+	if !options.Watch && (seen["--every"] || seen["--iterations"] || seen["--clear"] || seen["--no-clear"]) {
+		return statusOptions{}, fmt.Errorf("%s: --every, --iterations, --clear, and --no-clear require --watch", statusUsage)
 	}
 	return options, nil
 }
@@ -1357,12 +1400,25 @@ func runInventory(w io.Writer) error {
 }
 
 func runStatus(options statusOptions, w io.Writer) error {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if options.Watch {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		var summary statusview.WatchSummary
+		err := runStatusWatch(ctx, options, w, &summary)
+		if summaryErr := statusview.WriteWatchSummary(w, summary); err == nil && summaryErr != nil {
+			err = summaryErr
+		}
+		if err != nil {
+			return fmt.Errorf("status watch error: %w", err)
+		}
+		return nil
+	}
+
+	report, err := collectStatus(options)
 	if err != nil {
 		return fmt.Errorf("status error: %w", err)
 	}
-	report, err := statusview.Collect(inventory.Enrich(vms), options.Duration, options.Interval)
-	if err != nil {
+	if err := statusview.SortReport(&report, options.Sort); err != nil {
 		return fmt.Errorf("status error: %w", err)
 	}
 	if options.JSON {
@@ -1374,6 +1430,74 @@ func runStatus(options statusOptions, w io.Writer) error {
 		return fmt.Errorf("status error: %w", err)
 	}
 	return nil
+}
+
+func collectStatus(options statusOptions) (statusview.Report, error) {
+	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if err != nil {
+		return statusview.Report{}, err
+	}
+	report, err := statusview.Collect(inventory.Enrich(vms), options.Duration, options.Interval)
+	if err != nil {
+		return statusview.Report{}, err
+	}
+	return report, nil
+}
+
+func runStatusWatch(ctx context.Context, options statusOptions, w io.Writer, summary *statusview.WatchSummary) error {
+	nextStart := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		timestamp := time.Now().UTC()
+		report, err := collectStatus(options)
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		if err := statusview.SortReport(&report, options.Sort); err != nil {
+			return err
+		}
+		summary.IterationsRun++
+		counts := statusview.CountPressures(report)
+		summary.HighPressureObservations += counts.High
+		if options.Clear {
+			if _, err := fmt.Fprint(w, "\x1b[2J\x1b[H"); err != nil {
+				return err
+			}
+		}
+		if err := statusview.WriteWatchFrame(w, report, statusview.WatchFrame{
+			Timestamp: timestamp,
+			Every:     options.Every,
+			Iteration: summary.IterationsRun,
+		}); err != nil {
+			return err
+		}
+
+		if options.Iterations > 0 && summary.IterationsRun >= options.Iterations {
+			return nil
+		}
+		nextStart = nextStart.Add(options.Every)
+		wait := time.Until(nextStart)
+		if wait <= 0 {
+			continue
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
 }
 
 func runDoctor(w io.Writer) error {
@@ -1492,7 +1616,7 @@ Usage:
   solis ebpf block-count --duration <duration>
   solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
   solis inventory
-  solis status [--duration <duration>] [--interval <duration>] [--json]
+  solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
   solis top
   solis inspect <vm> [--verbose]
   solis experiment summarize <report-dir>

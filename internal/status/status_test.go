@@ -121,3 +121,73 @@ func TestWriteHumanShowsRequiredColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestSortReportByPressure(t *testing.T) {
+	report := Report{VMs: []VMStatus{
+		{Name: "idle", Pressure: PressureIdle},
+		{Name: "low", Pressure: PressureLow},
+		{Name: "high-b", Pressure: PressureHigh},
+		{Name: "high-a", Pressure: PressureHigh},
+	}}
+	if err := SortReport(&report, "pressure"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"high-a", "high-b", "low", "idle"}
+	for index, name := range want {
+		if report.VMs[index].Name != name {
+			t.Fatalf("row %d = %q, want %q; report = %#v", index, report.VMs[index].Name, name, report.VMs)
+		}
+	}
+}
+
+func TestWriteWatchSummary(t *testing.T) {
+	var output bytes.Buffer
+	if err := WriteWatchSummary(&output, WatchSummary{
+		IterationsRun:            3,
+		HighPressureObservations: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Solis VM Status Watch Summary",
+		"Iterations run: 3",
+		"High-pressure observations: 5",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("summary missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestWriteWatchFrameIncludesHeaderAndPressureCounts(t *testing.T) {
+	report := Report{
+		Duration: "1s",
+		Interval: "1s",
+		VMs: []VMStatus{
+			{Name: "a-web", Pressure: PressureHigh, IOAvailable: true},
+			{Name: "b-web", Pressure: PressureLow, IOAvailable: true},
+			{Name: "a-db", Pressure: PressureIdle, IOAvailable: true},
+		},
+	}
+	var output bytes.Buffer
+	if err := WriteWatchFrame(&output, report, WatchFrame{
+		Timestamp: time.Date(2026, 8, 9, 12, 30, 0, 0, time.UTC),
+		Every:     2 * time.Second,
+		Iteration: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Solis VM Status Watch",
+		"Timestamp: 2026-08-09T12:30:00Z",
+		"Duration: 1s",
+		"Interval: 1s",
+		"Refresh every: 2s",
+		"Iteration: 4",
+		"Pressure counts: high: 1, low: 1, idle: 1",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("frame missing %q:\n%s", want, output.String())
+		}
+	}
+}

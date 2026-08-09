@@ -13,6 +13,13 @@ func WriteHuman(dst io.Writer, report Report) error {
 	if _, err := fmt.Fprintf(dst, "Solis VM Status\nDuration: %s\nInterval: %s\n\n", report.Duration, report.Interval); err != nil {
 		return err
 	}
+	if err := writeVMTable(dst, report); err != nil {
+		return err
+	}
+	return writeWarnings(dst, report)
+}
+
+func writeVMTable(dst io.Writer, report Report) error {
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(w, "VM\tTENANT\tROLE\tSTATE\tIP\tQEMU_PID\tQCOW2_DISK\tPHYSICAL_DISK\tAVG_WRITE_MIB/S\tAVG_SYSCW/S\tPRESSURE"); err != nil {
 		return err
@@ -39,7 +46,10 @@ func WriteHuman(dst io.Writer, report Report) error {
 	if err := w.Flush(); err != nil {
 		return err
 	}
+	return nil
+}
 
+func writeWarnings(dst io.Writer, report Report) error {
 	var warnings []VMStatus
 	for _, vm := range report.VMs {
 		if !vm.IOAvailable {

@@ -1,0 +1,38 @@
+Solis eBPF Block Latency (experimental)
+
+VM-aware context:
+Victim:  a-web
+Suspect: b-stress
+
+VM storage topology:
+TARGET   VM        QEMU_PID  QCOW2_DISK                                                         MOUNTPOINT  SOURCE_DEVICE                      FILESYSTEM  PARENT_DEVICE   PHYSICAL_DEVICE
+victim   a-web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+suspect  b-stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /           /dev/mapper/ubuntu--vg-ubuntu--lv  ext4        /dev/nvme0n1p3  /dev/nvme0n1
+
+Shared storage path:
+Source device:   /dev/mapper/ubuntu--vg-ubuntu--lv
+Parent device:   /dev/nvme0n1p3
+Physical device: /dev/nvme0n1
+Attribution scope: eBPF block latency is host/storage-path level; it is not precise per-VM block latency attribution.
+VM writer attribution: use solis qemu io-summary to compare victim and suspect QEMU write activity.
+
+Duration:                 10s
+Correlation key:           dev + sector (best effort)
+Total completed requests:  15
+Average latency:           1232.35 us
+Max latency:               5435.44 us
+
+Latency histogram:
+LATENCY RANGE  REQUESTS  PERCENT
+< 10 us        0         0.00%
+10-49 us       7         46.67%
+50-99 us       0         0.00%
+100-499 us     4         26.67%
+500-999 us     0         0.00%
+1-4.999 ms     1         6.67%
+5-9.999 ms     3         20.00%
+10-49.999 ms   0         0.00%
+50-99.999 ms   0         0.00%
+100 ms+        0         0.00%
+
+Safety: temporary tracepoint programs detached; no payloads or process memory inspected

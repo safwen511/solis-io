@@ -1,0 +1,75 @@
+Solis Noisy Neighbor Diagnosis
+
+Inputs
+Report directory:  lab/reports/workload/20260808T174825Z
+Victim:            a-web
+Suspect:           b-stress
+Duration:          10s
+Interval:          2s
+
+Experiment evidence
+METRIC             BASELINE  DURING_NOISE  POST_NOISE
+Requests/sec       174.14    133.02        150.88
+Latency (ms)       114.850   150.359       132.560
+Failed requests    0         0             0
+Throughput drop:   23.61%
+Latency increase:  30.92%
+
+Storage topology
+TARGET                 VM        TENANT    ROLE    QEMU_PID  DISK                                                               SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+victim                 a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+suspect                b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+Shared physical disk:  yes
+
+Suspect discovery
+Victim:                a-web
+Victim physical disk:  /dev/nvme0n1
+
+CANDIDATE  TENANT    ROLE    SHARED_DISK  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  AVG_SYSCW/S  MAX_SYSCW/S  SCORE  REASON
+b-stress   tenant-b  stress  yes          0.03             0.14             130876.53    141296.50    HIGH   dominant syscall pressure
+a-stress   tenant-a  stress  yes          0.01             0.06             0.80         3.00         LOW    idle
+a-client   tenant-a  client  yes          0.00             0.00             0.20         1.00         LOW    idle
+a-db       tenant-a  db      yes          0.00             0.00             0.00         0.00         LOW    idle
+
+Selected suspect:  b-stress
+Reason:            dominant syscall pressure
+
+QEMU I/O evidence
+Victim average write MiB/s:      0.00
+Suspect average write MiB/s:     0.03
+Suspect/victim write ratio:      -
+Dominant writer:                 -
+Victim average syscw/s:          0.00
+Suspect average syscw/s:         130876.53
+Suspect/victim syscw ratio:      dominant suspect
+Suspect write syscall pressure:  HIGH
+Dominant write syscall source:   b-stress
+QEMU I/O conclusion:             QEMU write syscall pressure observed, but byte counters did not advance meaningfully.
+
+eBPF block latency evidence
+
+Duration:                 10s
+Correlation key:           dev + sector (best effort)
+Total completed requests:  15
+Average latency:           1232.35 us
+Max latency:               5435.44 us
+
+Latency histogram:
+LATENCY RANGE  REQUESTS  PERCENT
+< 10 us        0         0.00%
+10-49 us       7         46.67%
+50-99 us       0         0.00%
+100-499 us     4         26.67%
+500-999 us     0         0.00%
+1-4.999 ms     1         6.67%
+5-9.999 ms     3         20.00%
+10-49.999 ms   0         0.00%
+50-99.999 ms   0         0.00%
+100 ms+        0         0.00%
+
+Safety: temporary tracepoint programs detached; no payloads or process memory inspected
+eBPF latency is host/storage-path level, not precise per-VM attribution.
+QEMU io-summary is used for VM writer attribution.
+
+Verdict
+Probable noisy-neighbor storage interference.

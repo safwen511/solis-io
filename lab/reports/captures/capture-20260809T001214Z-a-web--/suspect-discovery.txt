@@ -1,0 +1,12 @@
+Suspect discovery
+Victim:                a-web
+Victim physical disk:  /dev/nvme0n1
+
+CANDIDATE  TENANT    ROLE    SHARED_DISK  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  AVG_SYSCW/S  MAX_SYSCW/S  SCORE  REASON
+a-db       tenant-a  db      yes          0.01             0.06             0.90         4.50         LOW    idle
+a-client   tenant-a  client  yes          0.00             0.00             0.00         0.00         LOW    idle
+a-stress   tenant-a  stress  yes          0.00             0.00             0.00         0.00         LOW    idle
+b-stress   tenant-b  stress  yes          0.00             0.00             0.00         0.00         LOW    idle
+
+Selected suspect:  -
+Reason:            no dominant writer observed

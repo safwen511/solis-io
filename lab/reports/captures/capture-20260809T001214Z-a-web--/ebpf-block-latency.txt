@@ -1,0 +1,26 @@
+Solis eBPF Block Latency (experimental)
+
+eBPF VM-aware latency requires a selected suspect; skipping VM-aware eBPF latency.
+
+Duration:                 10s
+Correlation key:           dev + sector (best effort)
+Total completed requests:  20
+Average latency:           1786.84 us
+Max latency:               5537.06 us
+
+Latency histogram:
+LATENCY RANGE  REQUESTS  PERCENT
+< 10 us        0         0.00%
+10-49 us       5         25.00%
+50-99 us       0         0.00%
+100-499 us     5         25.00%
+500-999 us     0         0.00%
+1-4.999 ms     5         25.00%
+5-9.999 ms     5         25.00%
+10-49.999 ms   0         0.00%
+50-99.999 ms   0         0.00%
+100 ms+        0         0.00%
+
+Safety: temporary tracepoint programs detached; no payloads or process memory inspected
+eBPF latency is host/storage-path level, not precise per-VM attribution.
+QEMU io-summary is used for VM writer attribution.

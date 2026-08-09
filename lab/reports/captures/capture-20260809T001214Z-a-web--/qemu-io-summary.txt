@@ -1,0 +1,33 @@
+QEMU I/O Summary
+Victim selector:   a-web
+Suspect selector:  -
+Duration:          10s
+Interval:          2s
+
+VM targets
+TARGET     VM        TENANT    ROLE    QEMU_PID  DISK
+victim     a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2
+candidate  a-client  tenant-a  client  24501     /var/lib/libvirt/images/solis-io/tenant-a/a-client/a-client.qcow2
+candidate  a-db      tenant-a  db      24633     /var/lib/libvirt/images/solis-io/tenant-a/a-db/a-db.qcow2
+candidate  a-stress  tenant-a  stress  24700     /var/lib/libvirt/images/solis-io/tenant-a/a-stress/a-stress.qcow2
+candidate  b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2
+
+Per-VM averages
+TARGET     VM        AVG_READ_MIB/S  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  TOTAL_READ_MIB  TOTAL_WRITTEN_MIB  AVG_SYSCR/S  AVG_SYSCW/S  MAX_SYSCW/S  ERROR
+victim     a-web     0.00            0.00             0.00             0.00            0.00               0.00         0.00         0.00         -
+candidate  a-client  0.00            0.00             0.00             0.00            0.00               0.00         0.00         0.00         -
+candidate  a-db      0.00            0.01             0.06             0.00            0.13               1.20         0.90         4.50         -
+candidate  a-stress  0.00            0.00             0.00             0.00            0.00               0.20         0.00         0.00         -
+candidate  b-stress  0.00            0.00             0.00             0.00            0.00               0.20         0.00         0.00         -
+
+Diagnosis
+Victim average write MiB/s:      0.00
+Suspect average write MiB/s:     -
+Suspect/victim write ratio:      -
+Dominant writer:                 -
+Victim average syscw/s:          0.00
+Suspect average syscw/s:         -
+Suspect/victim syscw ratio:      -
+Suspect write syscall pressure:  -
+Dominant write syscall source:   -
+Conclusion:                      QEMU process I/O counters were unavailable for diagnosis.

@@ -1,0 +1,63 @@
+Solis Noisy Neighbor Diagnosis
+
+Inputs
+Report directory:  lab/reports/workload/20260808T174825Z
+Victim:            a-web
+Suspect:           -
+Duration:          10s
+Interval:          2s
+
+Experiment evidence
+METRIC             BASELINE  DURING_NOISE  POST_NOISE
+Requests/sec       174.14    133.02        150.88
+Latency (ms)       114.850   150.359       132.560
+Failed requests    0         0             0
+Throughput drop:   23.61%
+Latency increase:  30.92%
+
+Storage topology
+TARGET                 VM     TENANT    ROLE  QEMU_PID  DISK                                                         SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+victim                 a-web  tenant-a  web   24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+Shared physical disk:  -
+
+Suspect discovery
+Victim:                a-web
+Victim physical disk:  /dev/nvme0n1
+
+CANDIDATE  TENANT    ROLE    SHARED_DISK  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  AVG_SYSCW/S  MAX_SYSCW/S  SCORE  REASON
+a-db       tenant-a  db      yes          0.01             0.06             0.90         4.50         LOW    idle
+a-client   tenant-a  client  yes          0.00             0.00             0.00         0.00         LOW    idle
+a-stress   tenant-a  stress  yes          0.00             0.00             0.00         0.00         LOW    idle
+b-stress   tenant-b  stress  yes          0.00             0.00             0.00         0.00         LOW    idle
+
+Selected suspect:  -
+Reason:            no dominant writer observed
+
+eBPF block latency evidence
+eBPF VM-aware latency requires a selected suspect; skipping VM-aware eBPF latency.
+
+Duration:                 10s
+Correlation key:           dev + sector (best effort)
+Total completed requests:  20
+Average latency:           1786.84 us
+Max latency:               5537.06 us
+
+Latency histogram:
+LATENCY RANGE  REQUESTS  PERCENT
+< 10 us        0         0.00%
+10-49 us       5         25.00%
+50-99 us       0         0.00%
+100-499 us     5         25.00%
+500-999 us     0         0.00%
+1-4.999 ms     5         25.00%
+5-9.999 ms     5         25.00%
+10-49.999 ms   0         0.00%
+50-99.999 ms   0         0.00%
+100 ms+        0         0.00%
+
+Safety: temporary tracepoint programs detached; no payloads or process memory inspected
+eBPF latency is host/storage-path level, not precise per-VM attribution.
+QEMU io-summary is used for VM writer attribution.
+
+Verdict
+Slowdown observed, but no dominant storage-neighbor candidate was detected during live sampling.

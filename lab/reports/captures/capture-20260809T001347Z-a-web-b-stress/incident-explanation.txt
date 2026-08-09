@@ -1,0 +1,21 @@
+Solis I/O Incident Explanation
+Report directory:  lab/reports/workload/20260808T174825Z
+Victim:            a-web
+Suspect:           b-stress
+
+HTTP evidence
+METRIC           BASELINE  DURING_NOISE  POST_NOISE
+Requests/sec     174.14    133.02        150.88
+Latency (ms)     114.850   150.359       132.560
+Failed requests  0         0             0
+
+Throughput drop:   23.61%
+Latency increase:  30.92%
+
+fio evidence
+IOPS:       59.9k
+Bandwidth:  234MiB/s
+Disk util:  84.86%
+
+Assessment:      Probable noisy-neighbor storage interference. No HTTP failures observed.
+Recommendation:  Inspect host block telemetry for the suspect VM and victim DB disk during the incident window.

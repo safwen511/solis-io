@@ -1,0 +1,12 @@
+Suspect discovery
+Victim:                a-web
+Victim physical disk:  /dev/nvme0n1
+
+CANDIDATE  TENANT    ROLE    SHARED_DISK  AVG_WRITE_MIB/S  MAX_WRITE_MIB/S  AVG_SYSCW/S  MAX_SYSCW/S  SCORE  REASON
+b-stress   tenant-b  stress  yes          0.03             0.14             130876.53    141296.50    HIGH   dominant syscall pressure
+a-stress   tenant-a  stress  yes          0.01             0.06             0.80         3.00         LOW    idle
+a-client   tenant-a  client  yes          0.00             0.00             0.20         1.00         LOW    idle
+a-db       tenant-a  db      yes          0.00             0.00             0.00         0.00         LOW    idle
+
+Selected suspect:  b-stress
+Reason:            dominant syscall pressure

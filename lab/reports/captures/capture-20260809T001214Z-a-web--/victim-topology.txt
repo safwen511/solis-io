@@ -1,0 +1,6 @@
+Victim Storage Topology
+VM     TENANT    ROLE  QEMU_PID  DISK                                                         MOUNTPOINT  SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+a-web  tenant-a  web   24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2  /           /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+
+Selected suspect:  -
+Reason:            no dominant writer observed

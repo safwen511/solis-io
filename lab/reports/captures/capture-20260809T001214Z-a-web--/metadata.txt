@@ -1,0 +1,14 @@
+Solis Capture Metadata
+Capture timestamp UTC: 20260809T001214Z
+Report directory: lab/reports/workload/20260808T174825Z
+Victim: a-web
+Suspect: -
+Duration: 10s
+Interval: 2s
+Solis command: solis capture noisy-neighbor
+Capture mode: discover-suspects
+Selected suspect: -
+eBPF latency requested: yes
+eBPF latency file written: yes
+Discovery file: suspect-discovery.txt
+eBPF block latency: ebpf-block-latency.txt (experimental; host/storage-path level)

@@ -1,0 +1,12 @@
+Storage Snapshot
+Victim selector:   a-web
+Suspect selector:  b-stress
+
+VM storage targets
+TARGET   VM        TENANT    ROLE    QEMU_PID  DISK                                                               SOURCE_DEVICE                      PARENT_DEVICE   PHYSICAL_DISK
+victim   a-web     tenant-a  web     24567     /var/lib/libvirt/images/solis-io/tenant-a/a-web/a-web.qcow2        /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+suspect  b-stress  tenant-b  stress  24765     /var/lib/libvirt/images/solis-io/tenant-b/b-stress/b-stress.qcow2  /dev/mapper/ubuntu--vg-ubuntu--lv  /dev/nvme0n1p3  /dev/nvme0n1
+
+Host device snapshot
+PHYSICAL_DISK  READS_COMPLETED  WRITES_COMPLETED  SECTORS_READ  SECTORS_WRITTEN  IO_IN_PROGRESS  WEIGHTED_IO_TIME_MS
+/dev/nvme0n1   88216            16151197          8304963       188801282        0               23130217

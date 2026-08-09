@@ -194,6 +194,24 @@ The demo runner builds Solis, starts the existing fio workload on `b-stress`, wa
 
 Run it from any directory inside the checked-out repository; the script resolves and changes to the repository root automatically. It requires the configured lab SSH access and interactive or cached `sudo` authorization for reading QEMU procfs counters. The workload writes only to the existing fio test file inside the `b-stress` guest.
 
+## Run the end-to-end MVP lab demo
+
+The MVP runner demonstrates the victim-only workflow: it starts temporary fio random-write pressure inside `b-stress`, asks Solis to discover the suspect automatically, captures QEMU and experimental eBPF evidence, and produces a timestamped evidence bundle with `incident-report.md`.
+
+From the repository root, run:
+
+```bash
+./lab/scripts/run-mvp-demo.sh
+```
+
+> **Lab only:** This script logs in to the configured stress VM at `192.168.140.40` and generates temporary fio write load inside that guest. SSH and fio orchestration remain outside the Solis CLI product path.
+
+The script validates SSH, remote fio, and local `sudo` access before starting the workload. It waits for fio, removes `/home/flint/solis-mvp-demo.dat` from the stress guest, runs `fstrim`, prints the fio summary, and reports both the capture directory and Markdown incident-report path. Its main settings can be overridden through environment variables, for example:
+
+```bash
+VICTIM=a-web FIO_RUNTIME=90 FIO_SIZE=512M ./lab/scripts/run-mvp-demo.sh
+```
+
 ## Sample result
 
 In the included lab experiment and a corresponding live QEMU I/O sample:

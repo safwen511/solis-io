@@ -9,6 +9,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/capture"
 	"github.com/safwen511/solis-io/internal/diagnose"
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/doctor"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
@@ -89,7 +90,7 @@ const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --su
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
-const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]"
+const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor --report-dir <dir> --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>"
 const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration>]"
@@ -112,6 +113,7 @@ type timedTargetOptions struct {
 	OutputPath         string
 	OutputDirectory    string
 	IncludeEBPFLatency bool
+	DiscoverSuspects   bool
 }
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
@@ -246,6 +248,7 @@ func parseTimedWatchOptions(args []string, start int, usage, commandName string)
 		false,
 		false,
 		false,
+		false,
 	)
 	if err != nil {
 		return "", "", 0, 0, err
@@ -267,6 +270,7 @@ func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		true,
 		true,
 		true,
+		true,
 	)
 }
 
@@ -284,6 +288,7 @@ func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		true,
 		true,
 		true,
+		false,
 	)
 	if err != nil {
 		return timedTargetOptions{}, err
@@ -307,11 +312,24 @@ func parseTimedTargetOptions(
 	allowReportDirectory bool,
 	allowOutputOptions bool,
 	allowEBPFLatency bool,
+	allowSuspectDiscovery bool,
 ) (timedTargetOptions, error) {
 	options := timedTargetOptions{Duration: defaultDuration, Interval: defaultInterval}
-	var durationSet, intervalSet, outputSet, outputDirectorySet, includeEBPFLatencySet bool
+	var durationSet, intervalSet, outputSet, outputDirectorySet, includeEBPFLatencySet, discoverSuspectsSet bool
 	for i := start; i < len(args); {
 		option := args[i]
+		if option == "--discover-suspects" {
+			if !allowSuspectDiscovery {
+				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
+			}
+			if discoverSuspectsSet {
+				return timedTargetOptions{}, fmt.Errorf("%s: --discover-suspects specified more than once", usage)
+			}
+			options.DiscoverSuspects = true
+			discoverSuspectsSet = true
+			i++
+			continue
+		}
 		if option == "--include-ebpf-latency" {
 			if !allowEBPFLatency {
 				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
@@ -398,7 +416,13 @@ func parseTimedTargetOptions(
 	if options.Victim == "" {
 		return timedTargetOptions{}, fmt.Errorf("%s: missing --victim", usage)
 	}
-	if options.Suspect == "" {
+	if options.Suspect != "" && options.DiscoverSuspects {
+		return timedTargetOptions{}, fmt.Errorf("%s: --suspect and --discover-suspects cannot be used together", usage)
+	}
+	if options.Suspect == "" && !options.DiscoverSuspects {
+		if allowSuspectDiscovery {
+			return timedTargetOptions{}, fmt.Errorf("%s: provide either --suspect <vm> or --discover-suspects", usage)
+		}
 		return timedTargetOptions{}, fmt.Errorf("%s: missing --suspect", usage)
 	}
 	if outputSet && outputDirectorySet {
@@ -610,13 +634,21 @@ type noisyNeighborEvidence struct {
 }
 
 func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
-	evidence, err := collectNoisyNeighborEvidence(options)
+	var report diagnose.Report
+	var err error
+	if options.DiscoverSuspects {
+		report, err = collectDiscoveredNoisyNeighborDiagnosis(options)
+	} else {
+		var evidence noisyNeighborEvidence
+		evidence, err = collectNoisyNeighborEvidence(options)
+		report = evidence.Diagnosis
+	}
 	if err != nil {
 		return fmt.Errorf("diagnose noisy-neighbor error: %w", err)
 	}
 	if _, err := diagnose.WriteOutput(
 		w,
-		evidence.Diagnosis,
+		report,
 		diagnose.OutputOptions{
 			Path:      options.OutputPath,
 			Directory: options.OutputDirectory,
@@ -709,31 +741,15 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 		plan.SuspectTarget,
 	)
 	var latencyContext *ebpf.BlockLatencyVMContext
-	var latencyResult <-chan blockLatencyCollectionResult
 	if options.IncludeEBPFLatency {
 		if len(plan.VictimTargets) == 1 {
 			context := ebpf.NewBlockLatencyVMContext(plan.VictimTargets[0], plan.SuspectTarget)
 			latencyContext = &context
 		}
-		resultChannel := make(chan blockLatencyCollectionResult, 1)
-		latencyResult = resultChannel
-		go func() {
-			result, err := ebpf.MeasureBlockLatency(options.Duration)
-			resultChannel <- blockLatencyCollectionResult{result: result, err: err}
-		}()
 	}
+	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
 	qemuReport, err := qemuio.CollectSummary(qemuPlan, options.Duration, options.Interval)
-	var latencyEvidence *ebpf.BlockLatencyEvidence
-	if latencyResult != nil {
-		collected := <-latencyResult
-		latencyEvidence = &ebpf.BlockLatencyEvidence{
-			Result:  collected.result,
-			Context: latencyContext,
-		}
-		if collected.err != nil {
-			latencyEvidence.UnavailableReason = collected.err.Error()
-		}
-	}
+	latencyEvidence := finishBlockLatencyCollection(latencyResult, latencyContext)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
@@ -763,6 +779,108 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 		EBPFLatency: latencyEvidence,
 		Diagnosis:   diagnosisReport,
 	}, nil
+}
+
+func collectDiscoveredNoisyNeighborDiagnosis(options timedTargetOptions) (diagnose.Report, error) {
+	experimentReport, err := experiment.Load(options.ReportDirectory)
+	if err != nil {
+		return diagnose.Report{}, err
+	}
+	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if err != nil {
+		return diagnose.Report{}, err
+	}
+	vms = inventory.Enrich(vms)
+	targets, err := discovery.Resolve(vms, options.Victim)
+	if err != nil {
+		return diagnose.Report{}, err
+	}
+
+	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
+	samplingPlan := discovery.SamplingPlan(targets)
+	sampled, sampleErr := qemuio.CollectSummary(samplingPlan, options.Duration, options.Interval)
+	discoveryReport := discovery.Analyze(targets, sampled)
+
+	var selectedSuspect string
+	var latencyContext *ebpf.BlockLatencyVMContext
+	var qemuReport qemuio.SummaryReport
+	var storageSnapshot storage.Snapshot
+	if discoveryReport.Selected != nil {
+		selected := discoveryReport.Selected.VM
+		selectedSuspect = selected.Name
+		pairPlan := qemuio.NewPlan(targets.Victim.Name, selected.Name, []inventory.VM{targets.Victim}, selected)
+		qemuReport = qemuio.SummaryForPlan(sampled, pairPlan)
+		storageSnapshot = storage.Capture(targets.Victim.Name, selected.Name, []inventory.VM{targets.Victim}, selected)
+		if options.IncludeEBPFLatency {
+			context := ebpf.NewBlockLatencyVMContext(targets.Victim, selected)
+			latencyContext = &context
+		}
+	} else {
+		selectedSuspect = "-"
+		qemuReport = sampled
+		storageSnapshot = storage.Snapshot{
+			VictimSelector:  targets.Victim.Name,
+			SuspectSelector: "-",
+			Targets: []storage.VMTarget{{
+				TargetType: "victim",
+				VM:         targets.Victim,
+				Storage:    targets.VictimStorage,
+			}},
+		}
+	}
+	latencyEvidence := finishBlockLatencyCollection(latencyResult, latencyContext)
+	if sampleErr != nil {
+		return diagnose.Report{}, sampleErr
+	}
+	if latencyEvidence != nil && discoveryReport.Selected == nil {
+		latencyEvidence.Notice = "eBPF VM-aware latency requires a selected suspect; skipping VM-aware eBPF latency."
+	}
+
+	report, err := diagnose.NewReport(
+		diagnose.Inputs{
+			ReportDirectory: experimentReport.Directory,
+			Victim:          targets.Victim.Name,
+			Suspect:         selectedSuspect,
+			Duration:        options.Duration,
+			Interval:        options.Interval,
+		},
+		experimentReport,
+		storageSnapshot,
+		qemuReport,
+	)
+	if err != nil {
+		return diagnose.Report{}, err
+	}
+	report.Discovery = &discoveryReport
+	report.EBPFLatency = latencyEvidence
+	if discoveryReport.Selected == nil {
+		report.Verdict = diagnose.NoDominantCandidateVerdict
+	}
+	return report, nil
+}
+
+func startBlockLatencyCollection(enabled bool, duration time.Duration) <-chan blockLatencyCollectionResult {
+	if !enabled {
+		return nil
+	}
+	results := make(chan blockLatencyCollectionResult, 1)
+	go func() {
+		result, err := ebpf.MeasureBlockLatency(duration)
+		results <- blockLatencyCollectionResult{result: result, err: err}
+	}()
+	return results
+}
+
+func finishBlockLatencyCollection(results <-chan blockLatencyCollectionResult, context *ebpf.BlockLatencyVMContext) *ebpf.BlockLatencyEvidence {
+	if results == nil {
+		return nil
+	}
+	collected := <-results
+	evidence := &ebpf.BlockLatencyEvidence{Result: collected.result, Context: context}
+	if collected.err != nil {
+		evidence.UnavailableReason = collected.err.Error()
+	}
+	return evidence
 }
 
 type blockLatencyCollectionResult struct {
@@ -959,7 +1077,7 @@ Usage:
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
-  solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]
+  solis diagnose noisy-neighbor --report-dir <dir> --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]
   solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)

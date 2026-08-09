@@ -111,6 +111,27 @@ func TestSyscallComparisonDoesNotMarkSimilarRatesDominant(t *testing.T) {
 	}
 }
 
+func TestSummaryForPlanReusesSelectedSamples(t *testing.T) {
+	victimVM := inventory.VM{Name: "a-web"}
+	suspectVM := inventory.VM{Name: "b-stress"}
+	source := SummaryReport{
+		Duration: 10 * time.Second,
+		Interval: 2 * time.Second,
+		VMs: []VMSummary{
+			{Target: Target{TargetType: "victim", VM: victimVM}, Available: true, AverageWriteMiBPerSecond: 1},
+			{Target: Target{TargetType: "candidate", VM: suspectVM}, Available: true, AverageWriteMiBPerSecond: 40},
+		},
+	}
+	plan := NewPlan("a-web", "b-stress", []inventory.VM{victimVM}, suspectVM)
+	report := SummaryForPlan(source, plan)
+	if report.SuspectAverageWriteMiBPerSecond != 40 || !report.SuspectDominant {
+		t.Fatalf("report = %#v", report)
+	}
+	if report.DominantWriter != "b-stress" || report.Duration != 10*time.Second || report.Interval != 2*time.Second {
+		t.Fatalf("report metadata = %#v", report)
+	}
+}
+
 func TestLowActivityReportHasNoDominantWriter(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}

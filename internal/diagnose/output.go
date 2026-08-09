@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/storage"
 )
@@ -55,20 +56,28 @@ func Write(dst io.Writer, report Report) error {
 		writeStorageTarget(w, target)
 	}
 	fmt.Fprintf(w, "Shared physical disk:\t%s\n\n", sharedDiskText(report.StorageTopologyAvailable, report.SharedPhysicalDisk))
+	if report.Discovery != nil {
+		if err := discovery.Write(w, *report.Discovery); err != nil {
+			return err
+		}
+		fmt.Fprintln(w)
+	}
 
-	fmt.Fprintln(w, "QEMU I/O evidence")
-	fmt.Fprintf(w, "Victim average write MiB/s:\t%s\n", qemuValue(report.QEMU.VictimAverageWriteMiBPerSecond, report.QEMU.VictimDataAvailable))
-	fmt.Fprintf(w, "Suspect average write MiB/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageWriteMiBPerSecond, report.QEMU.SuspectDataAvailable))
-	fmt.Fprintf(w, "Suspect/victim write ratio:\t%s\n", valueOrDash(report.QEMU.WriteRatio))
-	fmt.Fprintf(w, "Dominant writer:\t%s\n", valueOrDash(report.QEMU.DominantWriter))
-	fmt.Fprintf(w, "Victim average syscw/s:\t%s\n", qemuValue(report.QEMU.VictimAverageSyscwPerSecond, report.QEMU.VictimDataAvailable))
-	fmt.Fprintf(w, "Suspect average syscw/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageSyscwPerSecond, report.QEMU.SuspectDataAvailable))
-	fmt.Fprintf(w, "Suspect/victim syscw ratio:\t%s\n", valueOrDash(report.QEMU.SyscwRatio))
-	fmt.Fprintf(w, "Suspect write syscall pressure:\t%s\n", valueOrDash(report.QEMU.WriteSyscallPressure))
-	fmt.Fprintf(w, "Dominant write syscall source:\t%s\n", valueOrDash(report.QEMU.DominantWriteSyscallSource))
-	fmt.Fprintf(w, "QEMU I/O conclusion:\t%s\n", valueOrDash(report.QEMU.Conclusion))
-	writeQEMUErrors(w, report)
-	fmt.Fprintln(w)
+	if report.Discovery == nil || report.Discovery.Selected != nil {
+		fmt.Fprintln(w, "QEMU I/O evidence")
+		fmt.Fprintf(w, "Victim average write MiB/s:\t%s\n", qemuValue(report.QEMU.VictimAverageWriteMiBPerSecond, report.QEMU.VictimDataAvailable))
+		fmt.Fprintf(w, "Suspect average write MiB/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageWriteMiBPerSecond, report.QEMU.SuspectDataAvailable))
+		fmt.Fprintf(w, "Suspect/victim write ratio:\t%s\n", valueOrDash(report.QEMU.WriteRatio))
+		fmt.Fprintf(w, "Dominant writer:\t%s\n", valueOrDash(report.QEMU.DominantWriter))
+		fmt.Fprintf(w, "Victim average syscw/s:\t%s\n", qemuValue(report.QEMU.VictimAverageSyscwPerSecond, report.QEMU.VictimDataAvailable))
+		fmt.Fprintf(w, "Suspect average syscw/s:\t%s\n", qemuValue(report.QEMU.SuspectAverageSyscwPerSecond, report.QEMU.SuspectDataAvailable))
+		fmt.Fprintf(w, "Suspect/victim syscw ratio:\t%s\n", valueOrDash(report.QEMU.SyscwRatio))
+		fmt.Fprintf(w, "Suspect write syscall pressure:\t%s\n", valueOrDash(report.QEMU.WriteSyscallPressure))
+		fmt.Fprintf(w, "Dominant write syscall source:\t%s\n", valueOrDash(report.QEMU.DominantWriteSyscallSource))
+		fmt.Fprintf(w, "QEMU I/O conclusion:\t%s\n", valueOrDash(report.QEMU.Conclusion))
+		writeQEMUErrors(w, report)
+		fmt.Fprintln(w)
+	}
 	if report.EBPFLatency != nil {
 		fmt.Fprintln(w, "eBPF block latency evidence")
 		if err := ebpf.WriteBlockLatencyEvidence(w, *report.EBPFLatency); err != nil {

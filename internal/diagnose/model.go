@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -12,10 +13,11 @@ import (
 )
 
 const (
-	ProbableVerdict         = "Probable noisy-neighbor storage interference."
-	LowPressureVerdict      = "Slowdown observed, but no meaningful suspect QEMU write pressure was observed during live sampling."
-	TopologyMismatchVerdict = "Slowdown observed, but storage topology does not support this suspect as the cause."
-	InsufficientVerdict     = "Insufficient evidence for noisy-neighbor storage interference."
+	ProbableVerdict            = "Probable noisy-neighbor storage interference."
+	LowPressureVerdict         = "Slowdown observed, but no meaningful suspect QEMU write pressure was observed during live sampling."
+	TopologyMismatchVerdict    = "Slowdown observed, but storage topology does not support this suspect as the cause."
+	InsufficientVerdict        = "Insufficient evidence for noisy-neighbor storage interference."
+	NoDominantCandidateVerdict = "Slowdown observed, but no dominant storage-neighbor candidate was detected during live sampling."
 )
 
 // Inputs contains the selectors and live-sampling window supplied by the user.
@@ -47,6 +49,7 @@ type Report struct {
 	Storage                  storage.Snapshot
 	QEMU                     qemuio.SummaryReport
 	EBPFLatency              *ebpf.BlockLatencyEvidence
+	Discovery                *discovery.Report
 	StorageTopologyAvailable bool
 	SharedPhysicalDisk       bool
 	Verdict                  string

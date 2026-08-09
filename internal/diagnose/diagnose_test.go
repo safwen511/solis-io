@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
+	"github.com/safwen511/solis-io/internal/hoststorage"
+	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
@@ -135,6 +138,83 @@ func TestWriteWithoutEBPFLatencyPreservesExistingOutput(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "eBPF block latency evidence") {
 		t.Fatalf("output unexpectedly contains optional eBPF section:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "Suspect discovery") {
+		t.Fatalf("pairwise output unexpectedly contains suspect discovery:\n%s", output.String())
+	}
+}
+
+func TestWriteIncludesSuspectDiscoveryTable(t *testing.T) {
+	discoveryReport := discovery.Report{
+		Victim:        inventory.VM{Name: "a-web"},
+		VictimStorage: hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"},
+		Candidates: []discovery.Candidate{{
+			VM:         inventory.VM{Name: "b-stress", Tenant: "tenant-b", Role: "stress"},
+			SharedDisk: true,
+			Summary: qemuio.VMSummary{
+				Available:                true,
+				AverageWriteMiBPerSecond: 3.2,
+				MaxWriteMiBPerSecond:     10.81,
+				AverageSyscwPerSecond:    139413,
+				MaxSyscwPerSecond:        141000,
+			},
+			Score:  "HIGH",
+			Reason: "dominant syscall pressure",
+		}},
+		SelectionReason: "dominant syscall pressure",
+	}
+	discoveryReport.Selected = &discoveryReport.Candidates[0]
+	var output bytes.Buffer
+	if err := Write(&output, Report{Discovery: &discoveryReport}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Suspect discovery",
+		"Victim physical disk:",
+		"/dev/nvme0n1",
+		"AVG_WRITE_MIB/S",
+		"AVG_SYSCW/S",
+		"b-stress",
+		"dominant syscall pressure",
+		"Selected suspect:",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestWriteDiscoveryWithoutSelectionIncludesVerdictAndEBPFNotice(t *testing.T) {
+	discoveryReport := discovery.Report{
+		Victim:          inventory.VM{Name: "a-web"},
+		VictimStorage:   hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"},
+		SelectionReason: "no dominant writer observed",
+	}
+	latency := ebpf.BlockLatencyEvidence{
+		Result: ebpf.BlockLatencyResult{Duration: time.Second},
+		Notice: "eBPF VM-aware latency requires a selected suspect; skipping VM-aware eBPF latency.",
+	}
+	var output bytes.Buffer
+	if err := Write(&output, Report{
+		Discovery:   &discoveryReport,
+		EBPFLatency: &latency,
+		Verdict:     NoDominantCandidateVerdict,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Selected suspect:",
+		"Reason:",
+		"no dominant writer observed",
+		"eBPF VM-aware latency requires a selected suspect; skipping VM-aware eBPF latency.",
+		NoDominantCandidateVerdict,
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "QEMU I/O conclusion:") {
+		t.Fatalf("no-selection output contains misleading pairwise QEMU conclusion:\n%s", output.String())
 	}
 }
 

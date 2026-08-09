@@ -13,11 +13,17 @@ type BlockLatencyEvidence struct {
 	Result            BlockLatencyResult
 	Context           *BlockLatencyVMContext
 	UnavailableReason string
+	Notice            string
 }
 
 // WriteBlockLatencyEvidence writes an embeddable experimental evidence section
 // without the standalone command title.
 func WriteBlockLatencyEvidence(dst io.Writer, evidence BlockLatencyEvidence) error {
+	if notice := oneLineReason(evidence.Notice); notice != "" {
+		if _, err := fmt.Fprintln(dst, notice); err != nil {
+			return err
+		}
+	}
 	if reason := oneLineReason(evidence.UnavailableReason); reason != "" {
 		if _, err := fmt.Fprintf(dst, "eBPF block latency evidence unavailable: %s\n", reason); err != nil {
 			return err

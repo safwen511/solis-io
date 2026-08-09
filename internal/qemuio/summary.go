@@ -140,7 +140,32 @@ func summarizeSamples(plan Plan, duration, interval time.Duration, samples []int
 			vmSummary.MaxSyscwPerSecond = accumulator.maxSyscw
 		}
 		report.VMs = append(report.VMs, vmSummary)
+	}
+	return finalizeSummary(report)
+}
 
+// SummaryForPlan reuses already sampled per-VM summaries with a new victim and
+// suspect plan. It does not read procfs or start another sampling window.
+func SummaryForPlan(source SummaryReport, plan Plan) SummaryReport {
+	byName := make(map[string]VMSummary, len(source.VMs))
+	for _, summary := range source.VMs {
+		byName[summary.Target.VM.Name] = summary
+	}
+	report := SummaryReport{Plan: plan, Duration: source.Duration, Interval: source.Interval}
+	for _, target := range plan.Targets {
+		summary, ok := byName[target.VM.Name]
+		if !ok {
+			summary = VMSummary{Error: "QEMU process I/O summary unavailable"}
+		}
+		summary.Target = target
+		report.VMs = append(report.VMs, summary)
+	}
+	return finalizeSummary(report)
+}
+
+func finalizeSummary(report SummaryReport) SummaryReport {
+	for _, vmSummary := range report.VMs {
+		target := vmSummary.Target
 		if vmSummary.Available && targetHasType(target, "victim") {
 			report.VictimDataAvailable = true
 			report.VictimAverageWriteMiBPerSecond += vmSummary.AverageWriteMiBPerSecond
@@ -190,12 +215,12 @@ func summarizeSamples(plan Plan, duration, interval time.Duration, samples []int
 		report.SuspectAverageSyscwPerSecond,
 	)
 	if report.SuspectDominant {
-		report.DominantWriter = plan.SuspectSelector
+		report.DominantWriter = report.Plan.SuspectSelector
 	} else {
 		report.DominantWriter = "-"
 	}
 	if report.SuspectSyscwDominant {
-		report.DominantWriteSyscallSource = plan.SuspectSelector
+		report.DominantWriteSyscallSource = report.Plan.SuspectSelector
 	} else {
 		report.DominantWriteSyscallSource = "-"
 	}
@@ -231,6 +256,18 @@ func suspectIsDominant(victim, suspect float64) bool {
 	return suspect/victim >= dominantWriteRatio
 }
 
+// MeaningfulWriteBytes reports whether a write-byte rate is large enough for
+// byte-counter attribution.
+func MeaningfulWriteBytes(averageMiBPerSecond float64) bool {
+	return averageMiBPerSecond >= minimumMeaningfulWriteMiBPerSecond
+}
+
+// DominantWriteBytes reports whether a meaningful candidate write-byte rate is
+// at least the configured dominance ratio above the comparison rate.
+func DominantWriteBytes(comparison, candidate float64) bool {
+	return suspectIsDominant(comparison, candidate)
+}
+
 func formatSyscwRatio(suspect, victim float64) string {
 	if suspect < minimumMeaningfulSyscwPerSecond {
 		return "-"
@@ -249,6 +286,18 @@ func suspectSyscwIsDominant(victim, suspect float64) bool {
 		return true
 	}
 	return suspect/victim >= dominantSyscwRatio
+}
+
+// MeaningfulWriteSyscalls reports whether syscw activity crosses the
+// conservative fallback threshold.
+func MeaningfulWriteSyscalls(averagePerSecond float64) bool {
+	return averagePerSecond >= minimumMeaningfulSyscwPerSecond
+}
+
+// DominantWriteSyscalls reports whether meaningful candidate syscw activity is
+// at least the configured dominance ratio above the comparison rate.
+func DominantWriteSyscalls(comparison, candidate float64) bool {
+	return suspectSyscwIsDominant(comparison, candidate)
 }
 
 func syscallPressureClassification(meaningful bool) string {

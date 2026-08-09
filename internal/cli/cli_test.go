@@ -202,6 +202,45 @@ func TestParseDiagnoseNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	}
 }
 
+func TestParseDiagnoseNoisyNeighborDiscoversSuspects(t *testing.T) {
+	options, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--discover-suspects",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.DiscoverSuspects || options.Suspect != "" {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseDiagnoseNoisyNeighborRequiresSuspectMode(t *testing.T) {
+	_, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provide either --suspect <vm> or --discover-suspects") {
+		t.Fatalf("error = %v, want suspect mode usage error", err)
+	}
+}
+
+func TestParseDiagnoseNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
+	_, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+		"--discover-suspects",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--suspect and --discover-suspects cannot be used together") {
+		t.Fatalf("error = %v, want selector conflict", err)
+	}
+}
+
 func TestParseDiagnoseNoisyNeighborOutputPath(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",

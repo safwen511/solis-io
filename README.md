@@ -32,6 +32,7 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 - Capture and watch read-only host block counters from `/sys/class/block/<device>/stat` across storage layers.
 - Watch and summarize per-QEMU I/O using `/proc/<qemu-pid>/io`.
 - Combine experiment, storage-topology, and QEMU-process evidence into a noisy-neighbor verdict.
+- Discover a dominant same-storage suspect automatically when only the victim VM is known.
 - Optionally include an experimental host/storage-path eBPF block-latency histogram in diagnoses and captures.
 - Save diagnosis output to an exact path or a timestamped file without changing the diagnosis text.
 - Capture experiment, incident, topology, storage, QEMU I/O, diagnosis, and metadata evidence in a timestamped directory.
@@ -63,6 +64,7 @@ sudo ./solis qemu io-watch --victim <name> --suspect <name> --duration 10s --int
 sudo ./solis qemu io-summary --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency
+sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/diagnosis
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/captures
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures

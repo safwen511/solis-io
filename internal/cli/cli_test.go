@@ -13,6 +13,8 @@ import (
 	"github.com/safwen511/solis-io/internal/capture"
 	solisconfig "github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/guest"
+	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/storagevm"
 	"github.com/safwen511/solis-io/internal/version"
 )
 
@@ -1150,5 +1152,96 @@ func TestParseStatusArgsValidatesOptions(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Errorf("args %v: error = %v, want %q", test.args, err, test.want)
 		}
+	}
+}
+
+func TestParseVMStorageStatsArgs(t *testing.T) {
+	options, err := parseVMStorageStatsArgs([]string{
+		"vm", "storage-stats", "--victim", "a-web", "--suspect", "b-stress", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Victim != "a-web" || options.Suspect != "b-stress" || options.Duration != 10*time.Second || options.Interval != time.Second || !options.JSON {
+		t.Fatalf("options = %#v", options)
+	}
+	all, err := parseVMStorageStatsArgs([]string{"vm", "storage-stats", "--all-vms", "--duration", "5s", "--interval", "500ms", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !all.AllVMs || all.Duration != 5*time.Second || all.Interval != 500*time.Millisecond {
+		t.Fatalf("all options = %#v", all)
+	}
+}
+
+func TestParseVMStorageStatsArgsValidation(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"vm", "storage-stats"}, want: "--json is required"},
+		{args: []string{"vm", "storage-stats", "--suspect", "b-stress", "--json"}, want: "--suspect requires --victim"},
+		{args: []string{"vm", "storage-stats", "--all-vms", "--victim", "a-web", "--json"}, want: "--all-vms cannot be combined"},
+		{args: []string{"vm", "storage-stats", "--duration", "1s", "--interval", "2s", "--json"}, want: "--interval must not exceed --duration"},
+	} {
+		_, err := parseVMStorageStatsArgs(test.args)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("args %v: error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestSelectVMStorageStatsTargets(t *testing.T) {
+	vms := []inventory.VM{
+		{Name: "b-stress", State: "running"},
+		{Name: "a-web", State: "running"},
+		{Name: "a-db", State: "shut off"},
+	}
+	pair, err := selectVMStorageStatsTargets(vms, vmStorageStatsOptions{Victim: "a-web", Suspect: "b-stress"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pair) != 2 || pair[0].Name != "a-web" || pair[1].Name != "b-stress" {
+		t.Fatalf("pair = %#v", pair)
+	}
+	all, err := selectVMStorageStatsTargets(vms, vmStorageStatsOptions{AllVMs: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Name != "a-web" || all[1].Name != "b-stress" {
+		t.Fatalf("all = %#v", all)
+	}
+	stopped, err := selectVMStorageStatsTargets(vms, vmStorageStatsOptions{Victim: "a-db"})
+	if err != nil || len(stopped) != 1 || stopped[0].State != "shut off" {
+		t.Fatalf("stopped explicit target = %#v, error = %v", stopped, err)
+	}
+	if _, err := selectVMStorageStatsTargets(vms, vmStorageStatsOptions{Victim: "missing"}); err == nil || !strings.Contains(err.Error(), "VM not found: missing") {
+		t.Fatalf("unknown VM error = %v", err)
+	}
+}
+
+func TestWriteVMStorageStatsOutputIsPrivate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "stats.json")
+	report := storagevm.VMStorageStatsReport{SchemaVersion: storagevm.SchemaVersion, VMs: []storagevm.VMStorageStatsVM{}}
+	if err := writeVMStorageStatsOutput(path, report); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", info.Mode().Perm())
+	}
+	var decoded storagevm.VMStorageStatsReport
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SchemaVersion != storagevm.SchemaVersion {
+		t.Fatalf("decoded = %#v", decoded)
 	}
 }

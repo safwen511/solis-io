@@ -10,11 +10,15 @@ import (
 
 // CgroupIOCounters is one cumulative cgroup v2 io.stat device row.
 type CgroupIOCounters struct {
-	Device     string
-	ReadBytes  uint64
-	WriteBytes uint64
-	ReadOps    uint64
-	WriteOps   uint64
+	Device          string
+	ReadBytes       uint64
+	WriteBytes      uint64
+	ReadOps         uint64
+	WriteOps        uint64
+	DiscardBytes    uint64
+	DiscardOps      uint64
+	DiscardBytesSet bool
+	DiscardOpsSet   bool
 }
 
 // ParseCgroupIOStat parses cgroup v2 io.stat without combining stacked block
@@ -54,6 +58,12 @@ func ParseCgroupIOStat(data string) ([]CgroupIOCounters, error) {
 				row.ReadOps = value
 			case "wios":
 				row.WriteOps = value
+			case "dbytes":
+				row.DiscardBytes = value
+				row.DiscardBytesSet = true
+			case "dios":
+				row.DiscardOps = value
+				row.DiscardOpsSet = true
 			}
 		}
 		rows = append(rows, row)
@@ -99,12 +109,24 @@ func DeltaCgroupIOStat(vm, cgroupPath string, before, after []CgroupIOCounters) 
 			delta.CounterReset = delta.CounterReset || reset
 			delta.WriteOps, reset = validationCounterDelta(start.WriteOps, end.WriteOps)
 			delta.CounterReset = delta.CounterReset || reset
+			delta.DiscardBytesAvailable = start.DiscardBytesSet && end.DiscardBytesSet
+			if delta.DiscardBytesAvailable {
+				delta.DiscardBytes, reset = validationCounterDelta(start.DiscardBytes, end.DiscardBytes)
+				delta.CounterReset = delta.CounterReset || reset
+			}
+			delta.DiscardOpsAvailable = start.DiscardOpsSet && end.DiscardOpsSet
+			if delta.DiscardOpsAvailable {
+				delta.DiscardOps, reset = validationCounterDelta(start.DiscardOps, end.DiscardOps)
+				delta.CounterReset = delta.CounterReset || reset
+			}
 			if delta.CounterReset {
 				delta.Status = "counter_reset"
 				delta.ReadBytes = 0
 				delta.WriteBytes = 0
 				delta.ReadOps = 0
 				delta.WriteOps = 0
+				delta.DiscardBytes = 0
+				delta.DiscardOps = 0
 			}
 		}
 		deltas = append(deltas, delta)
@@ -122,6 +144,8 @@ type VirshBlockCounters struct {
 	WriteOps    uint64
 	ReadTimeNS  uint64
 	WriteTimeNS uint64
+	FlushOps    uint64
+	FlushTimeNS uint64
 }
 
 // ParseVirshDomstatsBlock parses fixed libvirt block-stat keys. Unknown keys
@@ -170,19 +194,28 @@ func ParseVirshDomstatsBlock(data string) ([]VirshBlockCounters, error) {
 			return nil, fmt.Errorf("duplicate virsh domstats block identity %q", block)
 		}
 		seenBlocks[block] = true
-		var err error
-		for key, destination := range map[string]*uint64{
-			"rd.bytes": &row.ReadBytes, "wr.bytes": &row.WriteBytes,
-			"rd.reqs": &row.ReadOps, "wr.reqs": &row.WriteOps,
-			"rd.times": &row.ReadTimeNS, "wr.times": &row.WriteTimeNS,
-		} {
-			if fields[key] == "" {
+		orderedNumericFields := []struct {
+			key         string
+			destination *uint64
+		}{
+			{key: "rd.bytes", destination: &row.ReadBytes},
+			{key: "wr.bytes", destination: &row.WriteBytes},
+			{key: "rd.reqs", destination: &row.ReadOps},
+			{key: "wr.reqs", destination: &row.WriteOps},
+			{key: "rd.times", destination: &row.ReadTimeNS},
+			{key: "wr.times", destination: &row.WriteTimeNS},
+			{key: "fl.reqs", destination: &row.FlushOps},
+			{key: "fl.times", destination: &row.FlushTimeNS},
+		}
+		for _, numeric := range orderedNumericFields {
+			if fields[numeric.key] == "" {
 				continue
 			}
-			*destination, err = strconv.ParseUint(fields[key], 10, 64)
+			value, err := strconv.ParseUint(fields[numeric.key], 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("parse virsh domstats %s for %s: %w", key, block, err)
+				return nil, fmt.Errorf("parse virsh domstats %s for %s: %w", numeric.key, block, err)
 			}
+			*numeric.destination = value
 		}
 		rows = append(rows, row)
 	}
@@ -227,6 +260,10 @@ func DeltaVirshBlockStats(vm string, before, after []VirshBlockCounters) ([]Virs
 			delta.CounterReset = delta.CounterReset || reset
 			delta.WriteTimeNS, reset = validationCounterDelta(start.WriteTimeNS, end.WriteTimeNS)
 			delta.CounterReset = delta.CounterReset || reset
+			delta.FlushOps, reset = validationCounterDelta(start.FlushOps, end.FlushOps)
+			delta.CounterReset = delta.CounterReset || reset
+			delta.FlushTimeNS, reset = validationCounterDelta(start.FlushTimeNS, end.FlushTimeNS)
+			delta.CounterReset = delta.CounterReset || reset
 			if delta.CounterReset {
 				delta.Status = "counter_reset"
 				delta.ReadBytes = 0
@@ -235,6 +272,8 @@ func DeltaVirshBlockStats(vm string, before, after []VirshBlockCounters) ([]Virs
 				delta.WriteOps = 0
 				delta.ReadTimeNS = 0
 				delta.WriteTimeNS = 0
+				delta.FlushOps = 0
+				delta.FlushTimeNS = 0
 			}
 		}
 		deltas = append(deltas, delta)

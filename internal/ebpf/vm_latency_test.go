@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -287,8 +288,8 @@ func TestBuildVMCgroupMappingsUsesOnlySafeProcMetadata(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cgroupRoot, strings.TrimPrefix(primary, "/")), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Only status and cgroup are present. cmdline and environ deliberately do
-	// not exist, proving the mapper neither requires nor opens them.
+	// Only status, cgroup, and stat are present. cmdline and environ deliberately
+	// do not exist, proving the mapper neither requires nor opens them.
 	writeFakeProcProcess(t, procRoot, 204, "qemu-system-x86", primary)
 	mappings, err := buildVMCgroupMappings([]inventory.VM{{Name: "a-web", QEMUPID: "204"}}, cgroupRoot, procRoot)
 	if err != nil {
@@ -296,6 +297,50 @@ func TestBuildVMCgroupMappingsUsesOnlySafeProcMetadata(t *testing.T) {
 	}
 	if mappings[0].PrimaryID == 0 || mappings[0].MappingQuality != "cgroup_v2_inode_partial" {
 		t.Fatalf("mapping = %#v", mappings[0])
+	}
+}
+
+func TestValidateMappedQEMUProcessUsesSafeStableIdentity(t *testing.T) {
+	procRoot := t.TempDir()
+	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
+	primary := scope + "/libvirt/emulator"
+	writeFakeProcProcess(t, procRoot, 301, "qemu-system-x86", primary)
+	mapping := VMBlockCgroupMapping{
+		Name: "a-web", QEMUPID: 301, PrimaryPath: primary,
+		CgroupPaths: []string{scope, primary}, MappingQuality: "cgroup_v2_inode_tree",
+	}
+	identity, err := validateMappedQEMUProcess(mapping, procRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.PID != 301 || identity.CgroupPath != primary || identity.MachineScope != scope || identity.StartTimeTicks != 12345 {
+		t.Fatalf("identity = %#v", identity)
+	}
+	if _, err := os.Lstat(filepath.Join(procRoot, "301", "cmdline")); !os.IsNotExist(err) {
+		t.Fatalf("test unexpectedly supplied cmdline: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(procRoot, "301", "environ")); !os.IsNotExist(err) {
+		t.Fatalf("test unexpectedly supplied environ: %v", err)
+	}
+
+	writeFakeProcProcess(t, procRoot, 302, "sleep", primary)
+	nonQEMU := mapping
+	nonQEMU.QEMUPID = 302
+	if _, err := validateMappedQEMUProcess(nonQEMU, procRoot); err == nil || !strings.Contains(err.Error(), "not a QEMU") {
+		t.Fatalf("non-QEMU error = %v", err)
+	}
+	writeFakeProcProcess(t, procRoot, 303, "qemu-system-x86", "/user.slice/session.scope")
+	outside := mapping
+	outside.QEMUPID = 303
+	outside.PrimaryPath = "/user.slice/session.scope"
+	outside.CgroupPaths = []string{"/user.slice/session.scope"}
+	if _, err := validateMappedQEMUProcess(outside, procRoot); err == nil || !strings.Contains(err.Error(), "not in a libvirt") {
+		t.Fatalf("outside-cgroup error = %v", err)
+	}
+	stale := mapping
+	stale.QEMUPID = 999
+	if _, err := validateMappedQEMUProcess(stale, procRoot); err == nil {
+		t.Fatal("expected stale PID error")
 	}
 }
 
@@ -415,6 +460,16 @@ func TestVirshDomstatsDeltaStatesAndDuplicateRejection(t *testing.T) {
 	}
 }
 
+func TestVirshDomstatsMalformedNumericErrorIsDeterministic(t *testing.T) {
+	input := "block.0.name=vda\nblock.0.rd.bytes=bad-read\nblock.0.wr.bytes=bad-write\nblock.0.rd.reqs=bad-reqs\n"
+	for iteration := 0; iteration < 50; iteration++ {
+		_, err := ParseVirshDomstatsBlock(input)
+		if err == nil || !strings.Contains(err.Error(), "parse virsh domstats rd.bytes for vda") {
+			t.Fatalf("iteration %d error = %v", iteration, err)
+		}
+	}
+}
+
 func writeFakeProcProcess(t *testing.T, procRoot string, pid int, name, cgroup string) {
 	t.Helper()
 	root := filepath.Join(procRoot, strconv.Itoa(pid))
@@ -425,6 +480,15 @@ func writeFakeProcProcess(t *testing.T, procRoot string, pid int, name, cgroup s
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "cgroup"), []byte("0::"+cgroup+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statFields := []string{"S"}
+	for range 18 {
+		statFields = append(statFields, "0")
+	}
+	statFields = append(statFields, "12345")
+	stat := fmt.Sprintf("%d (%s) %s\n", pid, name, strings.Join(statFields, " "))
+	if err := os.WriteFile(filepath.Join(root, "stat"), []byte(stat), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

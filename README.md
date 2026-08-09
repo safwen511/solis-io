@@ -29,6 +29,7 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Parse workload experiment reports and summarize throughput, latency, failures, fio activity, and disk utilization.
 - Explain report-backed incidents using application slowdown and fio evidence.
 - Collect read-only host storage snapshots and per-layer block-device watch deltas.
+- Collect time-bounded per-VM storage validation counters from cgroup v2 `io.stat`, `virsh domstats --block`, and optional QEMU procfs accounting.
 - Sample per-QEMU `/proc/<pid>/io` counters and attribute write activity using byte rates, with conservative write-syscall pressure fallback when byte counters do not advance meaningfully.
 - Automatically discover same-physical-disk suspect VMs and rank them by write-byte or syscall pressure.
 - Run report-backed or live-only noisy-neighbor diagnosis.
@@ -83,6 +84,8 @@ sudo ./solis status --watch --duration 1s --interval 1s --every 2s --iterations 
 ./solis trace plan --victim <name> --suspect <name>
 ./solis storage snapshot --victim <name> --suspect <name>
 ./solis storage watch --victim <name> --suspect <name> --duration 10s --interval 2s
+./solis vm storage-stats --victim a-web --suspect b-stress --duration 10s --interval 1s --json
+./solis vm storage-stats --all-vms --duration 10s --interval 1s --json
 sudo ./solis qemu io-watch --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis qemu io-summary --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis diagnose noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s
@@ -118,6 +121,14 @@ The experiment package parses existing ApacheBench and fio text reports. It calc
 ### QEMU process I/O accounting
 
 Solis samples Linux process counters from `/proc/<qemu-pid>/io` and calculates per-interval and observation-window read/write rates. Byte counters remain the primary attribution signal. When they are zero or low, Solis uses `AVG_SYSCW/S` and `MAX_SYSCW/S` as a conservative write-syscall pressure signal; those syscall rates indicate activity, not exact bytes written. Access is controlled by normal Linux procfs permissions, and Solis does not elevate privileges internally.
+
+### Per-VM storage validation counters
+
+`solis vm storage-stats` collects two read-only samples around an observation window. Cgroup v2 `io.stat` provides byte, operation, and optional discard-counter deltas for the mapped libvirt VM cgroup. The collector verifies that the source cgroup inode is unchanged across the window; an emulator-cgroup fallback is labelled partial, and arbitrary vCPU/child cgroups are not treated as aggregate VM accounting. `virsh domstats <vm> --block` provides virtual-disk request, byte, flush, and cumulative timing deltas. `/proc/<qemu-pid>/io` provides optional process-accounting correlation only after the PID is verified as the same QEMU process in the same libvirt machine scope at both samples; insufficient procfs permissions make only that section unavailable.
+
+With no selector, or with `--all-vms`, the command targets all inventory VMs currently reported as running. Explicit `--victim` and optional `--suspect` selectors retain a named VM even when it is shut off so its unavailable state can be represented. JSON is required for now, and `--output` atomically writes the same document to a mode-`0600` regular file while refusing symbolic-link targets.
+
+These are validation counters, not per-VM host block-latency measurements. Missing baselines, disappeared rows, duplicate identities, and counter resets are explicit and never converted into apparent window activity. Device-mapper, LVM, partition, and physical-device rows remain separate because summing stacked layers would double-count I/O. The command is intended to validate the cgroup and libvirt evidence used by the experimental `ebpf vm-block-latency` design; it does not prove exact physical-device latency, customer impact, or root cause.
 
 ### Experimental per-VM block latency
 

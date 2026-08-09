@@ -20,6 +20,17 @@ const (
 	defaultProcRoot   = "/proc"
 )
 
+// QEMUProcessIdentity is the privacy-safe process identity used to bind
+// counter samples to one known libvirt QEMU process. It deliberately excludes
+// process arguments and environments.
+type QEMUProcessIdentity struct {
+	PID            int
+	Name           string
+	CgroupPath     string
+	MachineScope   string
+	StartTimeTicks uint64
+}
+
 // BuildVMCgroupMappings maps known QEMU PIDs to cgroup v2 inode IDs without
 // reading process arguments, process environments, or process memory.
 func BuildVMCgroupMappings(vms []inventory.VM) ([]VMBlockCgroupMapping, error) {
@@ -70,6 +81,12 @@ func buildVMCgroupMappings(vms []inventory.VM, cgroupRoot, procRoot string) ([]V
 			continue
 		}
 		mapping.PrimaryPath = primary
+		startTime, err := readProcessStartTime(procRoot, pid)
+		if err != nil {
+			mapping.MappingQuality = "stale_or_unreadable_qemu_pid"
+			mappings = append(mappings, mapping)
+			continue
+		}
 
 		paths, err := relatedLibvirtCgroupPaths(cgroupRoot, primary)
 		if err != nil {
@@ -91,6 +108,12 @@ func buildVMCgroupMappings(vms []inventory.VM, cgroupRoot, procRoot string) ([]V
 		}
 		confirmedPrimary, err := parseUnifiedCgroupPath(string(confirmedCgroup))
 		if err != nil || confirmedPrimary != primary {
+			mapping.MappingQuality = "stale_or_reused_qemu_pid"
+			mappings = append(mappings, mapping)
+			continue
+		}
+		confirmedStartTime, err := readProcessStartTime(procRoot, pid)
+		if err != nil || confirmedStartTime != startTime {
 			mapping.MappingQuality = "stale_or_reused_qemu_pid"
 			mappings = append(mappings, mapping)
 			continue
@@ -124,6 +147,61 @@ func buildVMCgroupMappings(vms []inventory.VM, cgroupRoot, procRoot string) ([]V
 		return nil, err
 	}
 	return mappings, nil
+}
+
+// ValidateMappedQEMUProcess revalidates one mapped PID using only status or
+// comm, cgroup, and stat start-time metadata. The PID must still name a QEMU
+// process, remain in the same libvirt machine scope, and match the mapper's
+// primary cgroup path.
+func ValidateMappedQEMUProcess(mapping VMBlockCgroupMapping) (QEMUProcessIdentity, error) {
+	return validateMappedQEMUProcess(mapping, defaultProcRoot)
+}
+
+func validateMappedQEMUProcess(mapping VMBlockCgroupMapping, procRoot string) (QEMUProcessIdentity, error) {
+	if mapping.QEMUPID <= 0 {
+		return QEMUProcessIdentity{}, errors.New("QEMU PID is unavailable")
+	}
+	if mapping.MappingQuality != "cgroup_v2_inode_tree" && mapping.MappingQuality != "cgroup_v2_inode_partial" {
+		return QEMUProcessIdentity{}, fmt.Errorf("QEMU PID mapping is not verified: %s", firstNonEmpty(mapping.MappingQuality, "unavailable"))
+	}
+	name, err := readSafeProcessName(procRoot, mapping.QEMUPID)
+	if err != nil {
+		return QEMUProcessIdentity{}, fmt.Errorf("read QEMU process identity: %w", err)
+	}
+	if !isQEMUProcessName(name) {
+		return QEMUProcessIdentity{}, fmt.Errorf("PID %d is not a QEMU process", mapping.QEMUPID)
+	}
+	cgroupData, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(mapping.QEMUPID), "cgroup"))
+	if err != nil {
+		return QEMUProcessIdentity{}, fmt.Errorf("read QEMU cgroup identity: %w", err)
+	}
+	cgroupPath, err := parseUnifiedCgroupPath(string(cgroupData))
+	if err != nil {
+		return QEMUProcessIdentity{}, fmt.Errorf("read QEMU cgroup identity: %w", err)
+	}
+	machineScope, err := libvirtMachineScopeFromPath(cgroupPath)
+	if err != nil {
+		return QEMUProcessIdentity{}, fmt.Errorf("QEMU process is not in a libvirt machine scope: %w", err)
+	}
+	if cgroupPath != mapping.PrimaryPath || !containsExactString(mapping.CgroupPaths, cgroupPath) || !containsExactString(mapping.CgroupPaths, machineScope) {
+		return QEMUProcessIdentity{}, fmt.Errorf("QEMU process cgroup %q no longer matches mapped libvirt scope", cgroupPath)
+	}
+	startTime, err := readProcessStartTime(procRoot, mapping.QEMUPID)
+	if err != nil {
+		return QEMUProcessIdentity{}, fmt.Errorf("read QEMU process start time: %w", err)
+	}
+	return QEMUProcessIdentity{
+		PID: mapping.QEMUPID, Name: name, CgroupPath: cgroupPath,
+		MachineScope: machineScope, StartTimeTicks: startTime,
+	}, nil
+}
+
+// SameQEMUProcessIdentity reports whether two samples refer to the same
+// process instance and libvirt cgroup identity.
+func SameQEMUProcessIdentity(left, right QEMUProcessIdentity) bool {
+	return left.PID > 0 && left.PID == right.PID && left.Name == right.Name &&
+		left.CgroupPath == right.CgroupPath && left.MachineScope == right.MachineScope &&
+		left.StartTimeTicks > 0 && left.StartTimeTicks == right.StartTimeTicks
 }
 
 // IndexVMCgroupMappings constructs an unambiguous cgroup-ID-to-VM index.
@@ -187,18 +265,12 @@ func relatedLibvirtCgroupPaths(cgroupRoot, primary string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	scope, err := libvirtMachineScopeFromPath(primary)
+	if err != nil {
+		return nil, err
+	}
 	parts := strings.Split(strings.TrimPrefix(primary, "/"), "/")
-	scopeIndex := -1
-	for index, part := range parts {
-		if index > 0 && parts[index-1] == "machine.slice" && isLibvirtQEMUScope(part) {
-			scopeIndex = index
-			break
-		}
-	}
-	if scopeIndex < 0 {
-		return nil, errors.New("libvirt QEMU machine scope not found")
-	}
-	scope := "/" + filepath.Join(parts[:scopeIndex+1]...)
+	scopeIndex := len(strings.Split(strings.TrimPrefix(scope, "/"), "/")) - 1
 	scopeDiskPath, err := rootedCgroupPath(cgroupRoot, scope)
 	if err != nil {
 		return nil, err
@@ -232,6 +304,20 @@ func relatedLibvirtCgroupPaths(cgroupRoot, primary string) ([]string, error) {
 	return sortedUniqueStrings(paths), err
 }
 
+func libvirtMachineScopeFromPath(path string) (string, error) {
+	path, err := cleanCgroupPath(path)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	for index, part := range parts {
+		if index > 0 && parts[index-1] == "machine.slice" && isLibvirtQEMUScope(part) {
+			return "/" + filepath.Join(parts[:index+1]...), nil
+		}
+	}
+	return "", errors.New("libvirt QEMU machine scope not found")
+}
+
 func readSafeProcessName(procRoot string, pid int) (string, error) {
 	processRoot := filepath.Join(procRoot, strconv.Itoa(pid))
 	status, statusErr := os.ReadFile(filepath.Join(processRoot, "status"))
@@ -253,6 +339,29 @@ func readSafeProcessName(procRoot string, pid int) (string, error) {
 		return "", commErr
 	}
 	return "", errors.New("process name unavailable")
+}
+
+func readProcessStartTime(procRoot string, pid int) (uint64, error) {
+	data, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, err
+	}
+	line := strings.TrimSpace(string(data))
+	closing := strings.LastIndex(line, ")")
+	if closing < 0 || closing+1 >= len(line) {
+		return 0, errors.New("malformed process stat")
+	}
+	// The suffix starts at field 3 (state); starttime is field 22.
+	fields := strings.Fields(line[closing+1:])
+	const startTimeIndex = 22 - 3
+	if len(fields) <= startTimeIndex {
+		return 0, errors.New("process stat starttime unavailable")
+	}
+	value, err := strconv.ParseUint(fields[startTimeIndex], 10, 64)
+	if err != nil || value == 0 {
+		return 0, errors.New("invalid process stat starttime")
+	}
+	return value, nil
 }
 
 func parseProcessStatusName(data string) string {
@@ -278,6 +387,15 @@ func isLibvirtQEMUScope(component string) bool {
 	}
 	middle := strings.TrimSuffix(strings.TrimPrefix(component, "machine-qemu"), ".scope")
 	return middle != ""
+}
+
+func containsExactString(values []string, wanted string) bool {
+	for _, value := range values {
+		if filepath.Clean(value) == filepath.Clean(wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func cgroupInode(cgroupRoot, path string) (uint64, error) {

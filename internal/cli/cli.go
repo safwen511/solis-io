@@ -35,6 +35,7 @@ import (
 	"github.com/safwen511/solis-io/internal/servicehealth"
 	statusview "github.com/safwen511/solis-io/internal/status"
 	"github.com/safwen511/solis-io/internal/storage"
+	"github.com/safwen511/solis-io/internal/storagevm"
 	"github.com/safwen511/solis-io/internal/traceplan"
 	"github.com/safwen511/solis-io/internal/version"
 	watcher "github.com/safwen511/solis-io/internal/watch"
@@ -121,6 +122,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runTracePlan(runtimeConfig, victim, suspect, stdout)
 	case "storage":
 		return runStorageCommand(runtimeConfig, args, stdout)
+	case "vm":
+		options, err := parseVMStorageStatsArgs(args)
+		if err != nil {
+			return err
+		}
+		return runVMStorageStats(runtimeConfig, options, stdout)
 	case "qemu":
 		return runQEMUCommand(runtimeConfig, args, stdout)
 	case "diagnose":
@@ -185,6 +192,7 @@ const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duratio
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const ebpfVMBlockLatencyUsage = "usage: solis ebpf vm-block-latency [--duration <duration>] [--interval <duration>] [--device <block-device-name>] [--victim <vm>] [--suspect <vm>] [--all-vms] [--output <path>] --json"
+const vmStorageStatsUsage = "usage: solis vm storage-stats [--victim <vm>] [--suspect <vm>] [--all-vms] [--duration <duration>] [--interval <duration>] [--output <path>] --json"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
 const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
@@ -204,6 +212,16 @@ type ebpfVMBlockLatencyOptions struct {
 	Duration time.Duration
 	Interval time.Duration
 	Device   string
+	Victim   string
+	Suspect  string
+	AllVMs   bool
+	Output   string
+	JSON     bool
+}
+
+type vmStorageStatsOptions struct {
+	Duration time.Duration
+	Interval time.Duration
 	Victim   string
 	Suspect  string
 	AllVMs   bool
@@ -685,6 +703,71 @@ func parseEBPFVMBlockLatencyArgs(args []string) (ebpfVMBlockLatencyOptions, erro
 	}
 	if options.AllVMs && (options.Victim != "" || options.Suspect != "") {
 		return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: --all-vms cannot be combined with --victim or --suspect", ebpfVMBlockLatencyUsage)
+	}
+	return options, nil
+}
+
+func parseVMStorageStatsArgs(args []string) (vmStorageStatsOptions, error) {
+	if len(args) < 2 || args[0] != "vm" || args[1] != "storage-stats" {
+		return vmStorageStatsOptions{}, errors.New(vmStorageStatsUsage)
+	}
+	options := vmStorageStatsOptions{Duration: 10 * time.Second, Interval: time.Second}
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); index++ {
+		option := args[index]
+		if seen[option] {
+			return vmStorageStatsOptions{}, fmt.Errorf("%s: duplicate option %s", vmStorageStatsUsage, option)
+		}
+		seen[option] = true
+		switch option {
+		case "--json":
+			options.JSON = true
+		case "--all-vms":
+			options.AllVMs = true
+		case "--duration", "--interval", "--victim", "--suspect", "--output":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return vmStorageStatsOptions{}, fmt.Errorf("%s: missing value for %s", vmStorageStatsUsage, option)
+			}
+			index++
+			value := strings.TrimSpace(args[index])
+			if value == "" {
+				return vmStorageStatsOptions{}, fmt.Errorf("%s: empty value for %s", vmStorageStatsUsage, option)
+			}
+			switch option {
+			case "--duration":
+				duration, err := time.ParseDuration(value)
+				if err != nil || duration <= 0 {
+					return vmStorageStatsOptions{}, fmt.Errorf("%s: invalid --duration %q", vmStorageStatsUsage, value)
+				}
+				options.Duration = duration
+			case "--interval":
+				interval, err := time.ParseDuration(value)
+				if err != nil || interval <= 0 {
+					return vmStorageStatsOptions{}, fmt.Errorf("%s: invalid --interval %q", vmStorageStatsUsage, value)
+				}
+				options.Interval = interval
+			case "--victim":
+				options.Victim = value
+			case "--suspect":
+				options.Suspect = value
+			case "--output":
+				options.Output = value
+			}
+		default:
+			return vmStorageStatsOptions{}, fmt.Errorf("%s: unknown option %s", vmStorageStatsUsage, option)
+		}
+	}
+	if !options.JSON {
+		return vmStorageStatsOptions{}, fmt.Errorf("%s: --json is required", vmStorageStatsUsage)
+	}
+	if options.Interval > options.Duration {
+		return vmStorageStatsOptions{}, fmt.Errorf("%s: --interval must not exceed --duration", vmStorageStatsUsage)
+	}
+	if options.AllVMs && (options.Victim != "" || options.Suspect != "") {
+		return vmStorageStatsOptions{}, fmt.Errorf("%s: --all-vms cannot be combined with --victim or --suspect", vmStorageStatsUsage)
+	}
+	if options.Suspect != "" && options.Victim == "" {
+		return vmStorageStatsOptions{}, fmt.Errorf("%s: --suspect requires --victim", vmStorageStatsUsage)
 	}
 	return options, nil
 }
@@ -2066,6 +2149,75 @@ func runEBPFVMBlockLatency(runtimeConfig solisconfig.Runtime, options ebpfVMBloc
 	return nil
 }
 
+func runVMStorageStats(runtimeConfig solisconfig.Runtime, options vmStorageStatsOptions, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return fmt.Errorf("vm storage-stats error: %w", err)
+	}
+	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(runtimeConfig))
+	targets, err := selectVMStorageStatsTargets(vms, options)
+	if err != nil {
+		return fmt.Errorf("vm storage-stats error: %w", err)
+	}
+	mappings, err := ebpf.BuildVMCgroupMappings(targets)
+	if err != nil {
+		return fmt.Errorf("vm storage-stats error: map libvirt cgroups: %w", err)
+	}
+	report, err := storagevm.NewCollector().Collect(context.Background(), storagevm.CollectRequest{
+		VMs: targets, Mappings: mappings, Duration: options.Duration, Interval: options.Interval,
+		ConfigSource: runtimeConfig.Source, LibvirtURI: runtimeConfig.Settings.LibvirtURI,
+	})
+	if err != nil {
+		return fmt.Errorf("vm storage-stats error: %w", err)
+	}
+	if options.Output != "" {
+		if err := writeVMStorageStatsOutput(options.Output, report); err != nil {
+			return fmt.Errorf("vm storage-stats error: %w", err)
+		}
+	}
+	if err := storagevm.WriteJSON(w, report); err != nil {
+		return fmt.Errorf("vm storage-stats error: %w", err)
+	}
+	return nil
+}
+
+func selectVMStorageStatsTargets(vms []inventory.VM, options vmStorageStatsOptions) ([]inventory.VM, error) {
+	requested := []string{}
+	if options.Victim != "" {
+		requested = append(requested, options.Victim)
+	}
+	if options.Suspect != "" && options.Suspect != options.Victim {
+		requested = append(requested, options.Suspect)
+	}
+	if len(requested) == 0 {
+		targets := make([]inventory.VM, 0, len(vms))
+		for _, vm := range vms {
+			if strings.EqualFold(strings.TrimSpace(vm.State), "running") {
+				targets = append(targets, vm)
+			}
+		}
+		if len(targets) == 0 {
+			return nil, errors.New("no running VMs found")
+		}
+		sort.Slice(targets, func(i, j int) bool { return targets[i].Name < targets[j].Name })
+		return targets, nil
+	}
+	targets := make([]inventory.VM, 0, len(requested))
+	for _, name := range requested {
+		vm, ok := inventory.FindByName(vms, name)
+		if !ok {
+			return nil, fmt.Errorf("VM not found: %s", name)
+		}
+		targets = append(targets, *vm)
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].Name < targets[j].Name })
+	return targets, nil
+}
+
+func writeVMStorageStatsOutput(path string, report storagevm.VMStorageStatsReport) error {
+	return storagevm.WriteJSONFile(path, report)
+}
+
 func selectVMBlockLatencyTargets(vms []inventory.VM, options ebpfVMBlockLatencyOptions) ([]inventory.VM, error) {
 	requested := []string{}
 	if options.Victim != "" {
@@ -2609,6 +2761,7 @@ Commands:
   solis trace plan --victim <name> --suspect <name>
   solis storage snapshot --victim <name> --suspect <name>
   solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
+  solis vm storage-stats [--victim <vm>] [--suspect <vm>] [--all-vms] [--duration <duration>] [--interval <duration>] [--output <path>] --json
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]

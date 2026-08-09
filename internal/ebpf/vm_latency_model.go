@@ -108,15 +108,19 @@ type VMBlockLatencyValidation struct {
 
 // CgroupIOStatDelta is a per-VM, per-device cgroup v2 counter delta.
 type CgroupIOStatDelta struct {
-	VM           string `json:"vm"`
-	CgroupPath   string `json:"cgroup_path"`
-	Device       string `json:"device"`
-	Status       string `json:"status"`
-	CounterReset bool   `json:"counter_reset"`
-	ReadBytes    uint64 `json:"read_bytes"`
-	WriteBytes   uint64 `json:"write_bytes"`
-	ReadOps      uint64 `json:"read_ops"`
-	WriteOps     uint64 `json:"write_ops"`
+	VM                    string `json:"vm"`
+	CgroupPath            string `json:"cgroup_path"`
+	Device                string `json:"device"`
+	Status                string `json:"status"`
+	CounterReset          bool   `json:"counter_reset"`
+	ReadBytes             uint64 `json:"read_bytes"`
+	WriteBytes            uint64 `json:"write_bytes"`
+	ReadOps               uint64 `json:"read_ops"`
+	WriteOps              uint64 `json:"write_ops"`
+	DiscardBytes          uint64 `json:"discard_bytes"`
+	DiscardOps            uint64 `json:"discard_ops"`
+	DiscardBytesAvailable bool   `json:"discard_bytes_available"`
+	DiscardOpsAvailable   bool   `json:"discard_ops_available"`
 }
 
 // VirshBlockDelta is a per-VM virtual-disk counter delta. Time is cumulative
@@ -132,6 +136,8 @@ type VirshBlockDelta struct {
 	WriteOps     uint64 `json:"write_ops"`
 	ReadTimeNS   uint64 `json:"read_time_ns"`
 	WriteTimeNS  uint64 `json:"write_time_ns"`
+	FlushOps     uint64 `json:"flush_ops"`
+	FlushTimeNS  uint64 `json:"flush_time_ns"`
 }
 
 // QEMUPressureSignal is pressure correlation only, not request latency.

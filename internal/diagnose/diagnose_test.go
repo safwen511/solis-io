@@ -8,9 +8,11 @@ import (
 
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
+	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
+	"github.com/safwen511/solis-io/internal/storage"
 )
 
 func TestVerdict(t *testing.T) {
@@ -95,6 +97,108 @@ func TestVerdict(t *testing.T) {
 				t.Fatalf("Verdict() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestLiveVerdictUsesInfrastructureEvidenceWithoutClaimingSlowdown(t *testing.T) {
+	tests := []struct {
+		name     string
+		evidence Evidence
+	}{
+		{
+			name: "write byte dominance",
+			evidence: Evidence{
+				StorageTopologyAvailable:       true,
+				SharedPhysicalDisk:             true,
+				QEMUDataAvailable:              true,
+				MeaningfulSuspectWritePressure: true,
+				SuspectDominant:                true,
+			},
+		},
+		{
+			name: "write syscall fallback",
+			evidence: Evidence{
+				StorageTopologyAvailable:       true,
+				SharedPhysicalDisk:             true,
+				QEMUDataAvailable:              true,
+				MeaningfulSuspectSyscwPressure: true,
+				SuspectSyscwDominant:           true,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := LiveVerdict(test.evidence); got != LikelyLiveVerdict {
+				t.Fatalf("LiveVerdict() = %q, want %q", got, LikelyLiveVerdict)
+			}
+		})
+	}
+}
+
+func TestNewLiveReportAndOutputOmitApplicationMetrics(t *testing.T) {
+	snapshot := storage.Snapshot{Targets: []storage.VMTarget{
+		{TargetType: "victim", Storage: hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"}},
+		{TargetType: "suspect", Storage: hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"}},
+	}}
+	qemuReport := qemuio.SummaryReport{
+		VictimDataAvailable:            true,
+		SuspectDataAvailable:           true,
+		MeaningfulSuspectSyscwPressure: true,
+		SuspectSyscwDominant:           true,
+	}
+	report := NewLiveReport(
+		Inputs{Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second},
+		snapshot,
+		qemuReport,
+	)
+	if report.ExperimentAvailable {
+		t.Fatal("ExperimentAvailable = true in live-only report")
+	}
+	if report.Verdict != LikelyLiveVerdict {
+		t.Fatalf("verdict = %q, want %q", report.Verdict, LikelyLiveVerdict)
+	}
+
+	var output bytes.Buffer
+	if err := Write(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"No report directory supplied.",
+		"Application-level slowdown evidence unavailable in this live-only run.",
+		LikelyLiveVerdict,
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("live output missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Requests/sec") || strings.Contains(output.String(), "Confirmed application slowdown") {
+		t.Fatalf("live output contains application metric or claim:\n%s", output.String())
+	}
+}
+
+func TestReportBackedOutputRetainsExperimentMetrics(t *testing.T) {
+	experimentReport := experiment.Report{
+		Baseline:    experiment.HTTPMetrics{RequestsPerSecond: 100, TimePerRequestMS: 10},
+		DuringNoise: experiment.HTTPMetrics{RequestsPerSecond: 80, TimePerRequestMS: 12},
+	}
+	report, err := NewReport(Inputs{ReportDirectory: "report"}, experimentReport, storage.Snapshot{}, qemuio.SummaryReport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.ExperimentAvailable {
+		t.Fatal("ExperimentAvailable = false for report-backed report")
+	}
+	var output bytes.Buffer
+	if err := Write(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"METRIC", "Requests/sec", "Throughput drop:", "20.00%"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("report-backed output missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "No report directory supplied.") {
+		t.Fatalf("report-backed output contains live-only placeholder:\n%s", output.String())
 	}
 }
 

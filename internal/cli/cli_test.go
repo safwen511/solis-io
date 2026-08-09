@@ -217,6 +217,20 @@ func TestParseDiagnoseNoisyNeighborDiscoversSuspects(t *testing.T) {
 	}
 }
 
+func TestParseDiagnoseNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
+	options, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor",
+		"--victim", "a-web",
+		"--discover-suspects",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.ReportDirectory != "" || !options.DiscoverSuspects {
+		t.Fatalf("options = %#v, want live-only discovery", options)
+	}
+}
+
 func TestParseDiagnoseNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -309,6 +323,21 @@ func TestParseCaptureNoisyNeighborDiscoversSuspects(t *testing.T) {
 	}
 }
 
+func TestParseCaptureNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
+	options, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--victim", "a-web",
+		"--discover-suspects",
+		"--output-dir", "captures",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.ReportDirectory != "" || !options.DiscoverSuspects {
+		t.Fatalf("options = %#v, want live-only discovery", options)
+	}
+}
+
 func TestParseCaptureNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	_, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -366,39 +395,13 @@ func TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag(t *testing.T) {
 	}
 }
 
-func TestParseCaptureNoisyNeighborRequiresDirectories(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "report directory",
-			args: []string{
-				"capture", "noisy-neighbor",
-				"--victim", "tenant-a",
-				"--suspect", "b-stress",
-				"--output-dir", "captures",
-			},
-			want: "missing --report-dir",
-		},
-		{
-			name: "output directory",
-			args: []string{
-				"capture", "noisy-neighbor",
-				"--report-dir", "report",
-				"--victim", "tenant-a",
-				"--suspect", "b-stress",
-			},
-			want: "missing --output-dir",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := parseCaptureNoisyNeighborArgs(test.args)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("parseCaptureNoisyNeighborArgs() error = %v, want %q", err, test.want)
-			}
-		})
+func TestParseCaptureNoisyNeighborRequiresOutputDirectory(t *testing.T) {
+	_, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--victim", "tenant-a",
+		"--suspect", "b-stress",
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing --output-dir") {
+		t.Fatalf("parseCaptureNoisyNeighborArgs() error = %v, want missing output directory", err)
 	}
 }

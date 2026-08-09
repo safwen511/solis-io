@@ -13,6 +13,7 @@ import (
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
+	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
@@ -49,6 +50,7 @@ func TestWriteMetadata(t *testing.T) {
 	wantLines := []string{
 		"Capture timestamp UTC: 20260808T211500Z",
 		"Report directory: lab/reports/workload/example",
+		"Evidence mode: report-backed",
 		"Victim: tenant-a",
 		"Suspect: b-stress",
 		"Duration: 10s",
@@ -348,6 +350,59 @@ func TestWriteContinuesWhenEBPFLatencyUnavailable(t *testing.T) {
 	}
 }
 
+func TestWriteLiveOnlyCaptureUsesExplicitUnavailableEvidence(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.ReportDirectory = ""
+	inputs.IncludeEBPFLatency = false
+	evidence := testCaptureEvidence(nil)
+	evidence.Experiment = experiment.Report{}
+	evidence.Incident = incident.Explanation{}
+	evidence.Diagnosis = diagnose.Report{
+		Inputs: diagnose.Inputs{
+			Victim:   "a-web",
+			Suspect:  "b-stress",
+			Duration: time.Second,
+			Interval: time.Second,
+		},
+		Verdict: diagnose.InsufficientLiveVerdict,
+	}
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 9, 0, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checks := map[string][]string{
+		"experiment-summary.txt": {
+			"No report directory supplied.",
+			"Application-level slowdown evidence unavailable in this live-only run.",
+		},
+		"incident-explanation.txt": {
+			"No report directory supplied.",
+			"Application-level slowdown evidence unavailable in this live-only run.",
+			"See diagnosis.txt and incident-report.md for provider-side live evidence.",
+		},
+		"incident-report.md": {
+			"- Evidence mode: live-only",
+			"Application slowdown evidence: unavailable; no --report-dir supplied.",
+		},
+		"metadata.txt": {
+			"Report directory: -",
+			"Evidence mode: live-only",
+		},
+	}
+	for name, wantValues := range checks {
+		content, err := os.ReadFile(filepath.Join(result.Directory, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wantValues {
+			if !strings.Contains(string(content), want) {
+				t.Errorf("%s missing %q:\n%s", name, want, content)
+			}
+		}
+	}
+}
+
 func testCaptureInputs(outputDirectory string) Inputs {
 	return Inputs{
 		OutputDirectory:    outputDirectory,
@@ -371,8 +426,9 @@ func testCaptureEvidence(latency *ebpf.BlockLatencyEvidence) Evidence {
 		Experiment:  experimentReport,
 		EBPFLatency: latency,
 		Diagnosis: diagnose.Report{
-			Experiment:  experimentReport,
-			EBPFLatency: latency,
+			ExperimentAvailable: true,
+			Experiment:          experimentReport,
+			EBPFLatency:         latency,
 		},
 	}
 }

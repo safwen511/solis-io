@@ -13,11 +13,16 @@ import (
 )
 
 const (
-	ProbableVerdict            = "Probable noisy-neighbor storage interference."
-	LowPressureVerdict         = "Slowdown observed, but no meaningful suspect QEMU write pressure was observed during live sampling."
-	TopologyMismatchVerdict    = "Slowdown observed, but storage topology does not support this suspect as the cause."
-	InsufficientVerdict        = "Insufficient evidence for noisy-neighbor storage interference."
-	NoDominantCandidateVerdict = "Slowdown observed, but no dominant storage-neighbor candidate was detected during live sampling."
+	ProbableVerdict                = "Probable noisy-neighbor storage interference."
+	LowPressureVerdict             = "Slowdown observed, but no meaningful suspect QEMU write pressure was observed during live sampling."
+	TopologyMismatchVerdict        = "Slowdown observed, but storage topology does not support this suspect as the cause."
+	InsufficientVerdict            = "Insufficient evidence for noisy-neighbor storage interference."
+	NoDominantCandidateVerdict     = "Slowdown observed, but no dominant storage-neighbor candidate was detected during live sampling."
+	LikelyLiveVerdict              = "Likely storage-neighbor pressure observed during live sampling."
+	LowPressureLiveVerdict         = "No meaningful QEMU write pressure observed during live sampling."
+	TopologyMismatchLiveVerdict    = "Live storage topology does not support this suspect as the source of storage-neighbor pressure."
+	InsufficientLiveVerdict        = "Insufficient live infrastructure evidence for storage-neighbor pressure."
+	NoDominantLiveCandidateVerdict = "No dominant storage-neighbor candidate was detected during live sampling."
 )
 
 // Inputs contains the selectors and live-sampling window supplied by the user.
@@ -44,6 +49,7 @@ type Evidence struct {
 // Report contains all evidence required for deterministic output.
 type Report struct {
 	Inputs                   Inputs
+	ExperimentAvailable      bool
 	Experiment               experiment.Report
 	Impact                   experiment.Impact
 	Storage                  storage.Snapshot
@@ -76,6 +82,7 @@ func NewReport(inputs Inputs, experimentReport experiment.Report, storageSnapsho
 
 	return Report{
 		Inputs:                   inputs,
+		ExperimentAvailable:      true,
 		Experiment:               experimentReport,
 		Impact:                   impact,
 		Storage:                  storageSnapshot,
@@ -84,6 +91,30 @@ func NewReport(inputs Inputs, experimentReport experiment.Report, storageSnapsho
 		SharedPhysicalDisk:       shared,
 		Verdict:                  Verdict(evidence),
 	}, nil
+}
+
+// NewLiveReport combines live provider-side evidence without claiming that an
+// application slowdown was observed.
+func NewLiveReport(inputs Inputs, storageSnapshot storage.Snapshot, qemuReport qemuio.SummaryReport) Report {
+	shared, topologyAvailable := sharedPhysicalDisk(storageSnapshot.Targets)
+	evidence := Evidence{
+		StorageTopologyAvailable:       topologyAvailable,
+		SharedPhysicalDisk:             shared,
+		QEMUDataAvailable:              qemuReport.VictimDataAvailable && qemuReport.SuspectDataAvailable,
+		MeaningfulSuspectWritePressure: qemuReport.MeaningfulSuspectWritePressure,
+		SuspectDominant:                qemuReport.SuspectDominant,
+		MeaningfulSuspectSyscwPressure: qemuReport.MeaningfulSuspectSyscwPressure,
+		SuspectSyscwDominant:           qemuReport.SuspectSyscwDominant,
+	}
+
+	return Report{
+		Inputs:                   inputs,
+		Storage:                  storageSnapshot,
+		QEMU:                     qemuReport,
+		StorageTopologyAvailable: topologyAvailable,
+		SharedPhysicalDisk:       shared,
+		Verdict:                  LiveVerdict(evidence),
+	}
 }
 
 // Verdict applies the noisy-neighbor evidence rules in deterministic order.
@@ -105,6 +136,25 @@ func Verdict(evidence Evidence) string {
 		return ProbableVerdict
 	}
 	return InsufficientVerdict
+}
+
+// LiveVerdict applies infrastructure-only rules without claiming an
+// application-level slowdown.
+func LiveVerdict(evidence Evidence) string {
+	if evidence.StorageTopologyAvailable && !evidence.SharedPhysicalDisk {
+		return TopologyMismatchLiveVerdict
+	}
+	if evidence.QEMUDataAvailable && !evidence.MeaningfulSuspectWritePressure && !evidence.MeaningfulSuspectSyscwPressure {
+		return LowPressureLiveVerdict
+	}
+	dominant := evidence.SuspectDominant
+	if !evidence.MeaningfulSuspectWritePressure {
+		dominant = evidence.MeaningfulSuspectSyscwPressure && evidence.SuspectSyscwDominant
+	}
+	if evidence.SharedPhysicalDisk && evidence.QEMUDataAvailable && dominant {
+		return LikelyLiveVerdict
+	}
+	return InsufficientLiveVerdict
 }
 
 func sharedPhysicalDisk(targets []storage.VMTarget) (bool, bool) {

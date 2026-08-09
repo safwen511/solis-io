@@ -62,13 +62,15 @@ sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis storage watch --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis qemu io-watch --victim <name> --suspect <name> --duration 10s --interval 2s
 sudo ./solis qemu io-summary --victim <name> --suspect <name> --duration 10s --interval 2s
-sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s
-sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency
+sudo ./solis diagnose noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s
+sudo ./solis diagnose noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency
+sudo ./solis diagnose noisy-neighbor --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/diagnosis
-sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/captures
-sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
+sudo ./solis capture noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/captures
+sudo ./solis capture noisy-neighbor [--report-dir <dir>] --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
+sudo ./solis capture noisy-neighbor --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
 ```
 
 For `--victim`, a tenant selector includes all configured VMs belonging to that tenant; a VM selector targets only that VM. The suspect must resolve to one VM.
@@ -150,11 +152,19 @@ Summarize live per-QEMU process I/O:
 sudo ./solis qemu io-summary --victim tenant-a --suspect b-stress --duration 10s --interval 2s
 ```
 
-Run the combined diagnosis:
+Run a report-backed combined diagnosis. This mode correlates provider-side evidence with the application slowdown recorded by the workload experiment:
 
 ```bash
 sudo ./solis diagnose noisy-neighbor --report-dir lab/reports/workload/20260808T174825Z --victim tenant-a --suspect b-stress --duration 10s --interval 2s
 ```
+
+Run a live-only diagnosis when the operator knows only which VM is slow now:
+
+```bash
+sudo ./solis diagnose noisy-neighbor --victim a-web --discover-suspects --duration 10s --interval 2s --include-ebpf-latency
+```
+
+Live-only mode discovers same-storage candidates and evaluates current storage topology, QEMU writer activity, syscall pressure, and optional host-path eBPF latency. It can identify likely provider-side storage-neighbor pressure, but without an external report it cannot prove that application-level slowdown occurred.
 
 Solis itself never invokes `sudo`. These examples use it because Linux commonly restricts access to `/proc/<qemu-pid>/io` for QEMU processes owned by another account. Use the minimum privileges appropriate for your environment.
 
@@ -181,6 +191,14 @@ Create a timestamped incident directory containing the experiment summary, incid
 ```bash
 sudo ./solis capture noisy-neighbor --report-dir lab/reports/workload/20260808T174825Z --victim tenant-a --suspect b-stress --duration 10s --interval 2s --output-dir lab/reports/captures
 ```
+
+For a live-only capture with automatic suspect discovery, omit `--report-dir`:
+
+```bash
+sudo ./solis capture noisy-neighbor --victim a-web --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
+```
+
+Live-only captures mark application evidence unavailable in `diagnosis.txt`, `experiment-summary.txt`, and `incident-report.md`; they do not print zero-valued application metrics as evidence.
 
 The generated directory is written beneath `lab/reports/captures/`. If QEMU procfs counters cannot be read, capture still preserves the other evidence and records the permission error in the relevant files.
 

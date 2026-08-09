@@ -20,6 +20,7 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 		impact = calculated
 	}
 	mode := captureMode(inputs)
+	evidenceMode := captureEvidenceMode(inputs)
 	suspect := selectedSuspect(inputs, evidence)
 
 	if _, err := fmt.Fprintln(dst, "# Solis Noisy Neighbor Incident Report"); err != nil {
@@ -32,20 +33,28 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 			"- Selected suspect: %s\n"+
 			"- Verdict: %s\n"+
 			"- Capture timestamp: %s\n"+
-			"- Capture mode: %s\n",
+			"- Capture mode: %s\n"+
+			"- Evidence mode: %s\n",
 		markdownText(inputs.Victim),
 		markdownText(suspect),
 		markdownText(evidence.Diagnosis.Verdict),
 		markdownText(timestamp),
 		markdownText(mode),
+		markdownText(evidenceMode),
 	); err != nil {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(
+	if _, err := fmt.Fprintln(dst, "\n## Evidence chain\n\n### Experiment slowdown evidence"); err != nil {
+		return err
+	}
+	if !evidence.Diagnosis.ExperimentAvailable {
+		if _, err := fmt.Fprintln(dst, "\nApplication slowdown evidence: unavailable; no --report-dir supplied."); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintf(
 		dst,
-		"\n## Evidence chain\n\n"+
-			"### Experiment slowdown evidence\n\n"+
+		"\n"+
 			"| Metric | Baseline | During noise | Post-noise |\n"+
 			"|---|---:|---:|---:|\n"+
 			"| Requests/sec | %.2f | %.2f | %.2f |\n"+
@@ -103,10 +112,12 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 		dst,
 		"\n## Metadata\n\n"+
 			"- Report directory: %s\n"+
+			"- Evidence mode: %s\n"+
 			"- Duration: %s\n"+
 			"- Interval: %s\n"+
 			"- Generated files:\n",
 		markdownText(inputs.ReportDirectory),
+		markdownText(evidenceMode),
 		inputs.Duration,
 		inputs.Interval,
 	); err != nil {
@@ -252,7 +263,7 @@ func writeEBPFEvidence(dst io.Writer, evidence ebpf.BlockLatencyEvidence) error 
 }
 
 func recommendation(verdict, suspect string) string {
-	if verdict == diagnose.ProbableVerdict {
+	if verdict == diagnose.ProbableVerdict || verdict == diagnose.LikelyLiveVerdict {
 		return fmt.Sprintf("Consider throttling, migrating, or investigating the selected suspect VM workload (%s).", markdownText(suspect))
 	}
 	if suspect == "-" {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/safwen511/solis-io/internal/diagnose"
@@ -37,9 +38,19 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 		return Result{}, fmt.Errorf("create capture directory %q: %w", directory, err)
 	}
 
-	artifacts := []artifact{
-		{"experiment-summary.txt", func(w io.Writer) error { return experiment.WriteSummary(w, evidence.Experiment) }},
-		{"incident-explanation.txt", func(w io.Writer) error { return incident.WriteExplanation(w, evidence.Incident) }},
+	var artifacts []artifact
+	if evidence.Diagnosis.ExperimentAvailable {
+		artifacts = append(
+			artifacts,
+			artifact{"experiment-summary.txt", func(w io.Writer) error { return experiment.WriteSummary(w, evidence.Experiment) }},
+			artifact{"incident-explanation.txt", func(w io.Writer) error { return incident.WriteExplanation(w, evidence.Incident) }},
+		)
+	} else {
+		artifacts = append(
+			artifacts,
+			artifact{"experiment-summary.txt", writeLiveOnlyExperimentPlaceholder},
+			artifact{"incident-explanation.txt", writeLiveOnlyIncidentPlaceholder},
+		)
 	}
 	if evidence.Discovery != nil && evidence.Discovery.Selected == nil {
 		artifacts = append(artifacts, artifact{
@@ -116,11 +127,13 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 	}
 	ebpfRequested := yesNo(inputs.IncludeEBPFLatency)
 	ebpfWritten := yesNo(inputs.IncludeEBPFLatency)
+	evidenceMode := captureEvidenceMode(inputs)
 	if _, err := fmt.Fprintf(
 		dst,
 		"Solis Capture Metadata\n"+
 			"Capture timestamp UTC: %s\n"+
 			"Report directory: %s\n"+
+			"Evidence mode: %s\n"+
 			"Victim: %s\n"+
 			"Suspect: %s\n"+
 			"Duration: %s\n"+
@@ -133,7 +146,8 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Discovery file: %s\n"+
 			"Incident report: incident-report.md\n",
 		timestamp,
-		inputs.ReportDirectory,
+		valueOrDash(inputs.ReportDirectory),
+		evidenceMode,
 		inputs.Victim,
 		inputs.Suspect,
 		inputs.Duration,
@@ -154,11 +168,39 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 	return nil
 }
 
+func writeLiveOnlyExperimentPlaceholder(dst io.Writer) error {
+	_, err := fmt.Fprintln(
+		dst,
+		"Experiment evidence\n"+
+			"No report directory supplied.\n"+
+			"Application-level slowdown evidence unavailable in this live-only run.",
+	)
+	return err
+}
+
+func writeLiveOnlyIncidentPlaceholder(dst io.Writer) error {
+	_, err := fmt.Fprintln(
+		dst,
+		"Incident explanation\n"+
+			"No report directory supplied.\n"+
+			"Application-level slowdown evidence unavailable in this live-only run.\n"+
+			"See diagnosis.txt and incident-report.md for provider-side live evidence.",
+	)
+	return err
+}
+
 func captureMode(inputs Inputs) string {
 	if inputs.CaptureMode == "discover-suspects" {
 		return "discover-suspects"
 	}
 	return "pairwise"
+}
+
+func captureEvidenceMode(inputs Inputs) string {
+	if strings.TrimSpace(inputs.ReportDirectory) == "" {
+		return "live-only"
+	}
+	return "report-backed"
 }
 
 func yesNo(value bool) string {
@@ -169,6 +211,7 @@ func yesNo(value bool) string {
 }
 
 func valueOrDash(value string) string {
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return "-"
 	}

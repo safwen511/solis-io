@@ -25,30 +25,36 @@ func Write(dst io.Writer, report Report) error {
 	fmt.Fprintf(w, "Interval:\t%s\n\n", report.Inputs.Interval)
 
 	fmt.Fprintln(w, "Experiment evidence")
-	fmt.Fprintln(w, "METRIC\tBASELINE\tDURING_NOISE\tPOST_NOISE")
-	fmt.Fprintf(
-		w,
-		"Requests/sec\t%.2f\t%.2f\t%.2f\n",
-		report.Experiment.Baseline.RequestsPerSecond,
-		report.Experiment.DuringNoise.RequestsPerSecond,
-		report.Experiment.PostNoise.RequestsPerSecond,
-	)
-	fmt.Fprintf(
-		w,
-		"Latency (ms)\t%.3f\t%.3f\t%.3f\n",
-		report.Experiment.Baseline.TimePerRequestMS,
-		report.Experiment.DuringNoise.TimePerRequestMS,
-		report.Experiment.PostNoise.TimePerRequestMS,
-	)
-	fmt.Fprintf(
-		w,
-		"Failed requests\t%d\t%d\t%d\n",
-		report.Experiment.Baseline.FailedRequests,
-		report.Experiment.DuringNoise.FailedRequests,
-		report.Experiment.PostNoise.FailedRequests,
-	)
-	fmt.Fprintf(w, "Throughput drop:\t%.2f%%\n", report.Impact.ThroughputDropPct)
-	fmt.Fprintf(w, "Latency increase:\t%.2f%%\n\n", report.Impact.LatencyIncreasePct)
+	if !report.ExperimentAvailable {
+		fmt.Fprintln(w, "No report directory supplied.")
+		fmt.Fprintln(w, "Application-level slowdown evidence unavailable in this live-only run.")
+		fmt.Fprintln(w)
+	} else {
+		fmt.Fprintln(w, "METRIC\tBASELINE\tDURING_NOISE\tPOST_NOISE")
+		fmt.Fprintf(
+			w,
+			"Requests/sec\t%.2f\t%.2f\t%.2f\n",
+			report.Experiment.Baseline.RequestsPerSecond,
+			report.Experiment.DuringNoise.RequestsPerSecond,
+			report.Experiment.PostNoise.RequestsPerSecond,
+		)
+		fmt.Fprintf(
+			w,
+			"Latency (ms)\t%.3f\t%.3f\t%.3f\n",
+			report.Experiment.Baseline.TimePerRequestMS,
+			report.Experiment.DuringNoise.TimePerRequestMS,
+			report.Experiment.PostNoise.TimePerRequestMS,
+		)
+		fmt.Fprintf(
+			w,
+			"Failed requests\t%d\t%d\t%d\n",
+			report.Experiment.Baseline.FailedRequests,
+			report.Experiment.DuringNoise.FailedRequests,
+			report.Experiment.PostNoise.FailedRequests,
+		)
+		fmt.Fprintf(w, "Throughput drop:\t%.2f%%\n", report.Impact.ThroughputDropPct)
+		fmt.Fprintf(w, "Latency increase:\t%.2f%%\n\n", report.Impact.LatencyIncreasePct)
+	}
 
 	fmt.Fprintln(w, "Storage topology")
 	fmt.Fprintln(w, "TARGET\tVM\tTENANT\tROLE\tQEMU_PID\tDISK\tSOURCE_DEVICE\tPARENT_DEVICE\tPHYSICAL_DISK")

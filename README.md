@@ -68,6 +68,7 @@ sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <vm> --discover
 sudo ./solis diagnose noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/diagnosis
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --output-dir lab/reports/captures
 sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <name> --suspect <name> --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
+sudo ./solis capture noisy-neighbor --report-dir <dir> --victim <vm> --discover-suspects --duration 10s --interval 2s --include-ebpf-latency --output-dir lab/reports/captures
 ```
 
 For `--victim`, a tenant selector includes all configured VMs belonging to that tenant; a VM selector targets only that VM. The suspect must resolve to one VM.

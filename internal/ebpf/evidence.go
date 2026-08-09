@@ -42,7 +42,7 @@ func WriteBlockLatencyEvidence(dst io.Writer, evidence BlockLatencyEvidence) err
 // WriteBlockLatencyEvidenceFile writes the standalone-style artifact used by
 // incident captures.
 func WriteBlockLatencyEvidenceFile(dst io.Writer, evidence BlockLatencyEvidence) error {
-	if oneLineReason(evidence.UnavailableReason) != "" {
+	if oneLineReason(evidence.UnavailableReason) != "" || oneLineReason(evidence.Notice) != "" {
 		if _, err := fmt.Fprintln(dst, "Solis eBPF Block Latency (experimental)"); err != nil {
 			return err
 		}

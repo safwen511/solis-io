@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/diagnose"
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/incident"
@@ -39,9 +40,28 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 	artifacts := []artifact{
 		{"experiment-summary.txt", func(w io.Writer) error { return experiment.WriteSummary(w, evidence.Experiment) }},
 		{"incident-explanation.txt", func(w io.Writer) error { return incident.WriteExplanation(w, evidence.Incident) }},
-		{"trace-plan.txt", func(w io.Writer) error { return traceplan.Write(w, evidence.TracePlan) }},
-		{"storage-snapshot.txt", func(w io.Writer) error { return storage.Write(w, evidence.Storage) }},
-		{"qemu-io-summary.txt", func(w io.Writer) error { return qemuio.WriteSummary(w, evidence.QEMU) }},
+	}
+	if evidence.Discovery != nil && evidence.Discovery.Selected == nil {
+		artifacts = append(artifacts, artifact{
+			"victim-topology.txt",
+			func(w io.Writer) error { return discovery.WriteVictimTopology(w, *evidence.Discovery) },
+		})
+	} else {
+		artifacts = append(artifacts, artifact{
+			"trace-plan.txt",
+			func(w io.Writer) error { return traceplan.Write(w, evidence.TracePlan) },
+		})
+	}
+	artifacts = append(
+		artifacts,
+		artifact{"storage-snapshot.txt", func(w io.Writer) error { return storage.Write(w, evidence.Storage) }},
+		artifact{"qemu-io-summary.txt", func(w io.Writer) error { return qemuio.WriteSummary(w, evidence.QEMU) }},
+	)
+	if evidence.Discovery != nil {
+		artifacts = append(artifacts, artifact{
+			"suspect-discovery.txt",
+			func(w io.Writer) error { return discovery.Write(w, *evidence.Discovery) },
+		})
 	}
 	if inputs.IncludeEBPFLatency {
 		latencyEvidence := ebpf.BlockLatencyEvidence{UnavailableReason: "collector did not return eBPF block latency evidence"}
@@ -81,6 +101,13 @@ func captureDirectoryName(now time.Time, victim, suspect string) string {
 
 // WriteMetadata emits deterministic metadata for one capture.
 func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
+	mode := captureMode(inputs)
+	discoveryFile := "-"
+	if mode == "discover-suspects" {
+		discoveryFile = "suspect-discovery.txt"
+	}
+	ebpfRequested := yesNo(inputs.IncludeEBPFLatency)
+	ebpfWritten := yesNo(inputs.IncludeEBPFLatency)
 	if _, err := fmt.Fprintf(
 		dst,
 		"Solis Capture Metadata\n"+
@@ -90,7 +117,12 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Suspect: %s\n"+
 			"Duration: %s\n"+
 			"Interval: %s\n"+
-			"Solis command: %s\n",
+			"Solis command: %s\n"+
+			"Capture mode: %s\n"+
+			"Selected suspect: %s\n"+
+			"eBPF latency requested: %s\n"+
+			"eBPF latency file written: %s\n"+
+			"Discovery file: %s\n",
 		timestamp,
 		inputs.ReportDirectory,
 		inputs.Victim,
@@ -98,6 +130,11 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		inputs.Duration,
 		inputs.Interval,
 		commandName,
+		mode,
+		valueOrDash(inputs.Suspect),
+		ebpfRequested,
+		ebpfWritten,
+		discoveryFile,
 	); err != nil {
 		return err
 	}
@@ -106,6 +143,27 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		return err
 	}
 	return nil
+}
+
+func captureMode(inputs Inputs) string {
+	if inputs.CaptureMode == "discover-suspects" {
+		return "discover-suspects"
+	}
+	return "pairwise"
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func writeArtifact(path string, render func(io.Writer) error) error {

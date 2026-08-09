@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/diagnose"
+	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/incident"
@@ -24,6 +25,7 @@ type Inputs struct {
 	Duration           time.Duration
 	Interval           time.Duration
 	IncludeEBPFLatency bool
+	CaptureMode        string
 }
 
 // Evidence contains the already parsed, resolved, and sampled capture data.
@@ -34,6 +36,7 @@ type Evidence struct {
 	Storage     storage.Snapshot
 	QEMU        qemuio.SummaryReport
 	EBPFLatency *ebpf.BlockLatencyEvidence
+	Discovery   *discovery.Report
 	Diagnosis   diagnose.Report
 }
 

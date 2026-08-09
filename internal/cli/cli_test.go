@@ -288,6 +288,51 @@ func TestParseCaptureNoisyNeighborDefaults(t *testing.T) {
 	if options.OutputDirectory != "lab/reports/captures" {
 		t.Fatalf("OutputDirectory = %q, want lab/reports/captures", options.OutputDirectory)
 	}
+	if options.DiscoverSuspects {
+		t.Fatal("DiscoverSuspects = true in pairwise mode")
+	}
+}
+
+func TestParseCaptureNoisyNeighborDiscoversSuspects(t *testing.T) {
+	options, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--discover-suspects",
+		"--output-dir", "captures",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.DiscoverSuspects || options.Suspect != "" {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseCaptureNoisyNeighborRequiresSuspectMode(t *testing.T) {
+	_, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--output-dir", "captures",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provide either --suspect <vm> or --discover-suspects") {
+		t.Fatalf("error = %v, want suspect mode usage error", err)
+	}
+}
+
+func TestParseCaptureNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
+	_, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor",
+		"--report-dir", "report",
+		"--victim", "a-web",
+		"--suspect", "b-stress",
+		"--discover-suspects",
+		"--output-dir", "captures",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--suspect and --discover-suspects cannot be used together") {
+		t.Fatalf("error = %v, want selector conflict", err)
+	}
 }
 
 func TestParseCaptureNoisyNeighborIncludesEBPFLatency(t *testing.T) {

@@ -42,6 +42,30 @@ func Write(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// WriteVictimTopology writes the victim-only topology artifact used when no
+// suspect is selected.
+func WriteVictimTopology(dst io.Writer, report Report) error {
+	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Victim Storage Topology")
+	fmt.Fprintln(w, "VM\tTENANT\tROLE\tQEMU_PID\tDISK\tMOUNTPOINT\tSOURCE_DEVICE\tPARENT_DEVICE\tPHYSICAL_DISK")
+	fmt.Fprintf(
+		w,
+		"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		emptyDash(report.Victim.Name),
+		emptyDash(report.Victim.Tenant),
+		emptyDash(report.Victim.Role),
+		emptyDash(report.Victim.QEMUPID),
+		emptyDash(report.Victim.Disk),
+		emptyDash(report.VictimStorage.Mountpoint),
+		emptyDash(report.VictimStorage.SourceDevice),
+		emptyDash(report.VictimStorage.ParentDevice),
+		emptyDash(report.VictimStorage.PhysicalDisk),
+	)
+	fmt.Fprintln(w, "\nSelected suspect:\t-")
+	fmt.Fprintln(w, "Reason:\tno dominant writer observed")
+	return w.Flush()
+}
+
 func metric(value float64, available bool) string {
 	if !available {
 		return "-"

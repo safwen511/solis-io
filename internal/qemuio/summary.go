@@ -294,6 +294,13 @@ func MeaningfulWriteSyscalls(averagePerSecond float64) bool {
 	return averagePerSecond >= minimumMeaningfulSyscwPerSecond
 }
 
+// WriteActivityObserved reports whether either write-byte or write-syscall
+// activity is above the existing near-zero thresholds. It intentionally does
+// not classify the activity as meaningful pressure.
+func WriteActivityObserved(averageMiBPerSecond, averageSyscwPerSecond float64) bool {
+	return averageMiBPerSecond > nearZeroWriteMiBPerSecond || averageSyscwPerSecond > nearZeroWriteSyscallsPerSecond
+}
+
 // DominantWriteSyscalls reports whether meaningful candidate syscw activity is
 // at least the configured dominance ratio above the comparison rate.
 func DominantWriteSyscalls(comparison, candidate float64) bool {

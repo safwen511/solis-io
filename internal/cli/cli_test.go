@@ -510,3 +510,41 @@ func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestParseStatusArgsDefaults(t *testing.T) {
+	options, err := parseStatusArgs([]string{"status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Duration != 3*time.Second || options.Interval != time.Second || options.JSON {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseStatusArgsJSONAndTiming(t *testing.T) {
+	options, err := parseStatusArgs([]string{
+		"status", "--json", "--interval", "500ms", "--duration", "2s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.JSON || options.Duration != 2*time.Second || options.Interval != 500*time.Millisecond {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseStatusArgsValidatesOptions(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"status", "--duration", "0s"}, want: "invalid --duration"},
+		{args: []string{"status", "--duration", "1s", "--interval", "2s"}, want: "interval 2s cannot exceed duration 1s"},
+		{args: []string{"status", "--verbose"}, want: "unknown option --verbose"},
+	} {
+		_, err := parseStatusArgs(test.args)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("args %v: error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}

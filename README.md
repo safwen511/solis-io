@@ -24,6 +24,7 @@ This provides evidence about both sides of an incident: the tenant-visible slowd
 ## Current capabilities
 
 - Inventory KVM/libvirt VMs and show tenant, role, state, planned and leased IPs, QEMU PID, and disk path.
+- Show live running-VM, storage-topology, and QEMU write-pressure status as a terminal table or one JSON document.
 - Inspect one VM's configuration, libvirt state, storage path, QEMU process, and guest-agent presence.
 - Parse ApacheBench and fio workload reports and summarize throughput, latency, failures, IOPS, bandwidth, and disk utilization.
 - Explain an experiment incident for a selected victim and suspect.
@@ -55,6 +56,8 @@ sudo ./solis ebpf block-count --duration 10s
 sudo ./solis ebpf block-latency --duration 10s
 sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis inventory
+sudo ./solis status
+sudo ./solis status --duration 3s --interval 1s --json
 ./solis inspect <vm> [--verbose]
 ./solis experiment summarize <report-dir>
 ./solis incidents explain <report-dir> --victim <name> --suspect <name>
@@ -127,6 +130,22 @@ go build -o solis ./cmd/solis
 ```
 
 The binary is written to `./solis`.
+
+## Live VM status
+
+Show a compact table of running VMs, their QEMU and qcow2 mappings, physical storage, and sampled write pressure:
+
+```bash
+sudo ./solis status
+```
+
+Emit the same reusable status model as one JSON document for dashboards, automation, or a future TUI:
+
+```bash
+sudo ./solis status --duration 3s --interval 1s --json
+```
+
+The defaults are a three-second observation window and a one-second sampling interval. Solis does not elevate privileges internally; `sudo` is shown because Linux commonly protects QEMU processes' `/proc/<pid>/io` counters. No guest payloads, guest files, process memory, or application contents are inspected.
 
 ## Demo commands
 

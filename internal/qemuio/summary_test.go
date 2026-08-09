@@ -68,6 +68,18 @@ func TestConclusionLogic(t *testing.T) {
 	}
 }
 
+func TestWriteActivityObservedUsesCentralNearZeroThresholds(t *testing.T) {
+	if WriteActivityObserved(0, 0) {
+		t.Fatal("zero counters reported activity")
+	}
+	if !WriteActivityObserved(0.02, 0) {
+		t.Fatal("write bytes above near-zero threshold not reported")
+	}
+	if !WriteActivityObserved(0, 2) {
+		t.Fatal("write syscalls above near-zero threshold not reported")
+	}
+}
+
 func TestSyscallFallbackMarksDominantSuspect(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}

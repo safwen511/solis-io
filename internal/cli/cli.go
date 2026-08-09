@@ -24,6 +24,7 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/output"
 	"github.com/safwen511/solis-io/internal/qemuio"
+	statusview "github.com/safwen511/solis-io/internal/status"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
 	watcher "github.com/safwen511/solis-io/internal/watch"
@@ -45,6 +46,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runEBPFCommand(args, stdout)
 	case "inventory":
 		return runInventory(stdout)
+	case "status":
+		options, err := parseStatusArgs(args)
+		if err != nil {
+			return err
+		}
+		return runStatus(options, stdout)
 	case "top":
 		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
 		return nil
@@ -107,6 +114,7 @@ const ebpfBlockWatchUsage = "usage: solis ebpf block-watch [--duration <duration
 const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duration>"
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
+const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json]"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -138,6 +146,52 @@ type watchNoisyNeighborOptions struct {
 	OutputDirectory    string
 	Cooldown           time.Duration
 	Verbose            bool
+}
+
+type statusOptions struct {
+	Duration time.Duration
+	Interval time.Duration
+	JSON     bool
+}
+
+func parseStatusArgs(args []string) (statusOptions, error) {
+	options := statusOptions{Duration: 3 * time.Second, Interval: time.Second}
+	if len(args) == 0 || args[0] != "status" {
+		return statusOptions{}, errors.New(statusUsage)
+	}
+	seen := make(map[string]bool)
+	for index := 1; index < len(args); index++ {
+		option := args[index]
+		if seen[option] {
+			return statusOptions{}, fmt.Errorf("%s: %s specified more than once", statusUsage, option)
+		}
+		seen[option] = true
+		switch option {
+		case "--json":
+			options.JSON = true
+		case "--duration", "--interval":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return statusOptions{}, fmt.Errorf("%s: %s requires a value", statusUsage, option)
+			}
+			value := args[index+1]
+			index++
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration <= 0 {
+				return statusOptions{}, fmt.Errorf("%s: invalid %s %q", statusUsage, option, value)
+			}
+			if option == "--duration" {
+				options.Duration = duration
+			} else {
+				options.Interval = duration
+			}
+		default:
+			return statusOptions{}, fmt.Errorf("%s: unknown option %s", statusUsage, option)
+		}
+	}
+	if options.Interval > options.Duration {
+		return statusOptions{}, fmt.Errorf("%s: interval %s cannot exceed duration %s", statusUsage, options.Interval, options.Duration)
+	}
+	return options, nil
 }
 
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
@@ -1302,6 +1356,26 @@ func runInventory(w io.Writer) error {
 	return output.InventoryTable(w, inventory.Enrich(vms))
 }
 
+func runStatus(options statusOptions, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	if err != nil {
+		return fmt.Errorf("status error: %w", err)
+	}
+	report, err := statusview.Collect(inventory.Enrich(vms), options.Duration, options.Interval)
+	if err != nil {
+		return fmt.Errorf("status error: %w", err)
+	}
+	if options.JSON {
+		err = statusview.WriteJSON(w, report)
+	} else {
+		err = statusview.WriteHuman(w, report)
+	}
+	if err != nil {
+		return fmt.Errorf("status error: %w", err)
+	}
+	return nil
+}
+
 func runDoctor(w io.Writer) error {
 	if err := doctor.Write(w, doctor.Run(".")); err != nil {
 		return fmt.Errorf("doctor error: %w", err)
@@ -1418,6 +1492,7 @@ Usage:
   solis ebpf block-count --duration <duration>
   solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
   solis inventory
+  solis status [--duration <duration>] [--interval <duration>] [--json]
   solis top
   solis inspect <vm> [--verbose]
   solis experiment summarize <report-dir>

@@ -20,6 +20,7 @@ import (
 	"github.com/safwen511/solis-io/internal/doctor"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
+	"github.com/safwen511/solis-io/internal/hostmetrics"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
@@ -50,6 +51,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return runEBPFCommand(runtimeConfig, args, stdout)
 	case "inventory":
 		return runInventory(runtimeConfig, stdout)
+	case "host":
+		if err := parseHostStatusArgs(args); err != nil {
+			return err
+		}
+		return runHostStatus(runtimeConfig, stdout)
 	case "status":
 		options, err := parseStatusArgs(args)
 		if err != nil {
@@ -119,6 +125,7 @@ const ebpfBlockEventsUsage = "usage: solis ebpf block-events --duration <duratio
 const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>"
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
+const hostStatusUsage = "usage: solis host status --json"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -161,6 +168,13 @@ type statusOptions struct {
 	Iterations int
 	Clear      bool
 	Sort       string
+}
+
+func parseHostStatusArgs(args []string) error {
+	if len(args) != 3 || args[0] != "host" || args[1] != "status" || args[2] != "--json" {
+		return errors.New(hostStatusUsage)
+	}
+	return nil
 }
 
 func parseStatusArgs(args []string) (statusOptions, error) {
@@ -1637,6 +1651,40 @@ func runInspect(runtimeConfig solisconfig.Runtime, name string, verbose bool, w 
 	return output.VMDetail(w, *vm, verbose)
 }
 
+func runHostStatus(runtimeConfig solisconfig.Runtime, w io.Writer) error {
+	options, err := hostStatusOptions(runtimeConfig.Settings)
+	if err != nil {
+		return fmt.Errorf("host status error: %w", err)
+	}
+	status, err := hostmetrics.Collect(options)
+	if err != nil {
+		return fmt.Errorf("host status error: %w", err)
+	}
+	if err := hostmetrics.WriteJSON(w, status); err != nil {
+		return fmt.Errorf("host status error: %w", err)
+	}
+	return nil
+}
+
+func hostStatusOptions(settings solisconfig.Settings) (hostmetrics.Options, error) {
+	options := hostmetrics.DefaultOptions()
+	if settings.Observability == nil {
+		return options, nil
+	}
+	host := settings.Observability.Host
+	options.CollectPSI = host.CollectPSI
+	options.CollectNetwork = host.CollectNetwork
+	if strings.TrimSpace(host.Interval) == "" {
+		return options, nil
+	}
+	interval, err := time.ParseDuration(host.Interval)
+	if err != nil || interval <= 0 {
+		return hostmetrics.Options{}, fmt.Errorf("invalid configured host interval %q", host.Interval)
+	}
+	options.Interval = interval
+	return options, nil
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Solis I/O
 
@@ -1651,6 +1699,7 @@ Commands:
   solis ebpf block-count --duration <duration>
   solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
   solis inventory
+  solis host status --json
   solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
   solis top
   solis inspect <vm> [--verbose]

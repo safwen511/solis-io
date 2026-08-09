@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/capture"
+	solisconfig "github.com/safwen511/solis-io/internal/config"
 )
 
 func TestRunInventoryOutsideRepositoryWithExplicitConfig(t *testing.T) {
@@ -61,6 +62,37 @@ esac
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("inventory output missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestParseHostStatusJSON(t *testing.T) {
+	if err := parseHostStatusArgs([]string{"host", "status", "--json"}); err != nil {
+		t.Fatalf("parseHostStatusArgs() error = %v", err)
+	}
+	for _, args := range [][]string{
+		{"host"},
+		{"host", "status"},
+		{"host", "status", "--human"},
+		{"host", "status", "--json", "extra"},
+	} {
+		if err := parseHostStatusArgs(args); err == nil || !strings.Contains(err.Error(), hostStatusUsage) {
+			t.Fatalf("parseHostStatusArgs(%v) error = %v", args, err)
+		}
+	}
+}
+
+func TestHostStatusOptionsRespectSchemaVersionTwoHostSettings(t *testing.T) {
+	settings := solisconfig.Settings{Observability: &solisconfig.ObservabilityConfig{
+		Host: solisconfig.HostObservabilityConfig{
+			Interval: "250ms", CollectPSI: false, CollectNetwork: true,
+		},
+	}}
+	options, err := hostStatusOptions(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Interval != 250*time.Millisecond || options.CollectPSI || !options.CollectNetwork {
+		t.Fatalf("options = %#v", options)
 	}
 }
 

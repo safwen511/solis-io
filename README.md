@@ -57,6 +57,7 @@ sudo ./solis ebpf block-count --duration 10s
 sudo ./solis ebpf block-latency --duration 10s
 sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis inventory
+./solis host status --json
 sudo ./solis status
 sudo ./solis status --duration 3s --interval 1s
 sudo ./solis status --duration 3s --interval 1s --json
@@ -165,7 +166,7 @@ The built-in values preserve the repository-relative lab workflow for developmen
 
 ### Observability configuration
 
-Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for future bird's-eye host, guest, service, and database collectors:
+Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for the local host collector and future guest, service, and database collectors:
 
 ```json
 {
@@ -220,7 +221,7 @@ Schema version 1 remains supported. Schema version 2 adds an optional, strictly 
 }
 ```
 
-Observability is opt-in. Omitting the block leaves host and guest observability disabled and the database list empty; guest collection also requires an explicit `enabled: true`. These settings define future allowlists only—the current change does not run SSH, database queries, health checks, or guest-agent commands.
+Observability is opt-in. Omitting the block leaves automatic host and guest observability disabled and the database list empty; guest collection also requires an explicit `enabled: true`. An explicit `solis host status --json` invocation is still allowed and uses safe read-only defaults. When present, the host interval and PSI/network flags configure that command. Guest, service, and database settings remain definitions only and do not run SSH, database queries, health checks, or guest-agent commands.
 
 Do not put passwords, tokens, secrets, private keys, or credential values in the JSON file. `credential_ref` may be empty or refer to `systemd-credential:`, `file:`, or `env:` sources, but Solis does not read those references yet. The schema provides no arbitrary command, arbitrary SQL, table-scan, process-argument, environment, journal, or payload collection fields. Health-check body collection must remain `false`.
 
@@ -236,6 +237,16 @@ go build -o solis ./cmd/solis
 ```
 
 The binary is written to `./solis`.
+
+## Local host status
+
+Collect a one-second, provider-side host pressure window as deterministic JSON:
+
+```bash
+./solis host status --json
+```
+
+The command reads fixed local procfs data, sysfs block-device names, filesystem capacity through `statfs`, and short QEMU `comm` names. It reports CPU deltas, memory capacity, optional PSI, filesystem usage, disk counters and rates, optional network counters and rates, and sanitized QEMU RSS/CPU ticks. It does not read process arguments, process environments, guest files, database data, or payloads and does not invoke `sudo`.
 
 ## Live VM status
 

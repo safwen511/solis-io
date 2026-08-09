@@ -19,7 +19,7 @@ type ObservabilityConfig struct {
 	Databases []DatabaseObservabilityConfig `json:"databases"`
 }
 
-// HostObservabilityConfig declares future read-only host signal collection.
+// HostObservabilityConfig controls the read-only local host status collector.
 type HostObservabilityConfig struct {
 	Enabled        bool   `json:"enabled"`
 	Interval       string `json:"interval"`

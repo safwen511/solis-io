@@ -1,5 +1,5 @@
 // Package observability defines versioned, collector-independent models for
-// future host, guest, service, database, and incident timeline evidence.
+// host, guest, service, database, and incident timeline evidence.
 //
 // This package performs no collection and has no transport, SSH, guest-agent,
 // or database dependencies.
@@ -66,6 +66,18 @@ type GuestMemoryStatus struct {
 	PSIFullPercent float64 `json:"psi_full_percent"`
 }
 
+// GuestSectionAvailability records partial collection failures without making
+// an otherwise useful guest snapshot unavailable.
+type GuestSectionAvailability struct {
+	Identity        Availability `json:"identity"`
+	CPU             Availability `json:"cpu"`
+	Memory          Availability `json:"memory"`
+	Filesystems     Availability `json:"filesystems"`
+	Network         Availability `json:"network"`
+	ListeningPorts  Availability `json:"listening_ports"`
+	ProcessPressure Availability `json:"process_pressure"`
+}
+
 // FilesystemStatus contains capacity metadata only, never file contents.
 type FilesystemStatus struct {
 	Mountpoint  string  `json:"mountpoint"`
@@ -89,6 +101,7 @@ type NetworkStatus struct {
 // executable name; command-line arguments are intentionally absent.
 type ProcessPressure struct {
 	PID           int     `json:"pid"`
+	PPID          int     `json:"ppid"`
 	Command       string  `json:"command"`
 	CPUPercent    float64 `json:"cpu_percent"`
 	MemoryPercent float64 `json:"memory_percent"`
@@ -96,17 +109,23 @@ type ProcessPressure struct {
 
 // GuestStatus is one versioned guest health snapshot.
 type GuestStatus struct {
-	SchemaVersion   string             `json:"schema_version"`
-	ObservedAtUTC   string             `json:"observed_at_utc"`
-	WindowID        string             `json:"window_id"`
-	VM              VMIdentity         `json:"vm"`
-	Availability    Availability       `json:"availability"`
-	CPU             GuestCPUStatus     `json:"cpu"`
-	Memory          GuestMemoryStatus  `json:"memory"`
-	Filesystems     []FilesystemStatus `json:"filesystems"`
-	Network         []NetworkStatus    `json:"network"`
-	ProcessPressure []ProcessPressure  `json:"process_pressure"`
-	Privacy         PrivacyFlags       `json:"privacy"`
+	SchemaVersion   string                   `json:"schema_version"`
+	ObservedAtUTC   string                   `json:"observed_at_utc"`
+	WindowID        string                   `json:"window_id"`
+	VM              VMIdentity               `json:"vm"`
+	Hostname        string                   `json:"hostname"`
+	KernelRelease   string                   `json:"kernel_release"`
+	UptimeSeconds   float64                  `json:"uptime_seconds"`
+	Availability    Availability             `json:"availability"`
+	Sections        GuestSectionAvailability `json:"sections"`
+	CPU             GuestCPUStatus           `json:"cpu"`
+	Memory          GuestMemoryStatus        `json:"memory"`
+	Filesystems     []FilesystemStatus       `json:"filesystems"`
+	Network         []NetworkStatus          `json:"network"`
+	ServiceRefs     []string                 `json:"service_refs"`
+	ListeningPorts  []ListeningPort          `json:"listening_ports"`
+	ProcessPressure []ProcessPressure        `json:"process_pressure"`
+	Privacy         PrivacyFlags             `json:"privacy"`
 }
 
 // DatabaseCounters contains PostgreSQL statistics counters without table data
@@ -159,34 +178,46 @@ type ListeningPort struct {
 	Protocol string `json:"protocol"`
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
+	Process  string `json:"process"`
+}
+
+// SystemdUnitStatus contains only explicitly allowlisted systemd properties.
+type SystemdUnitStatus struct {
+	ID                 string       `json:"id"`
+	ActiveState        string       `json:"active_state"`
+	SubState           string       `json:"sub_state"`
+	MainPID            int          `json:"main_pid"`
+	Restarts           uint64       `json:"restarts"`
+	MainStartTimestamp string       `json:"main_start_timestamp"`
+	Availability       Availability `json:"availability"`
 }
 
 // AppHealthStatus contains the result metadata for an allowlisted health
 // endpoint. Request and response bodies are not represented.
 type AppHealthStatus struct {
-	Name         string       `json:"name"`
-	Path         string       `json:"path"`
-	Checked      bool         `json:"checked"`
-	StatusCode   int          `json:"status_code"`
-	LatencyMS    float64      `json:"latency_ms"`
-	Availability Availability `json:"availability"`
+	Name          string       `json:"name"`
+	Path          string       `json:"path"`
+	Checked       bool         `json:"checked"`
+	StatusCode    int          `json:"status_code"`
+	LatencyMS     float64      `json:"latency_ms"`
+	Error         string       `json:"error"`
+	BodyCollected bool         `json:"body_collected"`
+	Availability  Availability `json:"availability"`
 }
 
 // ServiceStatus is one versioned service metadata snapshot.
 type ServiceStatus struct {
-	SchemaVersion  string            `json:"schema_version"`
-	ObservedAtUTC  string            `json:"observed_at_utc"`
-	WindowID       string            `json:"window_id"`
-	VM             VMIdentity        `json:"vm"`
-	Name           string            `json:"name"`
-	SystemdUnit    string            `json:"systemd_unit"`
-	ActiveState    string            `json:"active_state"`
-	SubState       string            `json:"sub_state"`
-	MainPID        int               `json:"main_pid"`
-	ListeningPorts []ListeningPort   `json:"listening_ports"`
-	HealthChecks   []AppHealthStatus `json:"health_checks"`
-	Availability   Availability      `json:"availability"`
-	Privacy        PrivacyFlags      `json:"privacy"`
+	SchemaVersion    string              `json:"schema_version"`
+	ObservedAtUTC    string              `json:"observed_at_utc"`
+	WindowID         string              `json:"window_id"`
+	VM               VMIdentity          `json:"vm"`
+	Name             string              `json:"name"`
+	Units            []SystemdUnitStatus `json:"units"`
+	ListeningPorts   []ListeningPort     `json:"listening_ports"`
+	PortAvailability Availability        `json:"port_availability"`
+	HealthChecks     []AppHealthStatus   `json:"health_checks"`
+	Availability     Availability        `json:"availability"`
+	Privacy          PrivacyFlags        `json:"privacy"`
 }
 
 // TimelineEvent is one time-aligned numeric observation. Arbitrary payloads

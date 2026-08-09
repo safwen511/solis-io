@@ -1,6 +1,6 @@
 # Solis I/O
 
-Solis I/O is a Linux-only, provider-side KVM/libvirt storage-latency attribution CLI written in Go. It helps infrastructure operators determine whether a tenant VM slowdown correlates with host-side storage pressure from another VM—without logging in to guests or inspecting customer payloads.
+Solis I/O is a Linux-only, provider-side KVM/libvirt storage-latency attribution CLI written in Go. Its core diagnosis works without guest access and helps infrastructure operators determine whether a tenant VM slowdown correlates with host-side storage pressure from another VM. An optional, strictly allowlisted guest/service collector can add sanitized health metadata; neither mode inspects customer payloads.
 
 > **Project status:** Solis I/O is currently a lab/demo project. It is useful for controlled experiments and development, but it is not production-ready or production-hardened.
 
@@ -37,6 +37,7 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Produce timestamped capture bundles containing text evidence, a human-readable `incident-report.md`, and machine-readable `evidence-summary.json`.
 - Expose live VM status as a terminal table or JSON document.
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
+- Collect opt-in guest resource, listening-port, process-pressure, configured systemd unit, and HTTP health metadata through fixed allowlisted SSH commands.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
 
 The `top` command remains a placeholder.
@@ -58,6 +59,8 @@ sudo ./solis ebpf block-latency --duration 10s
 sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis inventory
 ./solis host status --json
+./solis --config ./solis.json guest status --vm a-web --json
+./solis --config ./solis.json service status --vm a-web --json
 sudo ./solis status
 sudo ./solis status --duration 3s --interval 1s
 sudo ./solis status --duration 3s --interval 1s --json
@@ -166,7 +169,7 @@ The built-in values preserve the repository-relative lab workflow for developmen
 
 ### Observability configuration
 
-Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for the local host collector and future guest, service, and database collectors:
+Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for the local host collector, the guest/service collectors, and a future database collector:
 
 ```json
 {
@@ -221,7 +224,7 @@ Schema version 1 remains supported. Schema version 2 adds an optional, strictly 
 }
 ```
 
-Observability is opt-in. Omitting the block leaves automatic host and guest observability disabled and the database list empty; guest collection also requires an explicit `enabled: true`. An explicit `solis host status --json` invocation is still allowed and uses safe read-only defaults. When present, the host interval and PSI/network flags configure that command. Guest, service, and database settings remain definitions only and do not run SSH, database queries, health checks, or guest-agent commands.
+Observability is opt-in. Omitting the block leaves automatic host and guest observability disabled and the database list empty; guest and service collection require an explicit `guest.enabled: true`, a validated inventory VM, and fixed service definitions. An explicit `solis host status --json` invocation is still allowed and uses safe read-only defaults. When present, the host interval and PSI/network flags configure that command. Database settings remain definitions only: PostgreSQL collection and guest-agent execution are not implemented.
 
 Do not put passwords, tokens, secrets, private keys, or credential values in the JSON file. `credential_ref` may be empty or refer to `systemd-credential:`, `file:`, or `env:` sources, but Solis does not read those references yet. The schema provides no arbitrary command, arbitrary SQL, table-scan, process-argument, environment, journal, or payload collection fields. Health-check body collection must remain `false`.
 
@@ -247,6 +250,17 @@ Collect a one-second, provider-side host pressure window as deterministic JSON:
 ```
 
 The command reads fixed local procfs data, sysfs block-device names, filesystem capacity through `statfs`, and short QEMU `comm` names. It reports CPU deltas, memory capacity, optional PSI, filesystem usage, disk counters and rates, optional network counters and rates, and sanitized QEMU RSS/CPU ticks. It does not read process arguments, process environments, guest files, database data, or payloads and does not invoke `sudo`.
+
+## Opt-in guest and service status
+
+With schema version 2 and `observability.guest.enabled: true`, collect deterministic guest or configured-service JSON for one inventory VM:
+
+```bash
+./solis --config ./solis.json guest status --vm a-web --json
+./solis --config ./solis.json service status --vm a-web --json
+```
+
+The SSH transport is non-interactive, uses the configured user and `known_hosts`, derives its destination only from inventory, bounds command output, and exposes only fixed command categories. Guest status contains resource summaries, listening socket metadata, and process pressure using short process names only. Service status contains allowlisted systemd properties for explicitly configured units plus HTTP status code and latency for configured paths; redirects are not followed and response bodies are closed without being read. Solis does not accept arbitrary commands, collect process arguments or environments, read journals, collect request/response bodies, or run database queries. Guest and service collection is disabled by default.
 
 ## Live VM status
 
@@ -433,7 +447,7 @@ From the repository root, run:
 ./lab/scripts/run-mvp-demo.sh
 ```
 
-> **Lab only:** This script logs in to the configured stress VM at `192.168.140.40` and generates temporary fio write load inside that guest. SSH and fio orchestration remain outside the Solis CLI product path.
+> **Lab only:** This script logs in to the configured stress VM at `192.168.140.40` and generates temporary fio write load inside that guest. Workload SSH/fio orchestration remains outside the Solis CLI product path.
 
 The script validates SSH, remote fio, and local `sudo` access before starting the workload. It waits for fio, removes `/home/flint/solis-mvp-demo.dat` from the stress guest, runs `fstrim`, prints the fio summary, and reports both the capture directory and Markdown incident-report path. Its main settings can be overridden through environment variables, for example:
 
@@ -455,9 +469,9 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 
 ## Safety and privacy
 
-- Provider-side only; no guest login is required.
-- The Solis CLI does not SSH into tenant VMs.
-- Does not inspect guest memory, guest filesystems, customer disk contents, database contents, or application payloads.
+- Core storage diagnosis is provider-side and requires no guest login; the optional guest/service commands use explicitly configured, allowlisted SSH access.
+- Guest/service collection is disabled by default and targets inventory VMs only.
+- Does not inspect guest memory, persistent guest files, process arguments or environments, journals, customer disk contents, database contents, secrets, or application payloads/bodies.
 - Uses provider-visible VM metadata, disk topology, experiment summaries, kernel block counters, and QEMU process counters.
 - Collection commands are read-only and do not create, stop, start, or modify VMs.
 - Does not bypass host permissions or invoke `sudo` internally.

@@ -9,9 +9,9 @@ import (
 	"unicode"
 )
 
-// ObservabilityConfig contains opt-in definitions for future collectors.
-// Loading this configuration does not start a collector or access a guest,
-// database, service, credential, or network endpoint.
+// ObservabilityConfig contains opt-in definitions for local host, allowlisted
+// guest/service, and future database collectors. Loading configuration alone
+// never starts collection or contacts a guest or endpoint.
 type ObservabilityConfig struct {
 	Host      HostObservabilityConfig       `json:"host"`
 	Guest     GuestObservabilityConfig      `json:"guest"`
@@ -27,8 +27,7 @@ type HostObservabilityConfig struct {
 	CollectNetwork bool   `json:"collect_network"`
 }
 
-// GuestObservabilityConfig declares a future guest transport. Guest access is
-// disabled by default and is not implemented by this package.
+// GuestObservabilityConfig declares the opt-in allowlisted guest transport.
 type GuestObservabilityConfig struct {
 	Enabled        bool   `json:"enabled"`
 	Transport      string `json:"transport"`
@@ -184,7 +183,7 @@ func validateServices(services []ServiceObservabilityConfig) error {
 		seenUnits := make(map[string]struct{}, len(service.Units))
 		for _, unit := range service.Units {
 			unit = strings.TrimSpace(unit)
-			if unit == "" || containsSpaceOrControl(unit) || !strings.HasSuffix(unit, ".service") {
+			if !validSystemdUnit(unit) {
 				return fmt.Errorf("observability service %q has invalid systemd unit %q", identity, unit)
 			}
 			if _, duplicate := seenUnits[unit]; duplicate {
@@ -209,6 +208,20 @@ func validateServices(services []ServiceObservabilityConfig) error {
 		}
 	}
 	return nil
+}
+
+func validSystemdUnit(unit string) bool {
+	if unit == "" || !strings.HasSuffix(unit, ".service") {
+		return false
+	}
+	for _, character := range unit {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' || strings.ContainsRune("_.@:-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateHealthCheck(service string, health HealthCheckConfig) error {

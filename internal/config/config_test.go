@@ -172,6 +172,13 @@ func TestValidateObservabilityRejectsUnsafeValues(t *testing.T) {
 			want: "unsupported",
 		},
 		{
+			name: "unsafe systemd unit",
+			mutate: func(settings *Settings) {
+				settings.Observability.Services[0].Units[0] = "nginx.service;id"
+			},
+			want: "invalid systemd unit",
+		},
+		{
 			name: "unapproved credential reference",
 			mutate: func(settings *Settings) {
 				settings.Observability.Databases[0].CredentialRef = "plain-text-value"

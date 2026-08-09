@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,12 +21,15 @@ import (
 	"github.com/safwen511/solis-io/internal/doctor"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
+	"github.com/safwen511/solis-io/internal/guest"
 	"github.com/safwen511/solis-io/internal/hostmetrics"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/observability"
 	"github.com/safwen511/solis-io/internal/output"
 	"github.com/safwen511/solis-io/internal/qemuio"
+	"github.com/safwen511/solis-io/internal/servicehealth"
 	statusview "github.com/safwen511/solis-io/internal/status"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
@@ -56,6 +60,18 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return runHostStatus(runtimeConfig, stdout)
+	case "guest":
+		name, err := parseVMJSONStatusArgs(args, "guest")
+		if err != nil {
+			return err
+		}
+		return runGuestStatus(runtimeConfig, name, stdout)
+	case "service":
+		name, err := parseVMJSONStatusArgs(args, "service")
+		if err != nil {
+			return err
+		}
+		return runServiceStatus(runtimeConfig, name, stdout)
 	case "status":
 		options, err := parseStatusArgs(args)
 		if err != nil {
@@ -126,6 +142,8 @@ const ebpfBlockCountUsage = "usage: solis ebpf block-count --duration <duration>
 const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
 const hostStatusUsage = "usage: solis host status --json"
+const guestStatusUsage = "usage: solis guest status --vm <name> --json"
+const serviceStatusUsage = "usage: solis service status --vm <name> --json"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -175,6 +193,40 @@ func parseHostStatusArgs(args []string) error {
 		return errors.New(hostStatusUsage)
 	}
 	return nil
+}
+
+func parseVMJSONStatusArgs(args []string, command string) (string, error) {
+	usage := guestStatusUsage
+	if command == "service" {
+		usage = serviceStatusUsage
+	}
+	if command != "guest" && command != "service" || len(args) != 5 || args[0] != command || args[1] != "status" {
+		return "", errors.New(usage)
+	}
+	var name string
+	seenVM, seenJSON := false, false
+	for index := 2; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			if seenJSON {
+				return "", errors.New(usage)
+			}
+			seenJSON = true
+		case "--vm":
+			if seenVM || index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return "", errors.New(usage)
+			}
+			name = strings.TrimSpace(args[index+1])
+			seenVM = true
+			index++
+		default:
+			return "", errors.New(usage)
+		}
+	}
+	if !seenVM || !seenJSON || name == "" {
+		return "", errors.New(usage)
+	}
+	return name, nil
 }
 
 func parseStatusArgs(args []string) (statusOptions, error) {
@@ -1666,6 +1718,133 @@ func runHostStatus(runtimeConfig solisconfig.Runtime, w io.Writer) error {
 	return nil
 }
 
+func runGuestStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
+	vm, guestConfig, serviceRefs, err := loadGuestTarget(runtimeConfig, name)
+	if err != nil {
+		return fmt.Errorf("guest status error: %w", err)
+	}
+	connectTimeout, err := time.ParseDuration(guestConfig.ConnectTimeout)
+	if err != nil || connectTimeout <= 0 {
+		return fmt.Errorf("guest status error: invalid configured guest connect timeout %q", guestConfig.ConnectTimeout)
+	}
+	runner, err := guest.NewSSHRunner(guest.SSHOptions{ConnectTimeout: connectTimeout, KnownHosts: guestConfig.KnownHosts})
+	if err != nil {
+		return fmt.Errorf("guest status error: %w", err)
+	}
+	return runGuestStatusWithRunner(context.Background(), *vm, guestConfig, serviceRefs, runner, w)
+}
+
+func runGuestStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, serviceRefs []string, runner guest.Runner, w io.Writer) error {
+	target, err := guest.TargetForVM(vm, guestConfig.User)
+	if err != nil {
+		return fmt.Errorf("guest status error: %w", err)
+	}
+	status, err := guest.Collect(ctx, runner, target, vm, guest.CollectOptions{
+		CommandTimeout: 10 * time.Second, ServiceRefs: serviceRefs, Now: time.Now,
+	})
+	if err != nil {
+		return fmt.Errorf("guest status error: %w", err)
+	}
+	if err := observability.WriteGuestStatus(w, status); err != nil {
+		return fmt.Errorf("guest status error: %w", err)
+	}
+	return nil
+}
+
+func runServiceStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
+	vm, guestConfig, _, err := loadGuestTarget(runtimeConfig, name)
+	if err != nil {
+		return fmt.Errorf("service status error: %w", err)
+	}
+	services := configuredServicesForVM(runtimeConfig.Settings.EffectiveObservability().Services, name)
+	if len(services) == 0 {
+		return fmt.Errorf("service status error: no services configured for VM: %s", name)
+	}
+	connectTimeout, err := time.ParseDuration(guestConfig.ConnectTimeout)
+	if err != nil || connectTimeout <= 0 {
+		return fmt.Errorf("service status error: invalid configured guest connect timeout %q", guestConfig.ConnectTimeout)
+	}
+	runner, err := guest.NewSSHRunner(guest.SSHOptions{ConnectTimeout: connectTimeout, KnownHosts: guestConfig.KnownHosts})
+	if err != nil {
+		return fmt.Errorf("service status error: %w", err)
+	}
+	return runServiceStatusWithRunner(context.Background(), *vm, guestConfig, services, runner, w)
+}
+
+func runServiceStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, services []solisconfig.ServiceObservabilityConfig, runner guest.Runner, w io.Writer) error {
+	target, err := guest.TargetForVM(vm, guestConfig.User)
+	if err != nil {
+		return fmt.Errorf("service status error: %w", err)
+	}
+	connectTimeout, err := time.ParseDuration(guestConfig.ConnectTimeout)
+	if err != nil || connectTimeout <= 0 {
+		return fmt.Errorf("service status error: invalid configured guest connect timeout %q", guestConfig.ConnectTimeout)
+	}
+	report, err := servicehealth.Collect(ctx, runner, target, vm, services, servicehealth.Options{
+		CommandTimeout: 10 * time.Second, HealthTimeout: connectTimeout, Now: time.Now,
+	})
+	if err != nil {
+		return fmt.Errorf("service status error: %w", err)
+	}
+	if err := servicehealth.WriteJSON(w, report); err != nil {
+		return fmt.Errorf("service status error: %w", err)
+	}
+	return nil
+}
+
+func loadGuestTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, []string, error) {
+	observabilityConfig := runtimeConfig.Settings.EffectiveObservability()
+	if !observabilityConfig.Guest.Enabled {
+		return nil, solisconfig.GuestObservabilityConfig{}, nil, errors.New("guest collection is disabled in configuration")
+	}
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return nil, solisconfig.GuestObservabilityConfig{}, nil, err
+	}
+	names := make([]string, len(vms))
+	for index := range vms {
+		names[index] = vms[index].Name
+	}
+	if err := solisconfig.ValidateWithInventory(runtimeConfig.Settings, names); err != nil {
+		return nil, solisconfig.GuestObservabilityConfig{}, nil, err
+	}
+	vm, ok := inventory.FindByName(vms, name)
+	if !ok {
+		return nil, solisconfig.GuestObservabilityConfig{}, nil, fmt.Errorf("VM not found: %s", name)
+	}
+	services := configuredServicesForVM(observabilityConfig.Services, name)
+	refs := make([]string, 0, len(services))
+	for _, service := range services {
+		identity := strings.TrimSpace(service.ID)
+		if identity == "" {
+			identity = service.VM
+		}
+		refs = append(refs, identity)
+	}
+	sort.Strings(refs)
+	return vm, observabilityConfig.Guest, refs, nil
+}
+
+func configuredServicesForVM(services []solisconfig.ServiceObservabilityConfig, name string) []solisconfig.ServiceObservabilityConfig {
+	selected := make([]solisconfig.ServiceObservabilityConfig, 0)
+	for _, service := range services {
+		if service.VM == name {
+			selected = append(selected, service)
+		}
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		left, right := strings.TrimSpace(selected[i].ID), strings.TrimSpace(selected[j].ID)
+		if left == "" {
+			left = selected[i].VM
+		}
+		if right == "" {
+			right = selected[j].VM
+		}
+		return left < right
+	})
+	return selected
+}
+
 func hostStatusOptions(settings solisconfig.Settings) (hostmetrics.Options, error) {
 	options := hostmetrics.DefaultOptions()
 	if settings.Observability == nil {
@@ -1700,6 +1879,8 @@ Commands:
   solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration>
   solis inventory
   solis host status --json
+  solis guest status --vm <name> --json
+  solis service status --vm <name> --json
   solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
   solis top
   solis inspect <vm> [--verbose]

@@ -30,6 +30,11 @@ func WriteServiceStatus(dst io.Writer, status ServiceStatus) error {
 	if err := validatePrivacy(status.Privacy); err != nil {
 		return err
 	}
+	for _, health := range status.HealthChecks {
+		if health.BodyCollected {
+			return errors.New("observability service status cannot record response body collection")
+		}
+	}
 	normalizeServiceStatus(&status)
 	return writeJSON(dst, status)
 }
@@ -64,12 +69,20 @@ func normalizeGuestStatus(status *GuestStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
 	status.Filesystems = append([]FilesystemStatus(nil), status.Filesystems...)
 	status.Network = append([]NetworkStatus(nil), status.Network...)
+	status.ServiceRefs = append([]string(nil), status.ServiceRefs...)
+	status.ListeningPorts = append([]ListeningPort(nil), status.ListeningPorts...)
 	status.ProcessPressure = append([]ProcessPressure(nil), status.ProcessPressure...)
 	if status.Filesystems == nil {
 		status.Filesystems = []FilesystemStatus{}
 	}
 	if status.Network == nil {
 		status.Network = []NetworkStatus{}
+	}
+	if status.ServiceRefs == nil {
+		status.ServiceRefs = []string{}
+	}
+	if status.ListeningPorts == nil {
+		status.ListeningPorts = []ListeningPort{}
 	}
 	if status.ProcessPressure == nil {
 		status.ProcessPressure = []ProcessPressure{}
@@ -80,6 +93,8 @@ func normalizeGuestStatus(status *GuestStatus) {
 	sort.Slice(status.Network, func(i, j int) bool {
 		return status.Network[i].Interface < status.Network[j].Interface
 	})
+	sort.Strings(status.ServiceRefs)
+	sortListeningPorts(status.ListeningPorts)
 	sort.Slice(status.ProcessPressure, func(i, j int) bool {
 		if status.ProcessPressure[i].PID == status.ProcessPressure[j].PID {
 			return status.ProcessPressure[i].Command < status.ProcessPressure[j].Command
@@ -118,26 +133,38 @@ func normalizeDBStatus(status *DBStatus) {
 
 func normalizeServiceStatus(status *ServiceStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
+	status.Units = append([]SystemdUnitStatus(nil), status.Units...)
 	status.ListeningPorts = append([]ListeningPort(nil), status.ListeningPorts...)
 	status.HealthChecks = append([]AppHealthStatus(nil), status.HealthChecks...)
+	if status.Units == nil {
+		status.Units = []SystemdUnitStatus{}
+	}
 	if status.ListeningPorts == nil {
 		status.ListeningPorts = []ListeningPort{}
 	}
 	if status.HealthChecks == nil {
 		status.HealthChecks = []AppHealthStatus{}
 	}
-	sort.Slice(status.ListeningPorts, func(i, j int) bool {
-		left, right := status.ListeningPorts[i], status.ListeningPorts[j]
+	sort.Slice(status.Units, func(i, j int) bool { return status.Units[i].ID < status.Units[j].ID })
+	sortListeningPorts(status.ListeningPorts)
+	sort.Slice(status.HealthChecks, func(i, j int) bool {
+		return status.HealthChecks[i].Name < status.HealthChecks[j].Name
+	})
+}
+
+func sortListeningPorts(ports []ListeningPort) {
+	sort.Slice(ports, func(i, j int) bool {
+		left, right := ports[i], ports[j]
 		if left.Protocol != right.Protocol {
 			return left.Protocol < right.Protocol
 		}
 		if left.Address != right.Address {
 			return left.Address < right.Address
 		}
-		return left.Port < right.Port
-	})
-	sort.Slice(status.HealthChecks, func(i, j int) bool {
-		return status.HealthChecks[i].Name < status.HealthChecks[j].Name
+		if left.Port != right.Port {
+			return left.Port < right.Port
+		}
+		return left.Process < right.Process
 	})
 }
 

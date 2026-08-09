@@ -22,6 +22,7 @@ const source = "configured allowlisted service metadata"
 type Options struct {
 	CommandTimeout time.Duration
 	HealthTimeout  time.Duration
+	WindowID       string
 	Now            func() time.Time
 	HTTPClient     *http.Client
 }
@@ -46,6 +47,7 @@ func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm i
 	report := Report{
 		SchemaVersion: observability.SchemaVersion,
 		ObservedAtUTC: options.Now().UTC().Format(time.RFC3339Nano),
+		WindowID:      options.WindowID,
 		VM:            observability.VMIdentity{Name: vm.Name, Tenant: vm.Tenant, Role: vm.Role},
 		Services:      []observability.ServiceStatus{},
 	}
@@ -61,7 +63,7 @@ func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm i
 		}
 		service := observability.ServiceStatus{
 			SchemaVersion: observability.SchemaVersion, ObservedAtUTC: report.ObservedAtUTC,
-			VM: report.VM, Name: serviceIdentity(configured), Units: []observability.SystemdUnitStatus{},
+			WindowID: options.WindowID, VM: report.VM, Name: serviceIdentity(configured), Units: []observability.SystemdUnitStatus{},
 			ListeningPorts: append([]observability.ListeningPort(nil), ports...), PortAvailability: portAvailability,
 			HealthChecks: []observability.AppHealthStatus{},
 		}

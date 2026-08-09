@@ -7,7 +7,8 @@ import (
 
 // EnrichOptions controls host-side inventory queries.
 type EnrichOptions struct {
-	LibvirtURI string
+	LibvirtURI               string
+	SkipQEMUProcessArguments bool
 }
 
 // Enrich adds host information reported by libvirt and QEMU to each VM.
@@ -21,7 +22,12 @@ func EnrichWithOptions(vms []VM, options EnrichOptions) []VM {
 		vms[i].State = domainState(vms[i].Name, options.LibvirtURI)
 		vms[i].IPLease = leaseIP(vms[i].Name, options.LibvirtURI)
 		vms[i].Disk = diskPath(vms[i].Name, options.LibvirtURI)
-		vms[i].QEMUPID, vms[i].QEMUCmdline = qemuDetails(vms[i].Name)
+		if options.SkipQEMUProcessArguments {
+			vms[i].QEMUPID = readLibvirtPIDFile(vms[i].Name)
+			vms[i].QEMUCmdline = ""
+		} else {
+			vms[i].QEMUPID, vms[i].QEMUCmdline = qemuDetails(vms[i].Name)
+		}
 	}
 
 	return vms

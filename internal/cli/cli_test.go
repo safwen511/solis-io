@@ -89,6 +89,180 @@ func TestParseHostStatusJSON(t *testing.T) {
 	}
 }
 
+func TestParseObserveSnapshot(t *testing.T) {
+	options, err := parseObserveSnapshotArgs([]string{
+		"observe", "snapshot", "--victim", "a-web", "--discover-suspects",
+		"--duration", "4s", "--interval", "1s", "--include-guest",
+		"--include-services", "--include-db", "--include-ebpf-latency", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Victim != "a-web" || !options.DiscoverSuspects || !options.JSON ||
+		options.Duration != 4*time.Second || options.Interval != time.Second ||
+		!options.IncludeGuest || !options.IncludeServices || !options.IncludeDB || !options.IncludeEBPFLatency {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseObserveSnapshotDefaults(t *testing.T) {
+	options, err := parseObserveSnapshotArgs([]string{"observe", "snapshot", "--victim", "a-web", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Duration != 10*time.Second || options.Interval != 2*time.Second || options.Suspect != "" || options.DiscoverSuspects {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseObserveSnapshotValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "victim required", args: []string{"observe", "snapshot", "--json"}, want: "--victim is required"},
+		{name: "json required", args: []string{"observe", "snapshot", "--victim", "a-web"}, want: "--json is required"},
+		{name: "suspect modes conflict", args: []string{"observe", "snapshot", "--victim", "a-web", "--suspect", "b-stress", "--discover-suspects", "--json"}, want: "cannot be used together"},
+		{name: "invalid window", args: []string{"observe", "snapshot", "--victim", "a-web", "--duration", "1s", "--interval", "2s", "--json"}, want: "cannot exceed duration"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseObserveSnapshotArgs(test.args)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestRunObserveSnapshotRejectsUnknownTargetsBeforeCollection(t *testing.T) {
+	runtime := solisconfig.DevelopmentDefaults()
+	runtime.Settings.InventoryCSV = filepath.Join(t.TempDir(), "vms.csv")
+	if err := os.WriteFile(runtime.Settings.InventoryCSV, []byte(
+		"name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\n"+
+			"a-web,tenant-a,tenant-a-net,192.0.2.10,1024,1,10,web\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		options observeSnapshotOptions
+		want    string
+	}{
+		{options: observeSnapshotOptions{Victim: "missing", Duration: time.Second, Interval: time.Second, JSON: true}, want: "victim VM not found: missing"},
+		{options: observeSnapshotOptions{Victim: "a-web", Suspect: "missing", Duration: time.Second, Interval: time.Second, JSON: true}, want: "suspect VM not found: missing"},
+	} {
+		var output bytes.Buffer
+		err := runObserveSnapshot(runtime, test.options, &output)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("error = %v, want %q", err, test.want)
+		}
+	}
+}
+
+func TestDiagnosisTargetEnrichmentDoesNotReadProcessArguments(t *testing.T) {
+	directory := t.TempDir()
+	inventoryPath := filepath.Join(directory, "vms.csv")
+	if err := os.WriteFile(inventoryPath, []byte(
+		"name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\n"+
+			"a-web,tenant-a,tenant-a-net,192.0.2.10,1024,1,10,web\n"+
+			"b-stress,tenant-b,tenant-b-net,192.0.2.20,1024,1,10,stress\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(directory, "ps-called")
+	writeExecutable(t, directory, "virsh", `#!/bin/sh
+case "$*" in
+  *domstate*) printf 'running\n' ;;
+  *domifaddr*a-web*) printf 'vnet0 x ipv4 192.0.2.10/24\n' ;;
+  *domifaddr*b-stress*) printf 'vnet0 x ipv4 192.0.2.20/24\n' ;;
+  *domblklist*a-web*) printf 'file disk vda /images/a-web.qcow2\n' ;;
+  *domblklist*b-stress*) printf 'file disk vda /images/b-stress.qcow2\n' ;;
+esac
+`)
+	writeExecutable(t, directory, "ps", "#!/bin/sh\ntouch \"$SOLIS_PS_MARKER\"\nexit 0\n")
+	t.Setenv("SOLIS_PS_MARKER", marker)
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	runtime := solisconfig.DevelopmentDefaults()
+	runtime.Settings.InventoryCSV = inventoryPath
+	plan, err := loadEnrichedTargetPlan(runtime, "a-web", "b-stress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.VictimTargets[0].Disk != "/images/a-web.qcow2" || plan.SuspectTarget.Disk != "/images/b-stress.qcow2" {
+		t.Fatalf("plan = %#v", plan)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("process argument fallback was invoked: %v", err)
+	}
+}
+
+func TestParseObserveWatch(t *testing.T) {
+	options, err := parseObserveWatchArgs([]string{
+		"observe", "watch", "--victim", "a-web", "--discover-suspects",
+		"--duration", "1s", "--interval", "1s", "--every", "2s", "--iterations", "2",
+		"--include-guest", "--include-services", "--include-db", "--include-ebpf-latency",
+		"--output-dir", "reports", "--json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Victim != "a-web" || !options.DiscoverSuspects || !options.JSON ||
+		options.Duration != time.Second || options.Interval != time.Second || options.Every != 2*time.Second || options.Iterations != 2 ||
+		options.OutputDirectory != "reports" || !options.IncludeGuest || !options.IncludeServices || !options.IncludeDB || !options.IncludeEBPFLatency {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseObserveWatchDefaults(t *testing.T) {
+	options, err := parseObserveWatchArgs([]string{"observe", "watch", "--victim", "a-web", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Duration != 10*time.Second || options.Interval != 2*time.Second || options.Every != 30*time.Second || options.Iterations != 0 {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
+func TestParseObserveWatchValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "victim required", args: []string{"observe", "watch", "--json"}, want: "--victim is required"},
+		{name: "json required", args: []string{"observe", "watch", "--victim", "a-web"}, want: "--json is required"},
+		{name: "suspect conflict", args: []string{"observe", "watch", "--victim", "a-web", "--suspect", "b-stress", "--discover-suspects", "--json"}, want: "cannot be used together"},
+		{name: "invalid iterations", args: []string{"observe", "watch", "--victim", "a-web", "--iterations", "0", "--json"}, want: "invalid --iterations"},
+		{name: "invalid every", args: []string{"observe", "watch", "--victim", "a-web", "--every", "0s", "--json"}, want: "invalid --every"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseObserveWatchArgs(test.args)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestOpenObserveWatchOutputCreatesSanitizedJSONLFile(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "nested", "observe")
+	path, file, err := openObserveWatchOutput(directory, "tenant/a web", time.Date(2026, 8, 9, 10, 11, 12, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "observe-watch-20260809T101112Z-tenant_a_web.jsonl" {
+		t.Fatalf("path = %q", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseGuestAndServiceStatusJSON(t *testing.T) {
 	for _, command := range []string{"guest", "service", "db"} {
 		for _, args := range [][]string{{command, "status", "--vm", "a-web", "--json"}, {command, "status", "--json", "--vm", "a-web"}} {

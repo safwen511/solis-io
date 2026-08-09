@@ -13,6 +13,7 @@ import (
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/incident"
+	"github.com/safwen511/solis-io/internal/observe"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
@@ -84,6 +85,9 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 			func(w io.Writer) error { return ebpf.WriteBlockLatencyEvidenceFile(w, latencyEvidence) },
 		})
 	}
+	artifacts = append(artifacts, artifact{"observe-snapshot.json", func(w io.Writer) error {
+		return writeObserveSnapshot(w, inputs, evidence, now)
+	}})
 	var generatedFiles []string
 	artifacts = append(
 		artifacts,
@@ -153,7 +157,8 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"eBPF latency file written: %s\n"+
 			"Discovery file: %s\n"+
 			"Incident report: incident-report.md\n"+
-			"Evidence JSON: evidence-summary.json\n",
+			"Evidence JSON: evidence-summary.json\n"+
+			"Observe snapshot: observe-snapshot.json\n",
 		timestamp,
 		valueOrDash(inputs.ReportDirectory),
 		evidenceMode,
@@ -179,6 +184,31 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		return err
 	}
 	return nil
+}
+
+func writeObserveSnapshot(dst io.Writer, inputs Inputs, evidence Evidence, now time.Time) error {
+	snapshot := evidence.ObserveSnapshot
+	reason := strings.TrimSpace(evidence.ObserveError)
+	if snapshot == nil {
+		unavailable := observe.NewUnavailableSnapshot(
+			inputs.Victim, inputs.Suspect, captureMode(inputs), inputs.Duration, inputs.Interval,
+			inputs.ConfigSource, reason, now,
+		)
+		snapshot = &unavailable
+	}
+	data, err := observe.MarshalJSON(*snapshot)
+	if err != nil {
+		unavailable := observe.NewUnavailableSnapshot(
+			inputs.Victim, inputs.Suspect, captureMode(inputs), inputs.Duration, inputs.Interval,
+			inputs.ConfigSource, "observe snapshot rendering rejected: "+err.Error(), now,
+		)
+		data, err = observe.MarshalJSON(unavailable)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = dst.Write(append(data, '\n'))
+	return err
 }
 
 func writeLiveOnlyExperimentPlaceholder(dst io.Writer) error {

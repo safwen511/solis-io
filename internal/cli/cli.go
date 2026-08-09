@@ -28,6 +28,7 @@ import (
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/observability"
+	"github.com/safwen511/solis-io/internal/observe"
 	"github.com/safwen511/solis-io/internal/output"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/servicehealth"
@@ -79,6 +80,26 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return runDBStatus(runtimeConfig, name, stdout)
+	case "observe":
+		if len(args) < 2 {
+			return errors.New(observeUsage)
+		}
+		switch args[1] {
+		case "snapshot":
+			options, err := parseObserveSnapshotArgs(args)
+			if err != nil {
+				return err
+			}
+			return runObserveSnapshot(runtimeConfig, options, stdout)
+		case "watch":
+			options, err := parseObserveWatchArgs(args)
+			if err != nil {
+				return err
+			}
+			return runObserveWatch(runtimeConfig, options, stdout, stderr)
+		default:
+			return errors.New(observeUsage)
+		}
 	case "status":
 		options, err := parseStatusArgs(args)
 		if err != nil {
@@ -152,6 +173,9 @@ const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
 const serviceStatusUsage = "usage: solis service status --vm <name> --json"
 const dbStatusUsage = "usage: solis db status --vm <name> --json"
+const observeUsage = "usage: solis observe snapshot|watch [options]"
+const observeSnapshotUsage = "usage: solis observe snapshot --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] --json"
+const observeWatchUsage = "usage: solis observe watch --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] [--output-dir <dir>] --json"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -194,6 +218,175 @@ type statusOptions struct {
 	Iterations int
 	Clear      bool
 	Sort       string
+}
+
+type observeSnapshotOptions struct {
+	Victim             string
+	Suspect            string
+	DiscoverSuspects   bool
+	Duration           time.Duration
+	Interval           time.Duration
+	JSON               bool
+	IncludeGuest       bool
+	IncludeServices    bool
+	IncludeDB          bool
+	IncludeEBPFLatency bool
+}
+
+type observeWatchOptions struct {
+	observeSnapshotOptions
+	Every           time.Duration
+	Iterations      int
+	OutputDirectory string
+}
+
+func parseObserveSnapshotArgs(args []string) (observeSnapshotOptions, error) {
+	options := observeSnapshotOptions{Duration: 10 * time.Second, Interval: 2 * time.Second}
+	if len(args) < 2 || args[0] != "observe" || args[1] != "snapshot" {
+		return observeSnapshotOptions{}, errors.New(observeSnapshotUsage)
+	}
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); index++ {
+		flag := args[index]
+		if seen[flag] {
+			return observeSnapshotOptions{}, fmt.Errorf("%s: %s specified more than once", observeSnapshotUsage, flag)
+		}
+		seen[flag] = true
+		switch flag {
+		case "--json":
+			options.JSON = true
+		case "--discover-suspects":
+			options.DiscoverSuspects = true
+		case "--include-guest":
+			options.IncludeGuest = true
+		case "--include-services":
+			options.IncludeServices = true
+		case "--include-db":
+			options.IncludeDB = true
+		case "--include-ebpf-latency":
+			options.IncludeEBPFLatency = true
+		case "--victim", "--suspect", "--duration", "--interval":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return observeSnapshotOptions{}, fmt.Errorf("%s: %s requires a value", observeSnapshotUsage, flag)
+			}
+			value := strings.TrimSpace(args[index+1])
+			index++
+			switch flag {
+			case "--victim":
+				options.Victim = value
+			case "--suspect":
+				options.Suspect = value
+			case "--duration", "--interval":
+				duration, err := time.ParseDuration(value)
+				if err != nil || duration <= 0 {
+					return observeSnapshotOptions{}, fmt.Errorf("%s: invalid %s %q", observeSnapshotUsage, flag, value)
+				}
+				if flag == "--duration" {
+					options.Duration = duration
+				} else {
+					options.Interval = duration
+				}
+			}
+		default:
+			return observeSnapshotOptions{}, fmt.Errorf("%s: unknown option %s", observeSnapshotUsage, flag)
+		}
+	}
+	if options.Victim == "" {
+		return observeSnapshotOptions{}, fmt.Errorf("%s: --victim is required", observeSnapshotUsage)
+	}
+	if !options.JSON {
+		return observeSnapshotOptions{}, fmt.Errorf("%s: --json is required", observeSnapshotUsage)
+	}
+	if options.Suspect != "" && options.DiscoverSuspects {
+		return observeSnapshotOptions{}, fmt.Errorf("%s: --suspect and --discover-suspects cannot be used together", observeSnapshotUsage)
+	}
+	if options.Interval > options.Duration {
+		return observeSnapshotOptions{}, fmt.Errorf("%s: interval %s cannot exceed duration %s", observeSnapshotUsage, options.Interval, options.Duration)
+	}
+	return options, nil
+}
+
+func parseObserveWatchArgs(args []string) (observeWatchOptions, error) {
+	options := observeWatchOptions{
+		observeSnapshotOptions: observeSnapshotOptions{Duration: 10 * time.Second, Interval: 2 * time.Second},
+		Every:                  30 * time.Second,
+	}
+	if len(args) < 2 || args[0] != "observe" || args[1] != "watch" {
+		return observeWatchOptions{}, errors.New(observeWatchUsage)
+	}
+	seen := make(map[string]bool)
+	for index := 2; index < len(args); index++ {
+		flag := args[index]
+		if seen[flag] {
+			return observeWatchOptions{}, fmt.Errorf("%s: %s specified more than once", observeWatchUsage, flag)
+		}
+		seen[flag] = true
+		switch flag {
+		case "--json":
+			options.JSON = true
+		case "--discover-suspects":
+			options.DiscoverSuspects = true
+		case "--include-guest":
+			options.IncludeGuest = true
+		case "--include-services":
+			options.IncludeServices = true
+		case "--include-db":
+			options.IncludeDB = true
+		case "--include-ebpf-latency":
+			options.IncludeEBPFLatency = true
+		case "--victim", "--suspect", "--duration", "--interval", "--every", "--iterations", "--output-dir":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return observeWatchOptions{}, fmt.Errorf("%s: %s requires a value", observeWatchUsage, flag)
+			}
+			value := strings.TrimSpace(args[index+1])
+			index++
+			switch flag {
+			case "--victim":
+				options.Victim = value
+			case "--suspect":
+				options.Suspect = value
+			case "--duration", "--interval", "--every":
+				duration, err := time.ParseDuration(value)
+				if err != nil || duration <= 0 {
+					return observeWatchOptions{}, fmt.Errorf("%s: invalid %s %q", observeWatchUsage, flag, value)
+				}
+				switch flag {
+				case "--duration":
+					options.Duration = duration
+				case "--interval":
+					options.Interval = duration
+				case "--every":
+					options.Every = duration
+				}
+			case "--iterations":
+				iterations, err := strconv.Atoi(value)
+				if err != nil || iterations <= 0 {
+					return observeWatchOptions{}, fmt.Errorf("%s: invalid --iterations %q", observeWatchUsage, value)
+				}
+				options.Iterations = iterations
+			case "--output-dir":
+				if value == "" {
+					return observeWatchOptions{}, fmt.Errorf("%s: --output-dir must not be empty", observeWatchUsage)
+				}
+				options.OutputDirectory = value
+			}
+		default:
+			return observeWatchOptions{}, fmt.Errorf("%s: unknown option %s", observeWatchUsage, flag)
+		}
+	}
+	if options.Victim == "" {
+		return observeWatchOptions{}, fmt.Errorf("%s: --victim is required", observeWatchUsage)
+	}
+	if !options.JSON {
+		return observeWatchOptions{}, fmt.Errorf("%s: --json is required", observeWatchUsage)
+	}
+	if options.Suspect != "" && options.DiscoverSuspects {
+		return observeWatchOptions{}, fmt.Errorf("%s: --suspect and --discover-suspects cannot be used together", observeWatchUsage)
+	}
+	if options.Interval > options.Duration {
+		return observeWatchOptions{}, fmt.Errorf("%s: interval %s cannot exceed duration %s", observeWatchUsage, options.Interval, options.Duration)
+	}
+	return options, nil
 }
 
 func parseHostStatusArgs(args []string) error {
@@ -995,6 +1188,27 @@ func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedT
 	if options.DiscoverSuspects {
 		mode = "discover-suspects"
 	}
+	observeOptions := observeSnapshotOptions{
+		Victim: evidence.Diagnosis.Inputs.Victim, Suspect: options.Suspect, DiscoverSuspects: options.DiscoverSuspects,
+		Duration: options.Duration, Interval: options.Interval, JSON: true,
+		IncludeEBPFLatency: options.IncludeEBPFLatency,
+	}
+	observeSnapshot, observeErr := collectObserveSnapshot(context.Background(), runtimeConfig, observeOptions)
+	captureEvidence := capture.Evidence{
+		Experiment:  evidence.Experiment,
+		Incident:    evidence.Incident,
+		TracePlan:   evidence.TracePlan,
+		Storage:     evidence.Storage,
+		QEMU:        evidence.QEMU,
+		EBPFLatency: evidence.EBPFLatency,
+		Discovery:   evidence.Discovery,
+		Diagnosis:   evidence.Diagnosis,
+	}
+	if observeErr != nil {
+		captureEvidence.ObserveError = observeErr.Error()
+	} else {
+		captureEvidence.ObserveSnapshot = &observeSnapshot
+	}
 	return capture.Write(
 		capture.Inputs{
 			OutputDirectory:    options.OutputDirectory,
@@ -1008,16 +1222,7 @@ func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedT
 			ConfigSource:       runtimeConfig.Source,
 			Thresholds:         runtimeConfig.Settings.Thresholds,
 		},
-		capture.Evidence{
-			Experiment:  evidence.Experiment,
-			Incident:    evidence.Incident,
-			TracePlan:   evidence.TracePlan,
-			Storage:     evidence.Storage,
-			QEMU:        evidence.QEMU,
-			EBPFLatency: evidence.EBPFLatency,
-			Discovery:   evidence.Discovery,
-			Diagnosis:   evidence.Diagnosis,
-		},
+		captureEvidence,
 		now,
 	)
 }
@@ -1265,7 +1470,7 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
-	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI})
+	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(runtimeConfig))
 	targets, err := discovery.Resolve(vms, options.Victim)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
@@ -1440,7 +1645,7 @@ func loadEnrichedTargetPlan(runtimeConfig solisconfig.Runtime, victim, suspect s
 	if _, duplicate := inventory.FindByName(targets, plan.SuspectTarget.Name); !duplicate {
 		targets = append(targets, plan.SuspectTarget)
 	}
-	targets = inventory.EnrichWithOptions(targets, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI})
+	targets = inventory.EnrichWithOptions(targets, privacySafeEnrichOptions(runtimeConfig))
 
 	plan, err = traceplan.Resolve(targets, victim, suspect)
 	if err != nil {
@@ -1528,7 +1733,7 @@ func collectStatus(runtimeConfig solisconfig.Runtime, options statusOptions) (st
 		return statusview.Report{}, err
 	}
 	report, err := statusview.CollectWithThresholds(
-		inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI}),
+		inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(runtimeConfig)),
 		options.Duration,
 		options.Interval,
 		runtimeConfig.Settings.Thresholds,
@@ -1836,6 +2041,244 @@ func runDBStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig sol
 	return nil
 }
 
+func runObserveSnapshot(runtimeConfig solisconfig.Runtime, options observeSnapshotOptions, w io.Writer) error {
+	snapshot, err := collectObserveSnapshot(context.Background(), runtimeConfig, options)
+	if err != nil {
+		return err
+	}
+	if err := observe.WriteJSON(w, snapshot); err != nil {
+		return fmt.Errorf("observe snapshot error: %w", err)
+	}
+	return nil
+}
+
+func collectObserveSnapshot(ctx context.Context, runtimeConfig solisconfig.Runtime, options observeSnapshotOptions) (observe.ObserveSnapshot, error) {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: %w", err)
+	}
+	names := make([]string, len(vms))
+	for index := range vms {
+		names[index] = vms[index].Name
+	}
+	if err := solisconfig.ValidateWithInventory(runtimeConfig.Settings, names); err != nil {
+		return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: %w", err)
+	}
+	if _, ok := inventory.FindByName(vms, options.Victim); !ok {
+		return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: victim VM not found: %s", options.Victim)
+	}
+	if options.Suspect != "" {
+		if _, ok := inventory.FindByName(vms, options.Suspect); !ok {
+			return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: suspect VM not found: %s", options.Suspect)
+		}
+	}
+
+	// Observe snapshots deliberately skip QEMU command-line discovery. Inventory
+	// runtime identity is limited to libvirt state, PID, disk, and lease metadata.
+	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(runtimeConfig))
+	observabilityConfig := runtimeConfig.Settings.EffectiveObservability()
+	serviceConfigured := make(map[string]bool)
+	for _, service := range observabilityConfig.Services {
+		serviceConfigured[service.VM] = true
+	}
+	databaseConfigured := make(map[string]bool)
+	for _, database := range observabilityConfig.Databases {
+		databaseConfigured[database.VM] = true
+	}
+	includeGuest := options.IncludeGuest || observabilityConfig.Guest.Enabled
+	includeServices := options.IncludeServices || len(observabilityConfig.Services) > 0
+	includeDB := options.IncludeDB || len(observabilityConfig.Databases) > 0
+
+	runner, runnerErr := observeGuestRunner(observabilityConfig.Guest)
+	dependencies := observe.Dependencies{
+		Now: time.Now,
+		Host: func(_ context.Context, windowID string) (hostmetrics.HostStatus, error) {
+			hostOptions, err := hostStatusOptions(runtimeConfig.Settings)
+			if err != nil {
+				return hostmetrics.HostStatus{}, err
+			}
+			hostOptions.Interval = options.Interval
+			hostOptions.WindowID = windowID
+			return hostmetrics.Collect(hostOptions)
+		},
+		QEMU: func(_ context.Context, plan qemuio.Plan, duration, interval time.Duration) (qemuio.SummaryReport, error) {
+			return qemuio.CollectSummaryWithThresholds(plan, duration, interval, runtimeConfig.Settings.Thresholds)
+		},
+		Storage: hoststorage.Resolve,
+		Discovery: func(enriched []inventory.VM, victim string, sampled qemuio.SummaryReport) (discovery.Report, error) {
+			targets, err := discovery.Resolve(enriched, victim)
+			if err != nil {
+				return discovery.Report{}, err
+			}
+			return discovery.Analyze(targets, sampled), nil
+		},
+	}
+	dependencies.Guest = func(ctx context.Context, vm inventory.VM, windowID string) (observability.GuestStatus, error) {
+		if runnerErr != nil {
+			return observability.GuestStatus{}, runnerErr
+		}
+		target, err := guest.TargetForVM(vm, observabilityConfig.Guest.User)
+		if err != nil {
+			return observability.GuestStatus{}, err
+		}
+		refs := configuredServiceRefs(observabilityConfig.Services, vm.Name)
+		return guest.Collect(ctx, runner, target, vm, guest.CollectOptions{
+			CommandTimeout: 10 * time.Second, WindowID: windowID, ServiceRefs: refs, Now: time.Now,
+		})
+	}
+	dependencies.Service = func(ctx context.Context, vm inventory.VM, windowID string) (servicehealth.Report, error) {
+		if runnerErr != nil {
+			return servicehealth.Report{}, runnerErr
+		}
+		target, err := guest.TargetForVM(vm, observabilityConfig.Guest.User)
+		if err != nil {
+			return servicehealth.Report{}, err
+		}
+		connectTimeout, err := configuredGuestTimeout(observabilityConfig.Guest)
+		if err != nil {
+			return servicehealth.Report{}, err
+		}
+		return servicehealth.Collect(ctx, runner, target, vm, configuredServicesForVM(observabilityConfig.Services, vm.Name), servicehealth.Options{
+			CommandTimeout: 10 * time.Second, HealthTimeout: connectTimeout, WindowID: windowID, Now: time.Now,
+		})
+	}
+	dependencies.Database = func(ctx context.Context, vm inventory.VM, windowID string) (observability.DBStatus, error) {
+		if runnerErr != nil {
+			return observability.DBStatus{}, runnerErr
+		}
+		database, err := configuredDatabaseForVM(observabilityConfig.Databases, vm.Name)
+		if err != nil {
+			return observability.DBStatus{}, err
+		}
+		target, err := guest.TargetForVM(vm, observabilityConfig.Guest.User)
+		if err != nil {
+			return observability.DBStatus{}, err
+		}
+		return dbstats.Collect(ctx, runner, target, vm, database, dbstats.Options{
+			CommandTimeout: 10 * time.Second, WindowID: windowID, Now: time.Now,
+		})
+	}
+
+	snapshot, err := observe.Collect(ctx, observe.Request{
+		Victim: options.Victim, Suspect: options.Suspect, DiscoverSuspects: options.DiscoverSuspects,
+		Duration: options.Duration, Interval: options.Interval, ConfigSource: runtimeConfig.Source,
+		IncludeGuest: includeGuest, IncludeServices: includeServices, IncludeDB: includeDB,
+		IncludeEBPFLatency: options.IncludeEBPFLatency, GuestEnabled: observabilityConfig.Guest.Enabled,
+		ServiceConfigured: serviceConfigured, DatabaseConfigured: databaseConfigured,
+	}, vms, dependencies)
+	if err != nil {
+		return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: %w", err)
+	}
+	return snapshot, nil
+}
+
+func runObserveWatch(runtimeConfig solisconfig.Runtime, options observeWatchOptions, stdout, stderr io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	output := stdout
+	summary := observe.WatchSummary{}
+	var outputFile *os.File
+	if options.OutputDirectory != "" {
+		path, file, err := openObserveWatchOutput(options.OutputDirectory, options.Victim, time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("observe watch error: %w", err)
+		}
+		outputFile = file
+		output = io.MultiWriter(stdout, outputFile)
+		summary.OutputPath = path
+	}
+
+	err := observe.Watch(ctx, output, observe.WatchOptions{Every: options.Every, Iterations: options.Iterations}, func(iterationContext context.Context) (observe.ObserveSnapshot, error) {
+		return collectObserveSnapshot(iterationContext, runtimeConfig, options.observeSnapshotOptions)
+	}, &summary)
+	if outputFile != nil {
+		if closeErr := outputFile.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+		outputFile = nil
+	}
+	if summaryErr := observe.WriteWatchSummary(stderr, summary); err == nil && summaryErr != nil {
+		err = summaryErr
+	}
+	if err != nil {
+		return fmt.Errorf("observe watch error: %w", err)
+	}
+	return nil
+}
+
+func openObserveWatchOutput(directory, victim string, now time.Time) (string, *os.File, error) {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create observe watch output directory %q: %w", directory, err)
+	}
+	name := fmt.Sprintf("observe-watch-%s-%s.jsonl", diagnose.FormatUTCTimestamp(now), diagnose.SanitizeFilenamePart(victim))
+	path := filepath.Join(directory, name)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return "", nil, fmt.Errorf("create observe watch output %q: %w", path, err)
+	}
+	return path, file, nil
+}
+
+func observeGuestRunner(configuration solisconfig.GuestObservabilityConfig) (guest.Runner, error) {
+	if strings.TrimSpace(configuration.Transport) != "ssh" {
+		return nil, errors.New("observability guest SSH transport is not configured")
+	}
+	if strings.TrimSpace(configuration.User) == "" || strings.TrimSpace(configuration.KnownHosts) == "" {
+		return nil, errors.New("observability guest SSH user and known_hosts are required")
+	}
+	timeout, err := configuredGuestTimeout(configuration)
+	if err != nil {
+		return nil, err
+	}
+	return guest.NewSSHRunner(guest.SSHOptions{ConnectTimeout: timeout, KnownHosts: configuration.KnownHosts})
+}
+
+func privacySafeEnrichOptions(runtimeConfig solisconfig.Runtime) inventory.EnrichOptions {
+	return inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI, SkipQEMUProcessArguments: true}
+}
+
+func configuredGuestTimeout(configuration solisconfig.GuestObservabilityConfig) (time.Duration, error) {
+	timeout, err := time.ParseDuration(strings.TrimSpace(configuration.ConnectTimeout))
+	if err != nil || timeout <= 0 {
+		return 0, fmt.Errorf("invalid configured guest connect timeout %q", configuration.ConnectTimeout)
+	}
+	return timeout, nil
+}
+
+func configuredServiceRefs(services []solisconfig.ServiceObservabilityConfig, name string) []string {
+	configured := configuredServicesForVM(services, name)
+	refs := make([]string, 0, len(configured))
+	for _, service := range configured {
+		identity := strings.TrimSpace(service.ID)
+		if identity == "" {
+			identity = service.VM
+		}
+		refs = append(refs, identity)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func configuredDatabaseForVM(databases []solisconfig.DatabaseObservabilityConfig, name string) (solisconfig.DatabaseObservabilityConfig, error) {
+	configured := make([]solisconfig.DatabaseObservabilityConfig, 0, 1)
+	for _, database := range databases {
+		if database.VM == name {
+			configured = append(configured, database)
+		}
+	}
+	if len(configured) == 0 {
+		return solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("no database configured for VM: %s", name)
+	}
+	if len(configured) > 1 {
+		return solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("multiple databases configured for VM %s; observe snapshot currently requires exactly one", name)
+	}
+	if configured[0].Kind != "postgresql" {
+		return solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("unsupported database kind %q; supported kind is postgresql", configured[0].Kind)
+	}
+	return configured[0], nil
+}
+
 func loadDatabaseTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, solisconfig.DatabaseObservabilityConfig, error) {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -1961,6 +2404,8 @@ Commands:
   solis guest status --vm <name> --json
   solis service status --vm <name> --json
   solis db status --vm <name> --json
+  solis observe snapshot --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] --json
+  solis observe watch --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] [--output-dir <dir>] --json
   solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
   solis top
   solis inspect <vm> [--verbose]

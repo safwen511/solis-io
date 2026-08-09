@@ -144,6 +144,7 @@ type EvidenceFiles struct {
 	Diagnosis       string `json:"diagnosis"`
 	Metadata        string `json:"metadata"`
 	EvidenceSummary string `json:"evidence_summary"`
+	ObserveSnapshot string `json:"observe_snapshot"`
 }
 
 // WriteEvidenceSummary writes the deterministic JSON representation of an
@@ -206,6 +207,7 @@ func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) Ev
 			Diagnosis:       "diagnosis.txt",
 			Metadata:        "metadata.txt",
 			EvidenceSummary: "evidence-summary.json",
+			ObserveSnapshot: "observe-snapshot.json",
 		},
 	}
 }

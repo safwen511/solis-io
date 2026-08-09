@@ -17,6 +17,7 @@ import (
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/observe"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 )
@@ -72,6 +73,7 @@ func TestWriteMetadata(t *testing.T) {
 		"Discovery file: -",
 		"Incident report: incident-report.md",
 		"Evidence JSON: evidence-summary.json",
+		"Observe snapshot: observe-snapshot.json",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(output.String(), line) {
@@ -94,6 +96,7 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 		"trace-plan.txt",
 		"storage-snapshot.txt",
 		"qemu-io-summary.txt",
+		"observe-snapshot.json",
 		"diagnosis.txt",
 		"evidence-summary.json",
 		"incident-report.md",
@@ -106,6 +109,67 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 		if filepath.Base(result.Files[index]) != name {
 			t.Fatalf("file %d = %q, want %q", index, filepath.Base(result.Files[index]), name)
 		}
+	}
+}
+
+func TestCaptureWritesObserveSnapshotAndReferencesIt(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.IncludeEBPFLatency = false
+	evidence := testCaptureEvidence(nil)
+	snapshot := observe.ObserveSnapshot{
+		SchemaVersion: observe.SchemaVersion, ObservedAtUTC: "2026-08-09T10:11:12Z", WindowID: "observe-fixture",
+		Duration: "1s", Interval: "1s", ConfigSource: config.BuiltInDefaultsSource,
+		Victim: observe.Target{Name: "a-web"}, SelectedSuspect: "b-stress", SuspectMode: "pairwise",
+	}
+	evidence.ObserveSnapshot = &snapshot
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 9, 10, 11, 12, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(result.Directory, "observe-snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded observe.ObserveSnapshot
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		t.Fatalf("observe-snapshot.json is invalid: %v\n%s", err, content)
+	}
+	if decoded.Victim.Name != "a-web" || decoded.WindowID != "observe-fixture" {
+		t.Fatalf("observe snapshot = %#v", decoded)
+	}
+	for _, file := range []string{"metadata.txt", "incident-report.md"} {
+		value, err := os.ReadFile(filepath.Join(result.Directory, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(value), "observe-snapshot.json") {
+			t.Errorf("%s does not reference observe-snapshot.json:\n%s", file, value)
+		}
+	}
+}
+
+func TestCaptureContinuesWithUnavailableObserveSnapshot(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.IncludeEBPFLatency = false
+	evidence := testCaptureEvidence(nil)
+	evidence.ObserveError = "fixture observation failure"
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 9, 10, 12, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(result.Directory, "observe-snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded observe.ObserveSnapshot
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		t.Fatalf("unavailable observe snapshot is invalid: %v\n%s", err, content)
+	}
+	if decoded.EvidenceQuality.Overall != observe.EvidenceUnavailable || !strings.Contains(string(content), "fixture observation failure") {
+		t.Fatalf("unavailable evidence not recorded:\n%s", content)
+	}
+	if len(decoded.UnavailableSections) != 1 || decoded.UnavailableSections[0].Section != "observe_snapshot" {
+		t.Fatalf("unavailable sections = %#v", decoded.UnavailableSections)
 	}
 }
 
@@ -138,6 +202,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"Discovery file: suspect-discovery.txt",
 		"Incident report: incident-report.md",
 		"Evidence JSON: evidence-summary.json",
+		"Observe snapshot: observe-snapshot.json",
 	} {
 		if !strings.Contains(string(metadata), want) {
 			t.Errorf("metadata missing %q:\n%s", want, metadata)
@@ -161,6 +226,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"Consider throttling, migrating, or investigating the selected suspect VM workload (b-stress).",
 		"  - incident-report.md",
 		"  - evidence-summary.json",
+		"  - observe-snapshot.json",
 	} {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("incident report missing %q:\n%s", want, report)
@@ -194,6 +260,7 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 		"storage-snapshot.txt",
 		"qemu-io-summary.txt",
 		"suspect-discovery.txt",
+		"observe-snapshot.json",
 		"diagnosis.txt",
 		"evidence-summary.json",
 		"incident-report.md",
@@ -320,6 +387,9 @@ func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
 	if summary.Safety.GuestPayloadsInspected || summary.Safety.GuestFilesInspected || summary.Safety.ProcessMemoryInspected {
 		t.Fatalf("unsafe evidence flags = %#v", summary.Safety)
 	}
+	if summary.Files.ObserveSnapshot != "observe-snapshot.json" {
+		t.Fatalf("capture file references = %#v", summary.Files)
+	}
 }
 
 func TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect(t *testing.T) {
@@ -371,14 +441,14 @@ func TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(metadata), "Evidence JSON: evidence-summary.json") {
+	if !strings.Contains(string(metadata), "Evidence JSON: evidence-summary.json") || !strings.Contains(string(metadata), "Observe snapshot: observe-snapshot.json") {
 		t.Fatalf("metadata missing JSON reference:\n%s", metadata)
 	}
 	report, err := os.ReadFile(filepath.Join(result.Directory, "incident-report.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(report), "  - evidence-summary.json") {
+	if !strings.Contains(string(report), "  - evidence-summary.json") || !strings.Contains(string(report), "  - observe-snapshot.json") {
 		t.Fatalf("incident report missing JSON reference:\n%s", report)
 	}
 }

@@ -39,6 +39,8 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
 - Collect opt-in guest resource, listening-port, process-pressure, configured systemd unit, and HTTP health metadata through fixed allowlisted SSH commands.
 - Collect opt-in PostgreSQL version, database counters, non-idle activity aggregates, extension names, and numeric `pg_stat_statements` counters through fixed read-only queries.
+- Combine host, VM/QEMU, guest, service, database, and storage evidence into one window-correlated, privacy-safe JSON observation snapshot.
+- Stream repeated unified observation snapshots as JSON Lines for automation and correlation workflows.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
 
 The `top` command remains a placeholder.
@@ -63,6 +65,8 @@ sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis --config ./solis.json guest status --vm a-web --json
 ./solis --config ./solis.json service status --vm a-web --json
 ./solis --config ./solis.json db status --vm a-db --json
+./solis --config ./solis.json observe snapshot --victim a-web --discover-suspects --duration 10s --interval 2s --json
+./solis --config ./solis.json observe watch --victim a-web --discover-suspects --duration 10s --interval 2s --every 30s --iterations 2 --json
 sudo ./solis status
 sudo ./solis status --duration 3s --interval 1s
 sudo ./solis status --duration 3s --interval 1s --json
@@ -274,6 +278,38 @@ For an inventory VM listed under `observability.databases`, collect a one-shot P
 
 PostgreSQL is the only supported engine. The collector uses five fixed, read-only catalog/statistics queries for version, `pg_stat_database`, non-idle `pg_stat_activity` metadata, extension names, and numeric `pg_stat_statements` counters when configured and installed. It never accepts SQL from configuration or the CLI and does not collect query text, table or schema data, dumps, connection strings, credentials, or secrets. `credential_ref` is recognized by configuration validation but is not read by this collector; the current lab transport uses fixed local peer access through the configured guest SSH target.
 
+## Unified observation snapshot
+
+Combine provider-side host, VM/QEMU, and storage evidence with configured guest, service, and PostgreSQL status in one JSON evidence object:
+
+```bash
+./solis --config ./solis.json observe snapshot \
+  --victim a-web \
+  --discover-suspects \
+  --duration 10s \
+  --interval 2s \
+  --json
+```
+
+Use `--suspect <vm>` for an explicit pair, or omit both suspect flags for a victim-centered snapshot. The command assigns one window ID, records each section's observation time, availability, and quality, and emits cautious correlation candidates. Collection is coordinated within one observation window but is not an exact simultaneous sample. It is a correlation foundation, not a diagnosis verdict engine, and it does not claim customer impact or causality. Optional guest, service, and database sections require schema version 2 observability configuration; disabled, unconfigured, unsupported, or failed optional sections are represented in the JSON rather than aborting the whole snapshot.
+
+The snapshot does not collect process arguments, process environments, guest files, journals, request or response bodies, SQL text, table data, dumps, credentials, or secrets. `--include-ebpf-latency` is accepted as an experimental request but currently records that section as unsupported instead of attaching an eBPF program from this orchestration path.
+
+Repeat the same collection as a machine-readable JSON Lines stream:
+
+```bash
+./solis --config ./solis.json observe watch \
+  --victim a-web \
+  --discover-suspects \
+  --duration 1s \
+  --interval 1s \
+  --every 2s \
+  --iterations 2 \
+  --json
+```
+
+Each stdout line is one complete `ObserveSnapshot` JSON document. The final iteration summary and errors are written to stderr so stdout remains parseable JSONL. Omit `--iterations` to continue until Ctrl-C or SIGTERM. Use `--output-dir <dir>` to save the same stream to a timestamped `.jsonl` file while retaining stdout output. Watch remains a foreground CLI loop, not a daemon or verdict engine.
+
 ## Live VM status
 
 Show a compact table of running VMs, their QEMU and qcow2 mappings, physical storage, and sampled write pressure:
@@ -388,6 +424,7 @@ Create a timestamped incident directory containing:
 - `trace-plan.txt`, or `victim-topology.txt` when discovery selects no suspect
 - `storage-snapshot.txt`
 - `qemu-io-summary.txt`
+- `observe-snapshot.json`
 - `diagnosis.txt`
 - `metadata.txt`
 - `incident-report.md`
@@ -406,6 +443,8 @@ sudo ./solis capture noisy-neighbor --victim a-web --discover-suspects --duratio
 ```
 
 Live-only captures mark application evidence unavailable in `diagnosis.txt`, `experiment-summary.txt`, and `incident-report.md`; they do not print zero-valued application metrics as evidence.
+
+`observe-snapshot.json` contains the unified host, VM/QEMU, storage, and configured optional observability view collected for the capture. If that collection is unavailable, capture still completes and the file contains a structured error and evidence-quality record rather than fabricated metrics. Both `metadata.txt` and `incident-report.md` reference the artifact.
 
 ## Watch live noisy-neighbor evidence
 
@@ -484,6 +523,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 - Core storage diagnosis is provider-side and requires no guest login; the optional guest/service commands use explicitly configured, allowlisted SSH access.
 - Guest/service collection is disabled by default and targets inventory VMs only.
 - Does not inspect guest memory, persistent guest files, process arguments or environments, journals, customer disk contents, database contents, secrets, or application payloads/bodies.
+- Unified observe output does not contain SQL text, table data, request or response bodies, arbitrary command output, credentials, tokens, passwords, or private keys.
 - Uses provider-visible VM metadata, disk topology, experiment summaries, kernel block counters, and QEMU process counters.
 - Collection commands are read-only and do not create, stop, start, or modify VMs.
 - Does not bypass host permissions or elevate local host commands internally; the opt-in DB collector may request only fixed non-interactive remote peer access as `postgres`.

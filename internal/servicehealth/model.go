@@ -14,6 +14,7 @@ import (
 type Report struct {
 	SchemaVersion string                        `json:"schema_version"`
 	ObservedAtUTC string                        `json:"observed_at_utc"`
+	WindowID      string                        `json:"window_id"`
 	VM            observability.VMIdentity      `json:"vm"`
 	Availability  observability.Availability    `json:"availability"`
 	Services      []observability.ServiceStatus `json:"services"`

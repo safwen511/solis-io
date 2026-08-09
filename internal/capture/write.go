@@ -88,6 +88,9 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 	artifacts = append(
 		artifacts,
 		artifact{"diagnosis.txt", func(w io.Writer) error { return diagnose.Write(w, evidence.Diagnosis) }},
+		artifact{"evidence-summary.json", func(w io.Writer) error {
+			return WriteEvidenceSummary(w, inputs, evidence, timestamp)
+		}},
 		artifact{"incident-report.md", func(w io.Writer) error {
 			return WriteIncidentReport(w, inputs, evidence, timestamp, generatedFiles)
 		}},
@@ -144,7 +147,8 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"eBPF latency requested: %s\n"+
 			"eBPF latency file written: %s\n"+
 			"Discovery file: %s\n"+
-			"Incident report: incident-report.md\n",
+			"Incident report: incident-report.md\n"+
+			"Evidence JSON: evidence-summary.json\n",
 		timestamp,
 		valueOrDash(inputs.ReportDirectory),
 		evidenceMode,

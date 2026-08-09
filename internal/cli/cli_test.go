@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/safwen511/solis-io/internal/capture"
 )
 
 func TestParseEBPFBlockWatchArgs(t *testing.T) {
@@ -488,5 +491,22 @@ func TestParseWatchNoisyNeighborSelectorValidation(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
+	var output bytes.Buffer
+	result := capture.Result{Directory: "lab/reports/captures/capture-example"}
+	if err := writeWatchCapturePaths(&output, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Capture directory: lab/reports/captures/capture-example",
+		"Incident report: lab/reports/captures/capture-example/incident-report.md",
+		"Evidence JSON: lab/reports/captures/capture-example/evidence-summary.json",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
 	}
 }

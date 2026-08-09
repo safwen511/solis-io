@@ -923,10 +923,7 @@ func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOption
 				}
 				lastCapture = captureTime
 				stats.Captures++
-				if _, err := fmt.Fprintf(w, "Capture directory: %s\n", result.Directory); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintf(w, "Incident report: %s\n", filepath.Join(result.Directory, "incident-report.md")); err != nil {
+				if err := writeWatchCapturePaths(w, result); err != nil {
 					return err
 				}
 			} else if options.CaptureOnAlert {
@@ -955,6 +952,17 @@ func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOption
 		case <-timer.C:
 		}
 	}
+}
+
+func writeWatchCapturePaths(w io.Writer, result capture.Result) error {
+	if _, err := fmt.Fprintf(w, "Capture directory: %s\n", result.Directory); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Incident report: %s\n", filepath.Join(result.Directory, "incident-report.md")); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(w, "Evidence JSON: %s\n", filepath.Join(result.Directory, "evidence-summary.json"))
+	return err
 }
 
 func writeWatchHeader(w io.Writer, options watchNoisyNeighborOptions) error {

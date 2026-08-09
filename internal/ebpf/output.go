@@ -32,16 +32,12 @@ func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockL
 }
 
 func writeBlockLatencyResult(dst io.Writer, result BlockLatencyResult) error {
-	averageNS := float64(0)
-	if result.CompletedRequests > 0 {
-		averageNS = float64(result.TotalLatencyNS) / float64(result.CompletedRequests)
-	}
 	if _, err := fmt.Fprintf(
 		dst,
 		"\nDuration:                 %s\nCorrelation key:           dev + sector (best effort)\nTotal completed requests:  %d\nAverage latency:           %.2f us\nMax latency:               %.2f us\n\nLatency histogram:\n",
 		result.Duration,
 		result.CompletedRequests,
-		averageNS/1000,
+		AverageLatencyMicroseconds(result),
 		float64(result.MaxLatencyNS)/1000,
 	); err != nil {
 		return err
@@ -50,12 +46,8 @@ func writeBlockLatencyResult(dst io.Writer, result BlockLatencyResult) error {
 	if _, err := fmt.Fprintln(w, "LATENCY RANGE\tREQUESTS\tPERCENT"); err != nil {
 		return err
 	}
-	for index, label := range latencyBucketLabels {
-		percent := float64(0)
-		if result.CompletedRequests > 0 {
-			percent = float64(result.Histogram[index]) / float64(result.CompletedRequests) * 100
-		}
-		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f%%\n", label, result.Histogram[index], percent); err != nil {
+	for _, bucket := range LatencyHistogram(result) {
+		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f%%\n", bucket.Range, bucket.Requests, bucket.Percent); err != nil {
 			return err
 		}
 	}
@@ -64,6 +56,39 @@ func writeBlockLatencyResult(dst io.Writer, result BlockLatencyResult) error {
 	}
 	_, err := fmt.Fprintln(dst, "\nSafety: temporary tracepoint programs detached; no payloads or process memory inspected")
 	return err
+}
+
+// LatencyHistogramBucket is one stable, human-readable latency bucket.
+type LatencyHistogramBucket struct {
+	Range    string
+	Requests uint64
+	Percent  float64
+}
+
+// AverageLatencyMicroseconds returns the aggregate request latency average.
+func AverageLatencyMicroseconds(result BlockLatencyResult) float64 {
+	if result.CompletedRequests == 0 {
+		return 0
+	}
+	return float64(result.TotalLatencyNS) / float64(result.CompletedRequests) / 1000
+}
+
+// LatencyHistogram returns the same buckets used by the text renderer. This
+// keeps structured evidence and operator-facing output in lockstep.
+func LatencyHistogram(result BlockLatencyResult) []LatencyHistogramBucket {
+	buckets := make([]LatencyHistogramBucket, 0, len(latencyBucketLabels))
+	for index, label := range latencyBucketLabels {
+		percent := float64(0)
+		if result.CompletedRequests > 0 {
+			percent = float64(result.Histogram[index]) / float64(result.CompletedRequests) * 100
+		}
+		buckets = append(buckets, LatencyHistogramBucket{
+			Range:    label,
+			Requests: result.Histogram[index],
+			Percent:  percent,
+		})
+	}
+	return buckets
 }
 
 func writeBlockLatencyVMContext(dst io.Writer, context BlockLatencyVMContext) error {

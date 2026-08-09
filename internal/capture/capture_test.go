@@ -2,6 +2,7 @@ package capture
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/safwen511/solis-io/internal/incident"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
+	"github.com/safwen511/solis-io/internal/storage"
 )
 
 func TestCaptureDirectoryName(t *testing.T) {
@@ -62,6 +64,7 @@ func TestWriteMetadata(t *testing.T) {
 		"eBPF latency file written: no",
 		"Discovery file: -",
 		"Incident report: incident-report.md",
+		"Evidence JSON: evidence-summary.json",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(output.String(), line) {
@@ -85,6 +88,7 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 		"storage-snapshot.txt",
 		"qemu-io-summary.txt",
 		"diagnosis.txt",
+		"evidence-summary.json",
 		"incident-report.md",
 		"metadata.txt",
 	}
@@ -126,6 +130,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"Selected suspect: b-stress",
 		"Discovery file: suspect-discovery.txt",
 		"Incident report: incident-report.md",
+		"Evidence JSON: evidence-summary.json",
 	} {
 		if !strings.Contains(string(metadata), want) {
 			t.Errorf("metadata missing %q:\n%s", want, metadata)
@@ -148,6 +153,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"No guest payloads, guest files, process memory, or application contents were inspected.",
 		"Consider throttling, migrating, or investigating the selected suspect VM workload (b-stress).",
 		"  - incident-report.md",
+		"  - evidence-summary.json",
 	} {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("incident report missing %q:\n%s", want, report)
@@ -182,6 +188,7 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 		"qemu-io-summary.txt",
 		"suspect-discovery.txt",
 		"diagnosis.txt",
+		"evidence-summary.json",
 		"incident-report.md",
 		"metadata.txt",
 	} {
@@ -210,6 +217,159 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("incident report missing %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.IncludeEBPFLatency = true
+	latency := ebpf.BlockLatencyEvidence{Result: ebpf.BlockLatencyResult{
+		Duration:          time.Second,
+		CompletedRequests: 4,
+		TotalLatencyNS:    200_000,
+		MaxLatencyNS:      100_000,
+		Histogram:         [10]uint64{1, 3},
+	}}
+	evidence := testCaptureEvidence(&latency)
+	evidence.Storage.Targets = []storage.VMTarget{
+		{
+			TargetType: "victim",
+			VM: inventory.VM{
+				Name: "a-web", Tenant: "tenant-a", Role: "web", QEMUPID: "12345",
+				Disk: "/images/a-web.qcow2",
+			},
+			Storage: hoststorage.Mapping{
+				DiskPath: "/images/a-web.qcow2", SourceDevice: "/dev/dm-0",
+				ParentDevice: "/dev/nvme0n1p3", PhysicalDisk: "/dev/nvme0n1",
+			},
+		},
+		{
+			TargetType: "suspect",
+			VM: inventory.VM{
+				Name: "b-stress", Tenant: "tenant-b", Role: "stress", QEMUPID: "12346",
+				Disk: "/images/b-stress.qcow2",
+			},
+			Storage: hoststorage.Mapping{
+				DiskPath: "/images/b-stress.qcow2", SourceDevice: "/dev/dm-0",
+				ParentDevice: "/dev/nvme0n1p3", PhysicalDisk: "/dev/nvme0n1",
+			},
+		},
+	}
+	evidence.QEMU = qemuio.SummaryReport{
+		VictimAverageWriteMiBPerSecond:  1.25,
+		SuspectAverageWriteMiBPerSecond: 42,
+		VictimAverageSyscwPerSecond:     10,
+		SuspectAverageSyscwPerSecond:    120000,
+		VictimDataAvailable:             true,
+		SuspectDataAvailable:            true,
+		MeaningfulSuspectWritePressure:  true,
+		SuspectDominant:                 true,
+		DominantWriter:                  "b-stress",
+		DominantWriteSyscallSource:      "b-stress",
+		Conclusion:                      "Suspect QEMU process is the dominant writer during the observation window.",
+	}
+	evidence.Diagnosis.Impact = experiment.Impact{ThroughputDropPct: 23.61, LatencyIncreasePct: 30.92}
+	evidence.Diagnosis.StorageTopologyAvailable = true
+	evidence.Diagnosis.SharedPhysicalDisk = true
+	evidence.Diagnosis.Verdict = diagnose.ProbableVerdict
+	evidence.Experiment.DuringNoise.FailedRequests = 2
+
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 9, 1, 2, 3, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary EvidenceSummary
+	content, err := os.ReadFile(filepath.Join(result.Directory, "evidence-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(content, &summary); err != nil {
+		t.Fatalf("evidence-summary.json is invalid: %v\n%s", err, content)
+	}
+	if summary.SchemaVersion != "1" || summary.Capture.EvidenceMode != "report-backed" {
+		t.Fatalf("capture summary = %#v", summary.Capture)
+	}
+	if summary.Victim.Name != "a-web" || summary.Victim.QEMUPID == nil || *summary.Victim.QEMUPID != 12345 {
+		t.Fatalf("victim = %#v", summary.Victim)
+	}
+	if summary.SelectedSuspect.Name != "b-stress" || summary.SelectedSuspect.Score != "HIGH" {
+		t.Fatalf("selected suspect = %#v", summary.SelectedSuspect)
+	}
+	if !summary.ExperimentEvidence.Available || summary.ExperimentEvidence.FailedRequestsDuringNoise != 2 {
+		t.Fatalf("experiment evidence = %#v", summary.ExperimentEvidence)
+	}
+	if !summary.StorageTopology.SharedPhysicalDisk || summary.StorageTopology.PhysicalDisk != "/dev/nvme0n1" {
+		t.Fatalf("storage topology = %#v", summary.StorageTopology)
+	}
+	if !summary.EBPFLatency.Available || summary.EBPFLatency.CompletedRequests != 4 || len(summary.EBPFLatency.Histogram) != 10 {
+		t.Fatalf("eBPF evidence = %#v", summary.EBPFLatency)
+	}
+	if summary.Verdict.Severity != "probable" {
+		t.Fatalf("verdict = %#v", summary.Verdict)
+	}
+	if summary.Safety.GuestPayloadsInspected || summary.Safety.GuestFilesInspected || summary.Safety.ProcessMemoryInspected {
+		t.Fatalf("unsafe evidence flags = %#v", summary.Safety)
+	}
+}
+
+func TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	inputs.ReportDirectory = ""
+	inputs.CaptureMode = "discover-suspects"
+	inputs.Suspect = "-"
+	inputs.IncludeEBPFLatency = false
+	discoveryReport := discovery.Report{
+		Victim:          inventory.VM{Name: "a-web", Tenant: "tenant-a", Role: "web"},
+		VictimStorage:   hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"},
+		SelectionReason: "no dominant writer observed",
+	}
+	evidence := testCaptureEvidence(nil)
+	evidence.Experiment = experiment.Report{}
+	evidence.Discovery = &discoveryReport
+	evidence.Diagnosis = diagnose.Report{
+		Inputs:              diagnose.Inputs{Victim: "a-web", Suspect: "-"},
+		ExperimentAvailable: false,
+		Discovery:           &discoveryReport,
+		Verdict:             diagnose.NoDominantLiveCandidateVerdict,
+	}
+
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 9, 1, 2, 4, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary EvidenceSummary
+	content, err := os.ReadFile(filepath.Join(result.Directory, "evidence-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(content, &summary); err != nil {
+		t.Fatalf("evidence-summary.json is invalid: %v", err)
+	}
+	if summary.Capture.EvidenceMode != "live-only" || summary.Capture.ReportDir != "-" {
+		t.Fatalf("capture summary = %#v", summary.Capture)
+	}
+	if summary.ExperimentEvidence.Available {
+		t.Fatalf("experiment evidence = %#v", summary.ExperimentEvidence)
+	}
+	if summary.SelectedSuspect.Name != "-" || summary.Discovery.SelectedSuspect != "-" {
+		t.Fatalf("selection = %#v / %#v", summary.SelectedSuspect, summary.Discovery)
+	}
+	if !summary.Discovery.Enabled || summary.Discovery.Candidates == nil {
+		t.Fatalf("discovery = %#v", summary.Discovery)
+	}
+	metadata, err := os.ReadFile(filepath.Join(result.Directory, "metadata.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(metadata), "Evidence JSON: evidence-summary.json") {
+		t.Fatalf("metadata missing JSON reference:\n%s", metadata)
+	}
+	report, err := os.ReadFile(filepath.Join(result.Directory, "incident-report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(report), "  - evidence-summary.json") {
+		t.Fatalf("incident report missing JSON reference:\n%s", report)
 	}
 }
 

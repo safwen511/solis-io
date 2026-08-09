@@ -201,6 +201,25 @@ func TestWriteBlockLatency(t *testing.T) {
 	}
 }
 
+func TestLatencyHistogramStructuredValues(t *testing.T) {
+	result := BlockLatencyResult{CompletedRequests: 4, TotalLatencyNS: 200_000}
+	result.Histogram[0] = 1
+	result.Histogram[1] = 3
+	buckets := LatencyHistogram(result)
+	if len(buckets) != 10 {
+		t.Fatalf("bucket count = %d, want 10", len(buckets))
+	}
+	if buckets[0].Range != "< 10 us" || buckets[0].Requests != 1 || buckets[0].Percent != 25 {
+		t.Fatalf("first bucket = %#v", buckets[0])
+	}
+	if buckets[1].Range != "10-49 us" || buckets[1].Requests != 3 || buckets[1].Percent != 75 {
+		t.Fatalf("second bucket = %#v", buckets[1])
+	}
+	if got := AverageLatencyMicroseconds(result); got != 50 {
+		t.Fatalf("average latency = %v us, want 50", got)
+	}
+}
+
 func TestLatencyOperationErrorIncludesVerifierAndPermissionGuidance(t *testing.T) {
 	verifierError := latencyOperationError("load latency program", "block_rq_complete", syscall.EINVAL, "invalid access to context")
 	for _, want := range []string{"load latency program", "block:block_rq_complete", "verifier log", "invalid access to context"} {

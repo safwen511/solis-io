@@ -73,11 +73,19 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 			func(w io.Writer) error { return ebpf.WriteBlockLatencyEvidenceFile(w, latencyEvidence) },
 		})
 	}
+	var generatedFiles []string
 	artifacts = append(
 		artifacts,
 		artifact{"diagnosis.txt", func(w io.Writer) error { return diagnose.Write(w, evidence.Diagnosis) }},
+		artifact{"incident-report.md", func(w io.Writer) error {
+			return WriteIncidentReport(w, inputs, evidence, timestamp, generatedFiles)
+		}},
 		artifact{"metadata.txt", func(w io.Writer) error { return WriteMetadata(w, inputs, timestamp) }},
 	)
+	generatedFiles = make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		generatedFiles = append(generatedFiles, artifact.name)
+	}
 
 	result := Result{Directory: directory}
 	for _, artifact := range artifacts {
@@ -122,7 +130,8 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Selected suspect: %s\n"+
 			"eBPF latency requested: %s\n"+
 			"eBPF latency file written: %s\n"+
-			"Discovery file: %s\n",
+			"Discovery file: %s\n"+
+			"Incident report: incident-report.md\n",
 		timestamp,
 		inputs.ReportDirectory,
 		inputs.Victim,

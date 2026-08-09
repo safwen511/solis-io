@@ -59,6 +59,7 @@ func TestWriteMetadata(t *testing.T) {
 		"eBPF latency requested: no",
 		"eBPF latency file written: no",
 		"Discovery file: -",
+		"Incident report: incident-report.md",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(output.String(), line) {
@@ -67,7 +68,7 @@ func TestWriteMetadata(t *testing.T) {
 	}
 }
 
-func TestPairwiseCaptureFileSetRemainsUnchanged(t *testing.T) {
+func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = false
 	evidence := testCaptureEvidence(nil)
@@ -82,6 +83,7 @@ func TestPairwiseCaptureFileSetRemainsUnchanged(t *testing.T) {
 		"storage-snapshot.txt",
 		"qemu-io-summary.txt",
 		"diagnosis.txt",
+		"incident-report.md",
 		"metadata.txt",
 	}
 	if len(result.Files) != len(want) {
@@ -101,6 +103,7 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 	evidence := testCaptureEvidence(nil)
 	evidence.Discovery = &discoveryReport
 	evidence.Diagnosis.Discovery = &discoveryReport
+	evidence.Diagnosis.Verdict = diagnose.ProbableVerdict
 	result, err := Write(inputs, evidence, time.Date(2026, 8, 8, 21, 17, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
@@ -120,9 +123,32 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"Capture mode: discover-suspects",
 		"Selected suspect: b-stress",
 		"Discovery file: suspect-discovery.txt",
+		"Incident report: incident-report.md",
 	} {
 		if !strings.Contains(string(metadata), want) {
 			t.Errorf("metadata missing %q:\n%s", want, metadata)
+		}
+	}
+	report, err := os.ReadFile(filepath.Join(result.Directory, "incident-report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Solis Noisy Neighbor Incident Report",
+		"- Selected suspect: b-stress",
+		"- Capture mode: discover-suspects",
+		"### Experiment slowdown evidence",
+		"### Shared storage topology",
+		"### Suspect discovery result",
+		"### QEMU writer/syscall attribution",
+		"eBPF block latency is host/storage-path level, not exact per-VM attribution.",
+		"QEMU io-summary is used for VM writer attribution.",
+		"No guest payloads, guest files, process memory, or application contents were inspected.",
+		"Consider throttling, migrating, or investigating the selected suspect VM workload (b-stress).",
+		"  - incident-report.md",
+	} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("incident report missing %q:\n%s", want, report)
 		}
 	}
 }
@@ -154,6 +180,7 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 		"qemu-io-summary.txt",
 		"suspect-discovery.txt",
 		"diagnosis.txt",
+		"incident-report.md",
 		"metadata.txt",
 	} {
 		if _, err := os.Stat(filepath.Join(result.Directory, name)); err != nil {
@@ -169,6 +196,18 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 	}
 	if !strings.Contains(string(metadata), "Selected suspect: -") {
 		t.Fatalf("metadata missing empty selection:\n%s", metadata)
+	}
+	report, err := os.ReadFile(filepath.Join(result.Directory, "incident-report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Selected suspect: -",
+		"Continue monitoring or expand the observation window.",
+	} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("incident report missing %q:\n%s", want, report)
+		}
 	}
 }
 
@@ -267,6 +306,18 @@ func TestWriteCreatesEBPFBlockLatencyArtifact(t *testing.T) {
 	}
 	if !strings.Contains(string(metadata), "eBPF block latency: ebpf-block-latency.txt") {
 		t.Fatalf("metadata missing eBPF artifact reference:\n%s", metadata)
+	}
+	report, err := os.ReadFile(filepath.Join(result.Directory, "incident-report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"### eBPF block latency evidence",
+		"Total completed requests:  2",
+	} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("incident report missing eBPF evidence %q:\n%s", want, report)
+		}
 	}
 }
 

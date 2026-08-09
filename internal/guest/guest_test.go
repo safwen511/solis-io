@@ -59,6 +59,52 @@ func TestCommandAllowlistCannotBeOverridden(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLCommandsAreFixedReadOnlyStatistics(t *testing.T) {
+	constructors := []func(string) (CommandSpec, error){
+		PostgreSQLVersionCommand, PostgreSQLDatabasesCommand, PostgreSQLActivityCommand,
+		PostgreSQLExtensionsCommand, PostgreSQLStatementsCommand,
+	}
+	for _, construct := range constructors {
+		command, err := construct("postgres")
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv, err := command.argv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(argv, " ")
+		for _, want := range []string{"sudo -n -u postgres", "psql", "--csv", "ON_ERROR_STOP=1", "--dbname postgres", "--command SELECT"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("command %s missing %q: %s", command.Key(), want, joined)
+			}
+		}
+		lower := strings.ToLower(joined)
+		for _, forbidden := range []string{"select query from", "select *", "information_schema", "pg_dump", "insert ", "update ", "delete ", "password", "token"} {
+			if strings.Contains(lower, forbidden) {
+				t.Errorf("command %s contains forbidden SQL/action %q: %s", command.Key(), forbidden, joined)
+			}
+		}
+	}
+	for _, database := range []string{"postgres;id", "postgres $(id)", "postgres/name"} {
+		if _, err := PostgreSQLVersionCommand(database); err == nil {
+			t.Errorf("unsafe database name %q accepted", database)
+		}
+	}
+}
+
+func TestRemoteArgumentQuotingProtectsFixedSQL(t *testing.T) {
+	command, _ := PostgreSQLActivityCommand("postgres")
+	argv, _ := command.argv()
+	remote := joinRemoteArgs(argv)
+	if !strings.Contains(remote, `'"'"'idle'"'"'`) {
+		t.Fatalf("SQL quote was not shell escaped: %s", remote)
+	}
+	if strings.Contains(remote, "; id") {
+		t.Fatalf("unexpected command injection surface: %s", remote)
+	}
+}
+
 func TestTargetMustComeFromInventory(t *testing.T) {
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
 	target, err := TargetForVM(vm, "flint")

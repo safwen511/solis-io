@@ -142,35 +142,62 @@ type DatabaseCounters struct {
 
 // DatabaseActivity summarizes active and waiting sessions without query text.
 type DatabaseActivity struct {
-	ActiveSessions      int      `json:"active_sessions"`
-	WaitingSessions     int      `json:"waiting_sessions"`
-	OldestActiveSeconds float64  `json:"oldest_active_seconds"`
-	WaitEvents          []string `json:"wait_events"`
+	ActiveSessions      int              `json:"active_sessions"`
+	WaitingSessions     int              `json:"waiting_sessions"`
+	OldestActiveSeconds float64          `json:"oldest_active_seconds"`
+	WaitEvents          []WaitEventCount `json:"wait_events"`
+}
+
+// WaitEventCount aggregates active PostgreSQL wait metadata without SQL text.
+type WaitEventCount struct {
+	Type  string `json:"type"`
+	Event string `json:"event"`
+	Count int    `json:"count"`
 }
 
 // StatementStatistics contains numeric pg_stat_statements evidence only.
 type StatementStatistics struct {
 	QueryID          string  `json:"query_id"`
 	Calls            uint64  `json:"calls"`
-	TotalExecutionMS float64 `json:"total_execution_ms"`
-	MeanExecutionMS  float64 `json:"mean_execution_ms"`
+	TotalExecutionMS float64 `json:"total_exec_time_ms"`
+	MeanExecutionMS  float64 `json:"mean_exec_time_ms"`
 	Rows             int64   `json:"rows"`
+}
+
+// PGStatStatementsStatus records numeric statement counters only. Query text
+// is structurally absent and explicitly marked as not collected.
+type PGStatStatementsStatus struct {
+	Available          bool                  `json:"available"`
+	Availability       Availability          `json:"availability"`
+	Entries            []StatementStatistics `json:"entries"`
+	QueryTextCollected bool                  `json:"query_text_collected"`
+}
+
+// DBSectionAvailability preserves useful partial snapshots when one fixed
+// statistics query is unavailable.
+type DBSectionAvailability struct {
+	Version          Availability `json:"version"`
+	Databases        Availability `json:"databases"`
+	Activity         Availability `json:"activity"`
+	Extensions       Availability `json:"extensions"`
+	PGStatStatements Availability `json:"pg_stat_statements"`
 }
 
 // DBStatus is one versioned database statistics snapshot.
 type DBStatus struct {
-	SchemaVersion       string                `json:"schema_version"`
-	ObservedAtUTC       string                `json:"observed_at_utc"`
-	WindowID            string                `json:"window_id"`
-	VM                  VMIdentity            `json:"vm"`
-	Engine              string                `json:"engine"`
-	Version             string                `json:"version"`
-	Availability        Availability          `json:"availability"`
-	Databases           []DatabaseCounters    `json:"databases"`
-	Activity            DatabaseActivity      `json:"activity"`
-	Extensions          []string              `json:"extensions"`
-	StatementStatistics []StatementStatistics `json:"statement_statistics"`
-	Privacy             PrivacyFlags          `json:"privacy"`
+	SchemaVersion    string                 `json:"schema_version"`
+	ObservedAtUTC    string                 `json:"observed_at_utc"`
+	WindowID         string                 `json:"window_id"`
+	VM               VMIdentity             `json:"vm"`
+	Engine           string                 `json:"engine"`
+	Version          string                 `json:"version"`
+	Availability     Availability           `json:"availability"`
+	Sections         DBSectionAvailability  `json:"sections"`
+	Databases        []DatabaseCounters     `json:"databases"`
+	Activity         DatabaseActivity       `json:"activity"`
+	Extensions       []string               `json:"extensions"`
+	PGStatStatements PGStatStatementsStatus `json:"pg_stat_statements"`
+	Privacy          PrivacyFlags           `json:"privacy"`
 }
 
 // ListeningPort contains service socket metadata only.

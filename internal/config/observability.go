@@ -10,7 +10,7 @@ import (
 )
 
 // ObservabilityConfig contains opt-in definitions for local host, allowlisted
-// guest/service, and future database collectors. Loading configuration alone
+// guest/service, and PostgreSQL statistics collectors. Loading configuration alone
 // never starts collection or contacts a guest or endpoint.
 type ObservabilityConfig struct {
 	Host      HostObservabilityConfig       `json:"host"`
@@ -249,8 +249,8 @@ func validateDatabases(databases []DatabaseObservabilityConfig) error {
 		if strings.TrimSpace(database.Kind) != "postgresql" {
 			return fmt.Errorf("observability database %q kind %q is unsupported; supported kind is \"postgresql\"", name, database.Kind)
 		}
-		if name == "" || containsSpaceOrControl(name) {
-			return fmt.Errorf("observability database for VM %q requires a database name without whitespace", vm)
+		if !validDatabaseName(name) {
+			return fmt.Errorf("observability database for VM %q requires a database name using letters, numbers, dot, dash, or underscore", vm)
 		}
 		identity := vm + "/" + name
 		if _, duplicate := seen[identity]; duplicate {
@@ -262,6 +262,20 @@ func validateDatabases(databases []DatabaseObservabilityConfig) error {
 		}
 	}
 	return nil
+}
+
+func validDatabaseName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, character := range name {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' || strings.ContainsRune("_.-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateCredentialRef(reference string) error {

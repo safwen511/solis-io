@@ -38,13 +38,14 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Expose live VM status as a terminal table or JSON document.
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
 - Collect opt-in guest resource, listening-port, process-pressure, configured systemd unit, and HTTP health metadata through fixed allowlisted SSH commands.
+- Collect opt-in PostgreSQL version, database counters, non-idle activity aggregates, extension names, and numeric `pg_stat_statements` counters through fixed read-only queries.
 - Check host, lab, inventory, storage, and QEMU procfs readiness with `solis doctor`.
 
 The `top` command remains a placeholder.
 
 ## Current command set
 
-Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procfs file is commonly protected when QEMU runs under another account. Experimental eBPF inspection and attachment may also require elevated capabilities. Solis never invokes `sudo` itself.
+Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procfs file is commonly protected when QEMU runs under another account. Experimental eBPF inspection and attachment may also require elevated capabilities. Host-side Solis commands do not elevate themselves. The opt-in PostgreSQL SSH collector can use one fixed remote `sudo -n -u postgres psql` command for local peer statistics access; it cannot run arbitrary sudo commands.
 
 The explicit `10s` and `2s` values below are example observation settings, not universal defaults; defaults vary by command.
 
@@ -61,6 +62,7 @@ sudo ./solis ebpf block-latency --victim a-web --suspect b-stress --duration 10s
 ./solis host status --json
 ./solis --config ./solis.json guest status --vm a-web --json
 ./solis --config ./solis.json service status --vm a-web --json
+./solis --config ./solis.json db status --vm a-db --json
 sudo ./solis status
 sudo ./solis status --duration 3s --interval 1s
 sudo ./solis status --duration 3s --interval 1s --json
@@ -169,7 +171,7 @@ The built-in values preserve the repository-relative lab workflow for developmen
 
 ### Observability configuration
 
-Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for the local host collector, the guest/service collectors, and a future database collector:
+Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for the local host, guest/service, and PostgreSQL statistics collectors:
 
 ```json
 {
@@ -224,7 +226,7 @@ Schema version 1 remains supported. Schema version 2 adds an optional, strictly 
 }
 ```
 
-Observability is opt-in. Omitting the block leaves automatic host and guest observability disabled and the database list empty; guest and service collection require an explicit `guest.enabled: true`, a validated inventory VM, and fixed service definitions. An explicit `solis host status --json` invocation is still allowed and uses safe read-only defaults. When present, the host interval and PSI/network flags configure that command. Database settings remain definitions only: PostgreSQL collection and guest-agent execution are not implemented.
+Observability is opt-in. Omitting the block leaves automatic host and guest observability disabled and the database list empty; guest and service collection require an explicit `guest.enabled: true`, a validated inventory VM, and fixed service definitions. PostgreSQL collection requires an explicit database entry and configured inventory-bound SSH transport settings. An explicit `solis host status --json` invocation is still allowed and uses safe read-only defaults. Guest-agent execution is not implemented.
 
 Do not put passwords, tokens, secrets, private keys, or credential values in the JSON file. `credential_ref` may be empty or refer to `systemd-credential:`, `file:`, or `env:` sources, but Solis does not read those references yet. The schema provides no arbitrary command, arbitrary SQL, table-scan, process-argument, environment, journal, or payload collection fields. Health-check body collection must remain `false`.
 
@@ -260,7 +262,17 @@ With schema version 2 and `observability.guest.enabled: true`, collect determini
 ./solis --config ./solis.json service status --vm a-web --json
 ```
 
-The SSH transport is non-interactive, uses the configured user and `known_hosts`, derives its destination only from inventory, bounds command output, and exposes only fixed command categories. Guest status contains resource summaries, listening socket metadata, and process pressure using short process names only. Service status contains allowlisted systemd properties for explicitly configured units plus HTTP status code and latency for configured paths; redirects are not followed and response bodies are closed without being read. Solis does not accept arbitrary commands, collect process arguments or environments, read journals, collect request/response bodies, or run database queries. Guest and service collection is disabled by default.
+The SSH transport is non-interactive, uses the configured user and `known_hosts`, derives its destination only from inventory, bounds command output, and exposes only fixed command categories. Guest status contains resource summaries, listening socket metadata, and process pressure using short process names only. Service status contains allowlisted systemd properties for explicitly configured units plus HTTP status code and latency for configured paths; redirects are not followed and response bodies are closed without being read. Solis does not accept arbitrary commands, collect process arguments or environments, read journals, or collect request/response bodies. Guest and service collection is disabled by default.
+
+## Opt-in PostgreSQL statistics
+
+For an inventory VM listed under `observability.databases`, collect a one-shot PostgreSQL statistics document:
+
+```bash
+./solis --config ./solis.json db status --vm a-db --json
+```
+
+PostgreSQL is the only supported engine. The collector uses five fixed, read-only catalog/statistics queries for version, `pg_stat_database`, non-idle `pg_stat_activity` metadata, extension names, and numeric `pg_stat_statements` counters when configured and installed. It never accepts SQL from configuration or the CLI and does not collect query text, table or schema data, dumps, connection strings, credentials, or secrets. `credential_ref` is recognized by configuration validation but is not read by this collector; the current lab transport uses fixed local peer access through the configured guest SSH target.
 
 ## Live VM status
 
@@ -338,7 +350,7 @@ sudo ./solis diagnose noisy-neighbor --victim a-web --discover-suspects --durati
 
 Live-only mode discovers same-storage candidates and evaluates current storage topology, QEMU writer activity, syscall pressure, and optional host-path eBPF latency. It can identify likely provider-side storage-neighbor pressure, but without an external report it cannot prove that application-level slowdown occurred.
 
-Solis itself never invokes `sudo`. These examples use it because Linux commonly restricts access to `/proc/<qemu-pid>/io` for QEMU processes owned by another account. Use the minimum privileges appropriate for your environment.
+Solis does not elevate these host-side diagnosis commands internally. These examples use `sudo` because Linux commonly restricts access to `/proc/<qemu-pid>/io` for QEMU processes owned by another account. The separate opt-in DB collector has one fixed remote peer-access command; use the minimum privileges appropriate for your environment.
 
 To save a combined diagnosis, add either `--output <path>` or `--output-dir <dir>`. The latter generates a UTC timestamped filename and will not overwrite an existing report with the same name.
 
@@ -474,7 +486,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 - Does not inspect guest memory, persistent guest files, process arguments or environments, journals, customer disk contents, database contents, secrets, or application payloads/bodies.
 - Uses provider-visible VM metadata, disk topology, experiment summaries, kernel block counters, and QEMU process counters.
 - Collection commands are read-only and do not create, stop, start, or modify VMs.
-- Does not bypass host permissions or invoke `sudo` internally.
+- Does not bypass host permissions or elevate local host commands internally; the opt-in DB collector may request only fixed non-interactive remote peer access as `postgres`.
 - QEMU I/O commands may need to be launched with `sudo` because Linux can protect `/proc/<qemu-pid>/io` from other users.
 
 ## Current limitations

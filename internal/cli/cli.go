@@ -16,6 +16,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/capture"
 	solisconfig "github.com/safwen511/solis-io/internal/config"
+	"github.com/safwen511/solis-io/internal/dbstats"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/doctor"
@@ -72,6 +73,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return runServiceStatus(runtimeConfig, name, stdout)
+	case "db":
+		name, err := parseVMJSONStatusArgs(args, "db")
+		if err != nil {
+			return err
+		}
+		return runDBStatus(runtimeConfig, name, stdout)
 	case "status":
 		options, err := parseStatusArgs(args)
 		if err != nil {
@@ -144,6 +151,7 @@ const statusUsage = "usage: solis status [--duration <duration>] [--interval <du
 const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
 const serviceStatusUsage = "usage: solis service status --vm <name> --json"
+const dbStatusUsage = "usage: solis db status --vm <name> --json"
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -199,8 +207,10 @@ func parseVMJSONStatusArgs(args []string, command string) (string, error) {
 	usage := guestStatusUsage
 	if command == "service" {
 		usage = serviceStatusUsage
+	} else if command == "db" {
+		usage = dbStatusUsage
 	}
-	if command != "guest" && command != "service" || len(args) != 5 || args[0] != command || args[1] != "status" {
+	if command != "guest" && command != "service" && command != "db" || len(args) != 5 || args[0] != command || args[1] != "status" {
 		return "", errors.New(usage)
 	}
 	var name string
@@ -1792,6 +1802,75 @@ func runServiceStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfi
 	return nil
 }
 
+func runDBStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
+	vm, guestConfig, database, err := loadDatabaseTarget(runtimeConfig, name)
+	if err != nil {
+		return fmt.Errorf("db status error: %w", err)
+	}
+	connectTimeout, err := time.ParseDuration(guestConfig.ConnectTimeout)
+	if err != nil || connectTimeout <= 0 {
+		return fmt.Errorf("db status error: database collection requires a positive observability.guest.connect_timeout")
+	}
+	if strings.TrimSpace(guestConfig.Transport) != "ssh" || strings.TrimSpace(guestConfig.User) == "" || strings.TrimSpace(guestConfig.KnownHosts) == "" {
+		return errors.New("db status error: database collection requires configured observability.guest SSH user and known_hosts")
+	}
+	runner, err := guest.NewSSHRunner(guest.SSHOptions{ConnectTimeout: connectTimeout, KnownHosts: guestConfig.KnownHosts})
+	if err != nil {
+		return fmt.Errorf("db status error: %w", err)
+	}
+	return runDBStatusWithRunner(context.Background(), *vm, guestConfig, database, runner, w)
+}
+
+func runDBStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, database solisconfig.DatabaseObservabilityConfig, runner guest.Runner, w io.Writer) error {
+	target, err := guest.TargetForVM(vm, guestConfig.User)
+	if err != nil {
+		return fmt.Errorf("db status error: %w", err)
+	}
+	status, err := dbstats.Collect(ctx, runner, target, vm, database, dbstats.Options{CommandTimeout: 10 * time.Second, Now: time.Now})
+	if err != nil {
+		return fmt.Errorf("db status error: %w", err)
+	}
+	if err := dbstats.WriteJSON(w, status); err != nil {
+		return fmt.Errorf("db status error: %w", err)
+	}
+	return nil
+}
+
+func loadDatabaseTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, solisconfig.DatabaseObservabilityConfig, error) {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, err
+	}
+	names := make([]string, len(vms))
+	for index := range vms {
+		names[index] = vms[index].Name
+	}
+	if err := solisconfig.ValidateWithInventory(runtimeConfig.Settings, names); err != nil {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, err
+	}
+	vm, ok := inventory.FindByName(vms, name)
+	if !ok {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("VM not found: %s", name)
+	}
+	observabilityConfig := runtimeConfig.Settings.EffectiveObservability()
+	configured := make([]solisconfig.DatabaseObservabilityConfig, 0, 1)
+	for _, database := range observabilityConfig.Databases {
+		if database.VM == name {
+			configured = append(configured, database)
+		}
+	}
+	if len(configured) == 0 {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("no database configured for VM: %s", name)
+	}
+	if len(configured) > 1 {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("multiple databases configured for VM %s; db status currently requires exactly one", name)
+	}
+	if configured[0].Kind != "postgresql" {
+		return nil, solisconfig.GuestObservabilityConfig{}, solisconfig.DatabaseObservabilityConfig{}, fmt.Errorf("unsupported database kind %q; supported kind is postgresql", configured[0].Kind)
+	}
+	return vm, observabilityConfig.Guest, configured[0], nil
+}
+
 func loadGuestTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, []string, error) {
 	observabilityConfig := runtimeConfig.Settings.EffectiveObservability()
 	if !observabilityConfig.Guest.Enabled {
@@ -1881,6 +1960,7 @@ Commands:
   solis host status --json
   solis guest status --vm <name> --json
   solis service status --vm <name> --json
+  solis db status --vm <name> --json
   solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
   solis top
   solis inspect <vm> [--verbose]

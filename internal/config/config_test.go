@@ -185,6 +185,20 @@ func TestValidateObservabilityRejectsUnsafeValues(t *testing.T) {
 			},
 			want: "credential_ref must be empty or use",
 		},
+		{
+			name: "unsupported database kind",
+			mutate: func(settings *Settings) {
+				settings.Observability.Databases[0].Kind = "mysql"
+			},
+			want: "kind \"mysql\" is unsupported",
+		},
+		{
+			name: "unsafe database name",
+			mutate: func(settings *Settings) {
+				settings.Observability.Databases[0].Database = "postgres;id"
+			},
+			want: "requires a database name using",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -208,6 +222,7 @@ func TestLoadRejectsInlineCredentialsAndUnsafeCollectorFields(t *testing.T) {
 		{"secret", `"client_secret":"secret-value",`, "inline credential"},
 		{"arbitrary SSH command", `"ssh_command":"cat /etc/shadow",`, "unsafe observability field"},
 		{"raw SQL", `"raw_sql":"SELECT * FROM customers",`, "unsafe observability field"},
+		{"table scan field", `"scan_tables":["customers"],`, "unsafe observability field"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -90,7 +90,7 @@ func TestParseHostStatusJSON(t *testing.T) {
 }
 
 func TestParseGuestAndServiceStatusJSON(t *testing.T) {
-	for _, command := range []string{"guest", "service"} {
+	for _, command := range []string{"guest", "service", "db"} {
 		for _, args := range [][]string{{command, "status", "--vm", "a-web", "--json"}, {command, "status", "--json", "--vm", "a-web"}} {
 			name, err := parseVMJSONStatusArgs(args, command)
 			if err != nil || name != "a-web" {
@@ -99,6 +99,44 @@ func TestParseGuestAndServiceStatusJSON(t *testing.T) {
 		}
 		if _, err := parseVMJSONStatusArgs([]string{command, "status", "--json"}, command); err == nil {
 			t.Fatalf("%s accepted missing VM", command)
+		}
+	}
+}
+
+func TestLoadDatabaseTargetRejectsUnknownAndMissingConfig(t *testing.T) {
+	database := solisconfig.DatabaseObservabilityConfig{VM: "a-db", Kind: "postgresql", Database: "postgres"}
+	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{database})
+	if _, _, _, err := loadDatabaseTarget(runtime, "missing"); err == nil || !strings.Contains(err.Error(), "VM not found: missing") {
+		t.Fatalf("unknown VM error = %v", err)
+	}
+	runtime = testDBRuntime(t, nil)
+	if _, _, _, err := loadDatabaseTarget(runtime, "a-db"); err == nil || !strings.Contains(err.Error(), "no database configured for VM: a-db") {
+		t.Fatalf("missing DB config error = %v", err)
+	}
+}
+
+func TestLoadDatabaseTargetRejectsUnsupportedKind(t *testing.T) {
+	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{{VM: "a-db", Kind: "mysql", Database: "postgres"}})
+	if _, _, _, err := loadDatabaseTarget(runtime, "a-db"); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("unsupported kind error = %v", err)
+	}
+}
+
+func TestConfiguredDatabaseCollectionUsesFakeRunner(t *testing.T) {
+	database := solisconfig.DatabaseObservabilityConfig{VM: "a-db", Kind: "postgresql", Database: "postgres", CollectPGStatStatements: true}
+	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{database})
+	vm, guestConfig, configured, err := loadDatabaseTarget(runtime, "a-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := completeCLIDBFakeRunner(t, configured.Database)
+	var output bytes.Buffer
+	if err := runDBStatusWithRunner(context.Background(), *vm, guestConfig, configured, runner, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"engine": "postgresql"`, `"name": "postgres"`, `"query_text_collected": false`, `"table_data_collected": false`, `"secrets_collected": false`} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("DB JSON missing %q:\n%s", want, output.String())
 		}
 	}
 }
@@ -182,6 +220,23 @@ func testGuestRuntime(t *testing.T, services []solisconfig.ServiceObservabilityC
 	return solisconfig.Runtime{Settings: settings, Source: "test", BaseDir: t.TempDir()}
 }
 
+func testDBRuntime(t *testing.T, databases []solisconfig.DatabaseObservabilityConfig) solisconfig.Runtime {
+	t.Helper()
+	inventoryPath := filepath.Join(t.TempDir(), "vms.csv")
+	if err := os.WriteFile(inventoryPath, []byte("name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\na-db,tenant-a,tenant-a-net,192.0.2.30,1024,1,10,db\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := solisconfig.Settings{
+		SchemaVersion: solisconfig.SchemaVersion2, InventoryCSV: inventoryPath, CaptureOutputRoot: t.TempDir(), LibvirtURI: "qemu:///system",
+		Thresholds: solisconfig.DefaultThresholds(),
+		Observability: &solisconfig.ObservabilityConfig{
+			Guest:    solisconfig.GuestObservabilityConfig{Transport: "ssh", User: "flint", ConnectTimeout: "1s", KnownHosts: filepath.Join(t.TempDir(), "known_hosts")},
+			Services: []solisconfig.ServiceObservabilityConfig{}, Databases: databases,
+		},
+	}
+	return solisconfig.Runtime{Settings: settings, Source: "test", BaseDir: t.TempDir()}
+}
+
 func completeCLIFakeRunner() fakeGuestRunner {
 	unit, _ := guest.SystemdUnitCommand("nginx.service")
 	return fakeGuestRunner{outputs: map[string]string{
@@ -194,6 +249,37 @@ func completeCLIFakeRunner() fakeGuestRunner {
 		guest.ListeningPortsCommand().Key():  "tcp LISTEN 0 128 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=1,fd=3))\n",
 		guest.ProcessPressureCommand().Key(): "1 0 nginx 1.0 1.0\n",
 		unit.Key():                           "Id=nginx.service\nActiveState=active\nSubState=running\nMainPID=1\nNRestarts=0\n",
+	}}
+}
+
+func completeCLIDBFakeRunner(t *testing.T, database string) fakeGuestRunner {
+	t.Helper()
+	version, err := guest.PostgreSQLVersionCommand(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	databases, err := guest.PostgreSQLDatabasesCommand(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity, err := guest.PostgreSQLActivityCommand(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extensions, err := guest.PostgreSQLExtensionsCommand(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements, err := guest.PostgreSQLStatementsCommand(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fakeGuestRunner{outputs: map[string]string{
+		version.Key():    "PostgreSQL 16.4\n",
+		databases.Key():  "postgres,2,100,1,10,1000,0\n",
+		activity.Key():   "10,postgres,postgres,active,Lock,transactionid,00:00:01\n",
+		extensions.Key(): "plpgsql\npg_stat_statements\n",
+		statements.Key(): "10,5,100.0,20.0,50\n",
 	}}
 }
 

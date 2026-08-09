@@ -21,6 +21,9 @@ func WriteDBStatus(dst io.Writer, status DBStatus) error {
 	if err := validatePrivacy(status.Privacy); err != nil {
 		return err
 	}
+	if status.PGStatStatements.QueryTextCollected {
+		return errors.New("observability database status cannot record query text collection")
+	}
 	normalizeDBStatus(&status)
 	return writeJSON(dst, status)
 }
@@ -106,28 +109,34 @@ func normalizeGuestStatus(status *GuestStatus) {
 func normalizeDBStatus(status *DBStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
 	status.Databases = append([]DatabaseCounters(nil), status.Databases...)
-	status.Activity.WaitEvents = append([]string(nil), status.Activity.WaitEvents...)
+	status.Activity.WaitEvents = append([]WaitEventCount(nil), status.Activity.WaitEvents...)
 	status.Extensions = append([]string(nil), status.Extensions...)
-	status.StatementStatistics = append([]StatementStatistics(nil), status.StatementStatistics...)
+	status.PGStatStatements.Entries = append([]StatementStatistics(nil), status.PGStatStatements.Entries...)
 	if status.Databases == nil {
 		status.Databases = []DatabaseCounters{}
 	}
 	if status.Activity.WaitEvents == nil {
-		status.Activity.WaitEvents = []string{}
+		status.Activity.WaitEvents = []WaitEventCount{}
 	}
 	if status.Extensions == nil {
 		status.Extensions = []string{}
 	}
-	if status.StatementStatistics == nil {
-		status.StatementStatistics = []StatementStatistics{}
+	if status.PGStatStatements.Entries == nil {
+		status.PGStatStatements.Entries = []StatementStatistics{}
 	}
 	sort.Slice(status.Databases, func(i, j int) bool {
 		return status.Databases[i].Name < status.Databases[j].Name
 	})
-	sort.Strings(status.Activity.WaitEvents)
+	sort.Slice(status.Activity.WaitEvents, func(i, j int) bool {
+		left, right := status.Activity.WaitEvents[i], status.Activity.WaitEvents[j]
+		if left.Type != right.Type {
+			return left.Type < right.Type
+		}
+		return left.Event < right.Event
+	})
 	sort.Strings(status.Extensions)
-	sort.Slice(status.StatementStatistics, func(i, j int) bool {
-		return status.StatementStatistics[i].QueryID < status.StatementStatistics[j].QueryID
+	sort.Slice(status.PGStatStatements.Entries, func(i, j int) bool {
+		return status.PGStatStatements.Entries[i].QueryID < status.PGStatStatements.Entries[j].QueryID
 	})
 }
 

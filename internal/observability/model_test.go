@@ -26,11 +26,11 @@ func TestWriteGuestStatusDeterministic(t *testing.T) {
 
 func TestWriteDBStatusDeterministic(t *testing.T) {
 	status := DBStatus{
-		Engine:              "postgresql",
-		Databases:           []DatabaseCounters{{Name: "template1"}, {Name: "postgres"}},
-		Activity:            DatabaseActivity{WaitEvents: []string{"Lock", "IO"}},
-		Extensions:          []string{"pg_stat_statements", "plpgsql"},
-		StatementStatistics: []StatementStatistics{{QueryID: "20"}, {QueryID: "10"}},
+		Engine:           "postgresql",
+		Databases:        []DatabaseCounters{{Name: "template1"}, {Name: "postgres"}},
+		Activity:         DatabaseActivity{WaitEvents: []WaitEventCount{{Type: "Lock", Event: "relation"}, {Type: "IO", Event: "DataFileRead"}}},
+		Extensions:       []string{"pg_stat_statements", "plpgsql"},
+		PGStatStatements: PGStatStatementsStatus{Entries: []StatementStatistics{{QueryID: "20"}, {QueryID: "10"}}},
 	}
 	output := renderTwice(t, func(buffer *bytes.Buffer) error { return WriteDBStatus(buffer, status) })
 	assertOrdered(t, output, `"name": "postgres"`, `"name": "template1"`)

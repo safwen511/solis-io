@@ -78,8 +78,19 @@ func (runner *SSHRunner) arguments(target Target, argv []string) []string {
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "UserKnownHostsFile=" + runner.options.KnownHosts,
 		"--", target.user + "@" + target.host,
-		strings.Join(argv, " "),
+		joinRemoteArgs(argv),
 	}
+}
+
+func joinRemoteArgs(argv []string) string {
+	quoted := make([]string, len(argv))
+	for index, argument := range argv {
+		// OpenSSH sends one remote command string. Single-quote every fixed argv
+		// token and escape embedded quotes so the remote shell cannot reinterpret
+		// configured values or the allowlisted SQL text.
+		quoted[index] = "'" + strings.ReplaceAll(argument, "'", `'"'"'`) + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 type boundedBuffer struct {

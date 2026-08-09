@@ -58,24 +58,31 @@ func (target Target) Host() string { return target.host }
 type CommandKind string
 
 const (
-	CommandHostname        CommandKind = "hostname"
-	CommandKernelRelease   CommandKind = "kernel-release"
-	CommandUptime          CommandKind = "uptime"
-	CommandLoad            CommandKind = "load"
-	CommandMemory          CommandKind = "memory"
-	CommandFilesystems     CommandKind = "filesystems"
-	CommandNetworkAddress  CommandKind = "network-addresses"
-	CommandNetworkCounters CommandKind = "network-counters"
-	CommandListeningPorts  CommandKind = "listening-ports"
-	CommandProcessPressure CommandKind = "process-pressure"
-	CommandSystemdUnit     CommandKind = "systemd-unit"
+	CommandHostname             CommandKind = "hostname"
+	CommandKernelRelease        CommandKind = "kernel-release"
+	CommandUptime               CommandKind = "uptime"
+	CommandLoad                 CommandKind = "load"
+	CommandMemory               CommandKind = "memory"
+	CommandFilesystems          CommandKind = "filesystems"
+	CommandNetworkAddress       CommandKind = "network-addresses"
+	CommandNetworkCounters      CommandKind = "network-counters"
+	CommandListeningPorts       CommandKind = "listening-ports"
+	CommandProcessPressure      CommandKind = "process-pressure"
+	CommandSystemdUnit          CommandKind = "systemd-unit"
+	CommandPostgreSQLVersion    CommandKind = "postgresql-version"
+	CommandPostgreSQLDatabases  CommandKind = "postgresql-databases"
+	CommandPostgreSQLActivity   CommandKind = "postgresql-activity"
+	CommandPostgreSQLExtensions CommandKind = "postgresql-extensions"
+	CommandPostgreSQLStatements CommandKind = "postgresql-stat-statements"
 )
 
-// CommandSpec identifies one fixed command. The only dynamic value supported
-// is a strictly validated systemd unit name.
+// CommandSpec identifies one fixed command. Dynamic values are limited to a
+// validated systemd unit or PostgreSQL connection database name; SQL is never
+// accepted from callers.
 type CommandSpec struct {
-	kind CommandKind
-	unit string
+	kind     CommandKind
+	unit     string
+	database string
 }
 
 func HostnameCommand() CommandSpec        { return CommandSpec{kind: CommandHostname} }
@@ -97,10 +104,43 @@ func SystemdUnitCommand(unit string) (CommandSpec, error) {
 	return CommandSpec{kind: CommandSystemdUnit, unit: unit}, nil
 }
 
+// PostgreSQL statistic commands are fixed in code. The database argument is a
+// validated connection target, never SQL supplied by a caller.
+func PostgreSQLVersionCommand(database string) (CommandSpec, error) {
+	return postgreSQLCommand(CommandPostgreSQLVersion, database)
+}
+
+func PostgreSQLDatabasesCommand(database string) (CommandSpec, error) {
+	return postgreSQLCommand(CommandPostgreSQLDatabases, database)
+}
+
+func PostgreSQLActivityCommand(database string) (CommandSpec, error) {
+	return postgreSQLCommand(CommandPostgreSQLActivity, database)
+}
+
+func PostgreSQLExtensionsCommand(database string) (CommandSpec, error) {
+	return postgreSQLCommand(CommandPostgreSQLExtensions, database)
+}
+
+func PostgreSQLStatementsCommand(database string) (CommandSpec, error) {
+	return postgreSQLCommand(CommandPostgreSQLStatements, database)
+}
+
+func postgreSQLCommand(kind CommandKind, database string) (CommandSpec, error) {
+	database = strings.TrimSpace(database)
+	if !safeDatabasePattern.MatchString(database) {
+		return CommandSpec{}, errors.New("configured PostgreSQL database name is empty or invalid")
+	}
+	return CommandSpec{kind: kind, database: database}, nil
+}
+
 // Key is a non-executable stable identity useful for tests and diagnostics.
 func (command CommandSpec) Key() string {
 	if command.unit != "" {
 		return string(command.kind) + ":" + command.unit
+	}
+	if command.database != "" {
+		return string(command.kind) + ":" + command.database
 	}
 	return string(command.kind)
 }
@@ -132,12 +172,43 @@ func (command CommandSpec) argv() ([]string, error) {
 			return nil, fmt.Errorf("invalid allowlisted systemd unit %q", command.unit)
 		}
 		return []string{"systemctl", "show", command.unit, "--no-pager", "--property=Id,ActiveState,SubState,MainPID,NRestarts,ExecMainStartTimestamp"}, nil
+	case CommandPostgreSQLVersion, CommandPostgreSQLDatabases, CommandPostgreSQLActivity,
+		CommandPostgreSQLExtensions, CommandPostgreSQLStatements:
+		if !safeDatabasePattern.MatchString(command.database) {
+			return nil, errors.New("configured PostgreSQL database name is empty or invalid")
+		}
+		query, ok := postgreSQLQueries[command.kind]
+		if !ok {
+			return nil, fmt.Errorf("guest command kind %q is not allowlisted", command.kind)
+		}
+		return []string{
+			"sudo", "-n", "-u", "postgres", "--", "psql",
+			"--no-psqlrc", "--csv", "--tuples-only", "--set", "ON_ERROR_STOP=1",
+			"--dbname", command.database, "--command", query,
+		}, nil
 	default:
 		return nil, fmt.Errorf("guest command kind %q is not allowlisted", command.kind)
 	}
 }
 
 var (
-	safeUserPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	safeUnitPattern = regexp.MustCompile(`^[A-Za-z0-9_.@:-]+$`)
+	safeUserPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	safeUnitPattern     = regexp.MustCompile(`^[A-Za-z0-9_.@:-]+$`)
+	safeDatabasePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
+
+var postgreSQLQueries = map[CommandKind]string{
+	CommandPostgreSQLVersion: `SELECT version();`,
+	CommandPostgreSQLDatabases: `SELECT datname, numbackends, xact_commit, xact_rollback,
+       blks_read, blks_hit, deadlocks
+FROM pg_stat_database;`,
+	CommandPostgreSQLActivity: `SELECT pid, usename, datname, state, wait_event_type,
+       wait_event, now() - query_start AS age
+FROM pg_stat_activity
+WHERE state <> 'idle';`,
+	CommandPostgreSQLExtensions: `SELECT extname FROM pg_extension;`,
+	CommandPostgreSQLStatements: `SELECT queryid, calls, total_exec_time, mean_exec_time, rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 10;`,
+}

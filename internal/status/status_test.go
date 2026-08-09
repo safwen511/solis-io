@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -60,6 +61,16 @@ func TestClassifyPressureUsesSyscallFallback(t *testing.T) {
 	})
 	if pressure != PressureHigh || reason != "high syscall pressure" {
 		t.Fatalf("classification = %q, %q", pressure, reason)
+	}
+}
+
+func TestClassifyPressureUsesConfiguredThresholds(t *testing.T) {
+	pressure, _ := ClassifyPressureWithThresholds(qemuio.VMSummary{
+		Available:                true,
+		AverageWriteMiBPerSecond: 50,
+	}, config.Thresholds{WriteMiBPerSecond: 100, WriteSyscallsPerSecond: 200000, DominanceRatio: 3})
+	if pressure != PressureLow {
+		t.Fatalf("pressure = %q, want %q", pressure, PressureLow)
 	}
 }
 

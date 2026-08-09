@@ -2,12 +2,104 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/safwen511/solis-io/internal/capture"
 )
+
+func TestRunInventoryOutsideRepositoryWithExplicitConfig(t *testing.T) {
+	configDirectory := t.TempDir()
+	inventoryPath := filepath.Join(configDirectory, "vms.csv")
+	if err := os.WriteFile(inventoryPath, []byte(
+		"name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\n"+
+			"portable-web,tenant-a,tenant-a-net,192.0.2.10,1024,1,10,web\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDirectory, "solis.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "schema_version": "1",
+  "inventory_csv": "vms.csv",
+  "capture_output_root": "captures",
+  "default_report_dir": "reports",
+  "libvirt_uri": "qemu:///system",
+  "thresholds": {"write_mib_per_sec": 10, "write_syscalls_per_sec": 10000, "dominance_ratio": 2}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	binDirectory := t.TempDir()
+	writeExecutable(t, binDirectory, "virsh", `#!/bin/sh
+case "$*" in
+  *domstate*) printf 'running\n' ;;
+  *domifaddr*) printf 'vnet0 52:54:00:00:00:01 ipv4 192.0.2.10/24\n' ;;
+  *domblklist*) printf 'file disk vda /tmp/portable-web.qcow2\n' ;;
+esac
+`)
+	writeExecutable(t, binDirectory, "ps", "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", binDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	originalDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsideDirectory := t.TempDir()
+	if err := os.Chdir(outsideDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDirectory) })
+
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"inventory", "--config", configPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("Run() error = %v; stderr = %s", err, stderr.String())
+	}
+	for _, want := range []string{"portable-web", "running", "192.0.2.10", "/tmp/portable-web.qcow2"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("inventory output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunDoctorLabModeIsExplicit(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "solis.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "schema_version": "1",
+  "inventory_csv": "missing.csv",
+  "capture_output_root": "captures",
+  "default_report_dir": "reports",
+  "libvirt_uri": "qemu:///system",
+  "thresholds": {"write_mib_per_sec": 10, "write_syscalls_per_sec": 10000, "dominance_ratio": 2}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		args    []string
+		wantLab bool
+	}{
+		{[]string{"--config", configPath, "doctor"}, false},
+		{[]string{"doctor", "--lab", "--config", configPath}, true},
+	} {
+		var output bytes.Buffer
+		if err := Run(test.args, &output, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(output.String(), "Lab checks:") != test.wantLab {
+			t.Fatalf("args %v output lab mode mismatch:\n%s", test.args, output.String())
+		}
+	}
+}
+
+func writeExecutable(t *testing.T, directory, name, content string) {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestParseEBPFBlockWatchArgs(t *testing.T) {
 	tests := []struct {

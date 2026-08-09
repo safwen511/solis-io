@@ -13,7 +13,9 @@ func Write(dst io.Writer, report Report) error {
 	fmt.Fprintln(w, "Solis Doctor")
 	fmt.Fprintln(w)
 	writeSection(w, "Host checks:", report.Host)
-	writeSection(w, "Lab checks:", report.Lab)
+	if len(report.Lab) > 0 {
+		writeSection(w, "Lab checks:", report.Lab)
+	}
 	writeSection(w, "VM inventory checks:", report.Inventory)
 	writeSection(w, "Storage checks:", report.Storage)
 	writeSection(w, "QEMU I/O permission check:", report.QEMU)

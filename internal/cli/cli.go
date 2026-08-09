@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/capture"
+	solisconfig "github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/doctor"
@@ -30,10 +31,13 @@ import (
 	watcher "github.com/safwen511/solis-io/internal/watch"
 )
 
-const defaultConfigPath = "lab/config/vms.csv"
-
 // Run executes the requested Solis command.
 func Run(args []string, stdout, stderr io.Writer) error {
+	runtimeConfig, commandArgs, err := solisconfig.Resolve(args, os.Getenv(solisconfig.EnvironmentVariable))
+	if err != nil {
+		return fmt.Errorf("config error: %w", err)
+	}
+	args = commandArgs
 	if len(args) == 0 {
 		printUsage(stdout)
 		return nil
@@ -41,17 +45,17 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 	switch args[0] {
 	case "doctor":
-		return runDoctor(stdout)
+		return runDoctor(runtimeConfig, args, stdout)
 	case "ebpf":
-		return runEBPFCommand(args, stdout)
+		return runEBPFCommand(runtimeConfig, args, stdout)
 	case "inventory":
-		return runInventory(stdout)
+		return runInventory(runtimeConfig, stdout)
 	case "status":
 		options, err := parseStatusArgs(args)
 		if err != nil {
 			return err
 		}
-		return runStatus(options, stdout)
+		return runStatus(runtimeConfig, options, stdout)
 	case "top":
 		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
 		return nil
@@ -60,17 +64,17 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return runTracePlan(victim, suspect, stdout)
+		return runTracePlan(runtimeConfig, victim, suspect, stdout)
 	case "storage":
-		return runStorageCommand(args, stdout)
+		return runStorageCommand(runtimeConfig, args, stdout)
 	case "qemu":
-		return runQEMUCommand(args, stdout)
+		return runQEMUCommand(runtimeConfig, args, stdout)
 	case "diagnose":
-		return runDiagnoseCommand(args, stdout)
+		return runDiagnoseCommand(runtimeConfig, args, stdout)
 	case "capture":
-		return runCaptureCommand(args, stdout)
+		return runCaptureCommand(runtimeConfig, args, stdout)
 	case "watch":
-		return runWatchCommand(args, stdout)
+		return runWatchCommand(runtimeConfig, args, stdout)
 	case "experiment":
 		if len(args) != 3 || args[1] != "summarize" {
 			return errors.New("usage: solis experiment summarize <report-dir>")
@@ -93,7 +97,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			}
 			verbose = true
 		}
-		return runInspect(args[1], verbose, stdout)
+		return runInspect(runtimeConfig, args[1], verbose, stdout)
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -424,13 +428,17 @@ func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 }
 
 func parseWatchNoisyNeighborArgs(args []string) (watchNoisyNeighborOptions, error) {
+	return parseWatchNoisyNeighborArgsWithDefault(args, solisconfig.DevelopmentDefaults().Settings.CaptureOutputRoot)
+}
+
+func parseWatchNoisyNeighborArgsWithDefault(args []string, outputDirectory string) (watchNoisyNeighborOptions, error) {
 	if len(args) < 2 || args[1] != "noisy-neighbor" {
 		return watchNoisyNeighborOptions{}, errors.New(watchNoisyNeighborUsage)
 	}
 	options := watchNoisyNeighborOptions{
 		Window:          10 * time.Second,
 		Every:           30 * time.Second,
-		OutputDirectory: "lab/reports/captures",
+		OutputDirectory: outputDirectory,
 		Cooldown:        2 * time.Minute,
 	}
 	seen := make(map[string]bool)
@@ -680,8 +688,8 @@ func parseVictimSuspectOptions(args []string, start int, usage string) (string, 
 	return victim, suspect, nil
 }
 
-func runTracePlan(victim, suspect string, w io.Writer) error {
-	plan, err := loadEnrichedTargetPlan(victim, suspect)
+func runTracePlan(runtimeConfig solisconfig.Runtime, victim, suspect string, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("trace plan error: %w", err)
 	}
@@ -700,8 +708,8 @@ func runTracePlan(victim, suspect string, w io.Writer) error {
 	return nil
 }
 
-func runStorageSnapshot(victim, suspect string, w io.Writer) error {
-	plan, err := loadEnrichedTargetPlan(victim, suspect)
+func runStorageSnapshot(runtimeConfig solisconfig.Runtime, victim, suspect string, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("storage snapshot error: %w", err)
 	}
@@ -719,7 +727,7 @@ func runStorageSnapshot(victim, suspect string, w io.Writer) error {
 	return nil
 }
 
-func runStorageCommand(args []string, w io.Writer) error {
+func runStorageCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: solis storage snapshot|watch [options]")
 	}
@@ -730,20 +738,20 @@ func runStorageCommand(args []string, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return runStorageSnapshot(victim, suspect, w)
+		return runStorageSnapshot(runtimeConfig, victim, suspect, w)
 	case "watch":
 		victim, suspect, duration, interval, err := parseStorageWatchArgs(args)
 		if err != nil {
 			return err
 		}
-		return runStorageWatch(victim, suspect, duration, interval, w)
+		return runStorageWatch(runtimeConfig, victim, suspect, duration, interval, w)
 	default:
 		return fmt.Errorf("unknown storage command %q; expected snapshot or watch", args[1])
 	}
 }
 
-func runStorageWatch(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
-	plan, err := loadEnrichedTargetPlan(victim, suspect)
+func runStorageWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("storage watch error: %w", err)
 	}
@@ -761,7 +769,7 @@ func runStorageWatch(victim, suspect string, duration, interval time.Duration, w
 	return nil
 }
 
-func runQEMUCommand(args []string, w io.Writer) error {
+func runQEMUCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: solis qemu io-watch|io-summary [options]")
 	}
@@ -772,20 +780,20 @@ func runQEMUCommand(args []string, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return runQEMUIOWatch(victim, suspect, duration, interval, w)
+		return runQEMUIOWatch(runtimeConfig, victim, suspect, duration, interval, w)
 	case "io-summary":
 		victim, suspect, duration, interval, err := parseQEMUIOSummaryArgs(args)
 		if err != nil {
 			return err
 		}
-		return runQEMUIOSummary(victim, suspect, duration, interval, w)
+		return runQEMUIOSummary(runtimeConfig, victim, suspect, duration, interval, w)
 	default:
 		return fmt.Errorf("unknown qemu command %q; expected io-watch or io-summary", args[1])
 	}
 }
 
-func runQEMUIOWatch(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
-	plan, err := loadEnrichedTargetPlan(victim, suspect)
+func runQEMUIOWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("qemu io-watch error: %w", err)
 	}
@@ -802,8 +810,8 @@ func runQEMUIOWatch(victim, suspect string, duration, interval time.Duration, w 
 	return nil
 }
 
-func runQEMUIOSummary(victim, suspect string, duration, interval time.Duration, w io.Writer) error {
-	plan, err := loadEnrichedTargetPlan(victim, suspect)
+func runQEMUIOSummary(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
 		return fmt.Errorf("qemu io-summary error: %w", err)
 	}
@@ -814,7 +822,7 @@ func runQEMUIOSummary(victim, suspect string, duration, interval time.Duration, 
 		plan.VictimTargets,
 		plan.SuspectTarget,
 	)
-	report, err := qemuio.CollectSummary(watchPlan, duration, interval)
+	report, err := qemuio.CollectSummaryWithThresholds(watchPlan, duration, interval, runtimeConfig.Settings.Thresholds)
 	if err != nil {
 		return fmt.Errorf("qemu io-summary error: %w", err)
 	}
@@ -824,12 +832,12 @@ func runQEMUIOSummary(victim, suspect string, duration, interval time.Duration, 
 	return nil
 }
 
-func runDiagnoseCommand(args []string, w io.Writer) error {
+func runDiagnoseCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	options, err := parseDiagnoseNoisyNeighborArgs(args)
 	if err != nil {
 		return err
 	}
-	return runNoisyNeighborDiagnosis(options, w)
+	return runNoisyNeighborDiagnosis(runtimeConfig, options, w)
 }
 
 type noisyNeighborEvidence struct {
@@ -843,16 +851,16 @@ type noisyNeighborEvidence struct {
 	Diagnosis   diagnose.Report
 }
 
-func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
+func runNoisyNeighborDiagnosis(runtimeConfig solisconfig.Runtime, options timedTargetOptions, w io.Writer) error {
 	var report diagnose.Report
 	var err error
 	if options.DiscoverSuspects {
 		var evidence noisyNeighborEvidence
-		evidence, err = collectDiscoveredNoisyNeighborEvidence(options)
+		evidence, err = collectDiscoveredNoisyNeighborEvidence(runtimeConfig, options)
 		report = evidence.Diagnosis
 	} else {
 		var evidence noisyNeighborEvidence
-		evidence, err = collectNoisyNeighborEvidence(options)
+		evidence, err = collectNoisyNeighborEvidence(runtimeConfig, options)
 		report = evidence.Diagnosis
 	}
 	if err != nil {
@@ -872,22 +880,22 @@ func runNoisyNeighborDiagnosis(options timedTargetOptions, w io.Writer) error {
 	return nil
 }
 
-func runCaptureCommand(args []string, w io.Writer) error {
+func runCaptureCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	options, err := parseCaptureNoisyNeighborArgs(args)
 	if err != nil {
 		return err
 	}
 	var evidence noisyNeighborEvidence
 	if options.DiscoverSuspects {
-		evidence, err = collectDiscoveredNoisyNeighborEvidence(options)
+		evidence, err = collectDiscoveredNoisyNeighborEvidence(runtimeConfig, options)
 	} else {
-		evidence, err = collectNoisyNeighborEvidence(options)
+		evidence, err = collectNoisyNeighborEvidence(runtimeConfig, options)
 	}
 	if err != nil {
 		return fmt.Errorf("capture noisy-neighbor error: %w", err)
 	}
 
-	result, err := writeNoisyNeighborCapture(options, evidence, time.Now())
+	result, err := writeNoisyNeighborCapture(runtimeConfig, options, evidence, time.Now())
 	if err != nil {
 		return fmt.Errorf("capture noisy-neighbor error: %w", err)
 	}
@@ -906,7 +914,7 @@ func runCaptureCommand(args []string, w io.Writer) error {
 	return nil
 }
 
-func writeNoisyNeighborCapture(options timedTargetOptions, evidence noisyNeighborEvidence, now time.Time) (capture.Result, error) {
+func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedTargetOptions, evidence noisyNeighborEvidence, now time.Time) (capture.Result, error) {
 	mode := "pairwise"
 	if options.DiscoverSuspects {
 		mode = "discover-suspects"
@@ -921,6 +929,8 @@ func writeNoisyNeighborCapture(options timedTargetOptions, evidence noisyNeighbo
 			Interval:           options.Interval,
 			IncludeEBPFLatency: options.IncludeEBPFLatency,
 			CaptureMode:        mode,
+			ConfigSource:       runtimeConfig.Source,
+			Thresholds:         runtimeConfig.Settings.Thresholds,
 		},
 		capture.Evidence{
 			Experiment:  evidence.Experiment,
@@ -936,8 +946,8 @@ func writeNoisyNeighborCapture(options timedTargetOptions, evidence noisyNeighbo
 	)
 }
 
-func runWatchCommand(args []string, w io.Writer) error {
-	options, err := parseWatchNoisyNeighborArgs(args)
+func runWatchCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
+	options, err := parseWatchNoisyNeighborArgsWithDefault(args, runtimeConfig.Settings.CaptureOutputRoot)
 	if err != nil {
 		return err
 	}
@@ -945,7 +955,7 @@ func runWatchCommand(args []string, w io.Writer) error {
 	defer stop()
 
 	stats := watcher.FinalSummary{}
-	err = runNoisyNeighborWatch(ctx, options, w, &stats)
+	err = runNoisyNeighborWatch(ctx, runtimeConfig, options, w, &stats)
 	if summaryErr := watcher.WriteFinal(w, stats); err == nil && summaryErr != nil {
 		err = summaryErr
 	}
@@ -955,7 +965,7 @@ func runWatchCommand(args []string, w io.Writer) error {
 	return nil
 }
 
-func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOptions, w io.Writer, stats *watcher.FinalSummary) error {
+func runNoisyNeighborWatch(ctx context.Context, runtimeConfig solisconfig.Runtime, options watchNoisyNeighborOptions, w io.Writer, stats *watcher.FinalSummary) error {
 	if err := writeWatchHeader(w, options); err != nil {
 		return err
 	}
@@ -981,9 +991,9 @@ func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOption
 		var evidence noisyNeighborEvidence
 		var err error
 		if options.DiscoverSuspects {
-			evidence, err = collectDiscoveredNoisyNeighborEvidence(diagnosisOptions)
+			evidence, err = collectDiscoveredNoisyNeighborEvidence(runtimeConfig, diagnosisOptions)
 		} else {
-			evidence, err = collectNoisyNeighborEvidence(diagnosisOptions)
+			evidence, err = collectNoisyNeighborEvidence(runtimeConfig, diagnosisOptions)
 		}
 		if err != nil {
 			return err
@@ -1014,7 +1024,7 @@ func runNoisyNeighborWatch(ctx context.Context, options watchNoisyNeighborOption
 			}
 			captureTime := time.Now().UTC()
 			if options.CaptureOnAlert && watcher.CaptureAllowed(captureTime, lastCapture, options.Cooldown) {
-				result, err := writeNoisyNeighborCapture(diagnosisOptions, evidence, captureTime)
+				result, err := writeNoisyNeighborCapture(runtimeConfig, diagnosisOptions, evidence, captureTime)
 				if err != nil {
 					return err
 				}
@@ -1092,7 +1102,7 @@ func watchSamplingInterval(window time.Duration) time.Duration {
 	return defaultInterval
 }
 
-func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvidence, error) {
+func collectNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options timedTargetOptions) (noisyNeighborEvidence, error) {
 	experimentReport, experimentAvailable, err := loadOptionalExperimentReport(options.ReportDirectory)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
@@ -1105,7 +1115,7 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 		}
 	}
 
-	plan, err := loadEnrichedTargetPlan(options.Victim, options.Suspect)
+	plan, err := loadEnrichedTargetPlan(runtimeConfig, options.Victim, options.Suspect)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
@@ -1134,7 +1144,7 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 		}
 	}
 	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
-	qemuReport, err := qemuio.CollectSummary(qemuPlan, options.Duration, options.Interval)
+	qemuReport, err := qemuio.CollectSummaryWithThresholds(qemuPlan, options.Duration, options.Interval, runtimeConfig.Settings.Thresholds)
 	latencyEvidence := finishBlockLatencyCollection(latencyResult, latencyContext)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
@@ -1146,6 +1156,8 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 			Suspect:         options.Suspect,
 			Duration:        options.Duration,
 			Interval:        options.Interval,
+			ConfigSource:    runtimeConfig.Source,
+			Thresholds:      runtimeConfig.Settings.Thresholds,
 		},
 		experimentReport,
 		experimentAvailable,
@@ -1168,16 +1180,16 @@ func collectNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvid
 	}, nil
 }
 
-func collectDiscoveredNoisyNeighborEvidence(options timedTargetOptions) (noisyNeighborEvidence, error) {
+func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options timedTargetOptions) (noisyNeighborEvidence, error) {
 	experimentReport, experimentAvailable, err := loadOptionalExperimentReport(options.ReportDirectory)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
-	vms = inventory.Enrich(vms)
+	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI})
 	targets, err := discovery.Resolve(vms, options.Victim)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
@@ -1185,7 +1197,7 @@ func collectDiscoveredNoisyNeighborEvidence(options timedTargetOptions) (noisyNe
 
 	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
 	samplingPlan := discovery.SamplingPlan(targets)
-	sampled, sampleErr := qemuio.CollectSummary(samplingPlan, options.Duration, options.Interval)
+	sampled, sampleErr := qemuio.CollectSummaryWithThresholds(samplingPlan, options.Duration, options.Interval, runtimeConfig.Settings.Thresholds)
 	discoveryReport := discovery.Analyze(targets, sampled)
 
 	var selectedSuspect string
@@ -1230,6 +1242,8 @@ func collectDiscoveredNoisyNeighborEvidence(options timedTargetOptions) (noisyNe
 			Suspect:         selectedSuspect,
 			Duration:        options.Duration,
 			Interval:        options.Interval,
+			ConfigSource:    runtimeConfig.Source,
+			Thresholds:      runtimeConfig.Settings.Thresholds,
 		},
 		experimentReport,
 		experimentAvailable,
@@ -1335,8 +1349,8 @@ type blockLatencyCollectionResult struct {
 	err    error
 }
 
-func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+func loadEnrichedTargetPlan(runtimeConfig solisconfig.Runtime, victim, suspect string) (traceplan.Plan, error) {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
 		return traceplan.Plan{}, err
 	}
@@ -1350,7 +1364,7 @@ func loadEnrichedTargetPlan(victim, suspect string) (traceplan.Plan, error) {
 	if _, duplicate := inventory.FindByName(targets, plan.SuspectTarget.Name); !duplicate {
 		targets = append(targets, plan.SuspectTarget)
 	}
-	targets = inventory.Enrich(targets)
+	targets = inventory.EnrichWithOptions(targets, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI})
 
 	plan, err = traceplan.Resolve(targets, victim, suspect)
 	if err != nil {
@@ -1390,21 +1404,21 @@ func runExperimentSummary(reportDir string, w io.Writer) error {
 	return nil
 }
 
-func runInventory(w io.Writer) error {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+func runInventory(runtimeConfig solisconfig.Runtime, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
 		return fmt.Errorf("inventory error: %w", err)
 	}
 
-	return output.InventoryTable(w, inventory.Enrich(vms))
+	return output.InventoryTable(w, inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI}))
 }
 
-func runStatus(options statusOptions, w io.Writer) error {
+func runStatus(runtimeConfig solisconfig.Runtime, options statusOptions, w io.Writer) error {
 	if options.Watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		var summary statusview.WatchSummary
-		err := runStatusWatch(ctx, options, w, &summary)
+		err := runStatusWatch(ctx, runtimeConfig, options, w, &summary)
 		if summaryErr := statusview.WriteWatchSummary(w, summary); err == nil && summaryErr != nil {
 			err = summaryErr
 		}
@@ -1414,7 +1428,7 @@ func runStatus(options statusOptions, w io.Writer) error {
 		return nil
 	}
 
-	report, err := collectStatus(options)
+	report, err := collectStatus(runtimeConfig, options)
 	if err != nil {
 		return fmt.Errorf("status error: %w", err)
 	}
@@ -1432,19 +1446,24 @@ func runStatus(options statusOptions, w io.Writer) error {
 	return nil
 }
 
-func collectStatus(options statusOptions) (statusview.Report, error) {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+func collectStatus(runtimeConfig solisconfig.Runtime, options statusOptions) (statusview.Report, error) {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
 		return statusview.Report{}, err
 	}
-	report, err := statusview.Collect(inventory.Enrich(vms), options.Duration, options.Interval)
+	report, err := statusview.CollectWithThresholds(
+		inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI}),
+		options.Duration,
+		options.Interval,
+		runtimeConfig.Settings.Thresholds,
+	)
 	if err != nil {
 		return statusview.Report{}, err
 	}
 	return report, nil
 }
 
-func runStatusWatch(ctx context.Context, options statusOptions, w io.Writer, summary *statusview.WatchSummary) error {
+func runStatusWatch(ctx context.Context, runtimeConfig solisconfig.Runtime, options statusOptions, w io.Writer, summary *statusview.WatchSummary) error {
 	nextStart := time.Now()
 	for {
 		select {
@@ -1454,7 +1473,7 @@ func runStatusWatch(ctx context.Context, options statusOptions, w io.Writer, sum
 		}
 
 		timestamp := time.Now().UTC()
-		report, err := collectStatus(options)
+		report, err := collectStatus(runtimeConfig, options)
 		if err != nil {
 			return err
 		}
@@ -1500,14 +1519,27 @@ func runStatusWatch(ctx context.Context, options statusOptions, w io.Writer, sum
 	}
 }
 
-func runDoctor(w io.Writer) error {
-	if err := doctor.Write(w, doctor.Run(".")); err != nil {
+func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
+	lab := false
+	if len(args) == 2 && args[1] == "--lab" {
+		lab = true
+	} else if len(args) != 1 {
+		return errors.New("usage: solis doctor [--lab]")
+	}
+	if err := doctor.Write(w, doctor.RunWithOptions(doctor.Options{
+		Root:              runtimeConfig.BaseDir,
+		InventoryCSV:      runtimeConfig.Settings.InventoryCSV,
+		CaptureOutputRoot: runtimeConfig.Settings.CaptureOutputRoot,
+		DefaultReportDir:  runtimeConfig.Settings.DefaultReportDir,
+		LibvirtURI:        runtimeConfig.Settings.LibvirtURI,
+		Lab:               lab,
+	})); err != nil {
 		return fmt.Errorf("doctor error: %w", err)
 	}
 	return nil
 }
 
-func runEBPFCommand(args []string, w io.Writer) error {
+func runEBPFCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return errors.New(ebpfUsage)
 	}
@@ -1562,7 +1594,7 @@ func runEBPFCommand(args []string, w io.Writer) error {
 		}
 		var vmContext *ebpf.BlockLatencyVMContext
 		if options.Victim != "" {
-			plan, err := loadEnrichedTargetPlan(options.Victim, options.Suspect)
+			plan, err := loadEnrichedTargetPlan(runtimeConfig, options.Victim, options.Suspect)
 			if err != nil {
 				return fmt.Errorf("ebpf block-latency error: %w", err)
 			}
@@ -1590,13 +1622,13 @@ func runEBPFCommand(args []string, w io.Writer) error {
 	}
 }
 
-func runInspect(name string, verbose bool, w io.Writer) error {
-	vms, err := inventory.LoadFromConfig(defaultConfigPath)
+func runInspect(runtimeConfig solisconfig.Runtime, name string, verbose bool, w io.Writer) error {
+	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
 		return fmt.Errorf("inspect error: %w", err)
 	}
 
-	vms = inventory.Enrich(vms)
+	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI})
 	vm, ok := inventory.FindByName(vms, name)
 	if !ok {
 		return fmt.Errorf("VM not found: %s", name)
@@ -1609,7 +1641,10 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Solis I/O
 
 Usage:
-  solis doctor
+  solis [--config <path>] <command> [options]
+
+Commands:
+  solis doctor [--lab]
   solis ebpf doctor
   solis ebpf block-watch [--duration <duration>]
   solis ebpf block-events --duration <duration>
@@ -1629,6 +1664,9 @@ Usage:
   solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]
   solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>
   solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]
+
+Configuration precedence:
+  --config <path> > SOLIS_CONFIG > built-in development defaults
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

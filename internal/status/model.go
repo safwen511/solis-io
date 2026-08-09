@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -58,6 +59,12 @@ type Sample struct {
 
 // NewReport creates a deterministic renderer-independent status model.
 func NewReport(duration, interval time.Duration, samples []Sample) Report {
+	return NewReportWithThresholds(duration, interval, samples, config.DefaultThresholds())
+}
+
+// NewReportWithThresholds creates a status model using configured pressure thresholds.
+func NewReportWithThresholds(duration, interval time.Duration, samples []Sample, thresholds config.Thresholds) Report {
+	thresholds = qemuio.EffectiveThresholds(thresholds)
 	samples = append([]Sample(nil), samples...)
 	sort.Slice(samples, func(i, j int) bool { return samples[i].VM.Name < samples[j].VM.Name })
 	report := Report{
@@ -67,7 +74,7 @@ func NewReport(duration, interval time.Duration, samples []Sample) Report {
 		VMs:           make([]VMStatus, 0, len(samples)),
 	}
 	for _, sample := range samples {
-		pressure, reason := ClassifyPressure(sample.QEMU)
+		pressure, reason := ClassifyPressureWithThresholds(sample.QEMU, thresholds)
 		disk := sample.Storage.DiskPath
 		if strings.TrimSpace(disk) == "" {
 			disk = sample.VM.Disk
@@ -98,6 +105,11 @@ func NewReport(duration, interval time.Duration, samples []Sample) Report {
 
 // ClassifyPressure applies the centralized qemuio byte and syscall thresholds.
 func ClassifyPressure(summary qemuio.VMSummary) (string, string) {
+	return ClassifyPressureWithThresholds(summary, config.DefaultThresholds())
+}
+
+// ClassifyPressureWithThresholds applies configured byte and syscall thresholds.
+func ClassifyPressureWithThresholds(summary qemuio.VMSummary, thresholds config.Thresholds) (string, string) {
 	if !summary.Available {
 		reason := oneLine(summary.Error)
 		if reason == "" {
@@ -105,10 +117,10 @@ func ClassifyPressure(summary qemuio.VMSummary) (string, string) {
 		}
 		return PressureLow, reason
 	}
-	if qemuio.MeaningfulWriteBytes(summary.AverageWriteMiBPerSecond) {
+	if qemuio.MeaningfulWriteBytesWithThresholds(summary.AverageWriteMiBPerSecond, thresholds) {
 		return PressureHigh, "dominant byte write rate"
 	}
-	if qemuio.MeaningfulWriteSyscalls(summary.AverageSyscwPerSecond) {
+	if qemuio.MeaningfulWriteSyscallsWithThresholds(summary.AverageSyscwPerSecond, thresholds) {
 		return PressureHigh, "high syscall pressure"
 	}
 	if qemuio.WriteActivityObserved(summary.AverageWriteMiBPerSecond, summary.AverageSyscwPerSecond) {

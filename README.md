@@ -49,6 +49,7 @@ The explicit `10s` and `2s` values below are example observation settings, not u
 
 ```text
 ./solis doctor
+./solis doctor --lab
 ./solis ebpf doctor
 ./solis ebpf block-watch --duration 10s
 sudo ./solis ebpf block-events --duration 10s
@@ -124,6 +125,43 @@ Live-only diagnosis omits application slowdown claims and evaluates current stor
 - Permission to read the selected QEMU processes' `/proc/<pid>/io` files when using QEMU I/O or combined diagnosis commands.
 
 The repository's demo inventory is read from `lab/config/vms.csv`.
+
+## Configuration
+
+Solis accepts an optional versioned JSON configuration. Configuration precedence is:
+
+```text
+--config <path> > SOLIS_CONFIG > built-in development defaults
+```
+
+An explicit configuration can be supplied before or after the command:
+
+```bash
+./solis --config ./solis.json status
+./solis status --config ./solis.json
+SOLIS_CONFIG=./solis.json ./solis inventory
+```
+
+Relative paths in an explicit configuration are resolved from the directory containing that JSON file, so commands do not need to run from the repository root. Example:
+
+```json
+{
+  "schema_version": "1",
+  "inventory_csv": "lab/config/vms.csv",
+  "capture_output_root": "lab/reports/captures",
+  "default_report_dir": "lab/reports/workload/20260808T174825Z",
+  "libvirt_uri": "qemu:///system",
+  "thresholds": {
+    "write_mib_per_sec": 10,
+    "write_syscalls_per_sec": 10000,
+    "dominance_ratio": 2.0
+  }
+}
+```
+
+The built-in values preserve the repository-relative lab workflow for development and demos. Production or installed use should provide an explicit configuration. `capture_output_root` supplies the default alert-capture location for noisy-neighbor watch, while `default_report_dir` is checked by `doctor --lab`; omitting `--report-dir` from diagnosis or capture still deliberately selects live-only mode. Inventory CSV loading strictly validates required headers and fields, positive memory/vCPU/disk values, portable VM identifiers, IP addresses, duplicate VM names, and empty inventories.
+
+`./solis doctor` performs product and configured-host checks only. Add `--lab` to check the bundled fio script, demo workload report, and configured capture output path. Effective configuration source and attribution thresholds are recorded in diagnosis output and capture metadata; capture JSON also records them in `evidence-summary.json`.
 
 ## Quickstart
 

@@ -131,6 +131,7 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 	ebpfRequested := yesNo(inputs.IncludeEBPFLatency)
 	ebpfWritten := yesNo(inputs.IncludeEBPFLatency)
 	evidenceMode := captureEvidenceMode(inputs)
+	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
 	if _, err := fmt.Fprintf(
 		dst,
 		"Solis Capture Metadata\n"+
@@ -141,6 +142,10 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Suspect: %s\n"+
 			"Duration: %s\n"+
 			"Interval: %s\n"+
+			"Config source: %s\n"+
+			"Write threshold MiB/s: %.2f\n"+
+			"Write syscall threshold/s: %.2f\n"+
+			"Dominance ratio: %.2f\n"+
 			"Solis command: %s\n"+
 			"Capture mode: %s\n"+
 			"Selected suspect: %s\n"+
@@ -156,6 +161,10 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		inputs.Suspect,
 		inputs.Duration,
 		inputs.Interval,
+		valueOrDash(inputs.ConfigSource),
+		thresholds.WriteMiBPerSecond,
+		thresholds.WriteSyscallsPerSecond,
+		thresholds.DominanceRatio,
 		commandName,
 		mode,
 		valueOrDash(inputs.Suspect),

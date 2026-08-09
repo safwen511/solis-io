@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -14,6 +15,11 @@ import (
 
 // Collect samples all enriched running VMs that have a valid QEMU PID.
 func Collect(vms []inventory.VM, duration, interval time.Duration) (Report, error) {
+	return CollectWithThresholds(vms, duration, interval, config.DefaultThresholds())
+}
+
+// CollectWithThresholds samples status using the resolved Solis thresholds.
+func CollectWithThresholds(vms []inventory.VM, duration, interval time.Duration, thresholds config.Thresholds) (Report, error) {
 	if duration <= 0 {
 		return Report{}, fmt.Errorf("duration must be greater than zero")
 	}
@@ -25,14 +31,14 @@ func Collect(vms []inventory.VM, duration, interval time.Duration) (Report, erro
 	}
 	targets := eligibleVMs(vms)
 	if len(targets) == 0 {
-		return NewReport(duration, interval, nil), nil
+		return NewReportWithThresholds(duration, interval, nil, thresholds), nil
 	}
 
 	plan := qemuio.Plan{Targets: make([]qemuio.Target, 0, len(targets))}
 	for _, vm := range targets {
 		plan.Targets = append(plan.Targets, qemuio.Target{TargetType: "status", VM: vm})
 	}
-	summary, err := qemuio.CollectSummary(plan, duration, interval)
+	summary, err := qemuio.CollectSummaryWithThresholds(plan, duration, interval, thresholds)
 	if err != nil {
 		return Report{}, err
 	}
@@ -49,7 +55,7 @@ func Collect(vms []inventory.VM, duration, interval time.Duration) (Report, erro
 			QEMU:    byName[vm.Name],
 		})
 	}
-	return NewReport(duration, interval, samples), nil
+	return NewReportWithThresholds(duration, interval, samples, thresholds), nil
 }
 
 func eligibleVMs(vms []inventory.VM) []inventory.VM {

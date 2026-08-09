@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
@@ -43,6 +44,8 @@ func TestWriteMetadata(t *testing.T) {
 		Suspect:         "b-stress",
 		Duration:        10 * time.Second,
 		Interval:        2 * time.Second,
+		ConfigSource:    config.BuiltInDefaultsSource,
+		Thresholds:      config.Thresholds{WriteMiBPerSecond: 12, WriteSyscallsPerSecond: 12000, DominanceRatio: 3},
 	}
 	var output bytes.Buffer
 	if err := WriteMetadata(&output, inputs, "20260808T211500Z"); err != nil {
@@ -57,6 +60,10 @@ func TestWriteMetadata(t *testing.T) {
 		"Suspect: b-stress",
 		"Duration: 10s",
 		"Interval: 2s",
+		"Config source: built-in defaults",
+		"Write threshold MiB/s: 12.00",
+		"Write syscall threshold/s: 12000.00",
+		"Dominance ratio: 3.00",
 		"Solis command: solis capture noisy-neighbor",
 		"Capture mode: pairwise",
 		"Selected suspect: b-stress",
@@ -288,6 +295,9 @@ func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
 	}
 	if summary.SchemaVersion != "1" || summary.Capture.EvidenceMode != "report-backed" {
 		t.Fatalf("capture summary = %#v", summary.Capture)
+	}
+	if summary.Capture.ConfigSource != config.BuiltInDefaultsSource || summary.Thresholds.WriteMiBPerSecond != 10 || summary.Thresholds.WriteSyscallsPerSecond != 10000 || summary.Thresholds.DominanceRatio != 2 {
+		t.Fatalf("config evidence = %#v / %#v", summary.Capture, summary.Thresholds)
 	}
 	if summary.Victim.Name != "a-web" || summary.Victim.QEMUPID == nil || *summary.Victim.QEMUPID != 12345 {
 		t.Fatalf("victim = %#v", summary.Victim)
@@ -572,6 +582,8 @@ func testCaptureInputs(outputDirectory string) Inputs {
 		Duration:           time.Second,
 		Interval:           time.Second,
 		IncludeEBPFLatency: true,
+		ConfigSource:       config.BuiltInDefaultsSource,
+		Thresholds:         config.DefaultThresholds(),
 	}
 }
 

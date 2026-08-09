@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
+	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
 // WriteIncidentReport renders a human-readable summary of an existing capture
@@ -22,6 +23,7 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 	mode := captureMode(inputs)
 	evidenceMode := captureEvidenceMode(inputs)
 	suspect := selectedSuspect(inputs, evidence)
+	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
 
 	if _, err := fmt.Fprintln(dst, "# Solis Noisy Neighbor Incident Report"); err != nil {
 		return err
@@ -115,11 +117,19 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 			"- Evidence mode: %s\n"+
 			"- Duration: %s\n"+
 			"- Interval: %s\n"+
+			"- Config source: %s\n"+
+			"- Write threshold MiB/s: %.2f\n"+
+			"- Write syscall threshold/s: %.2f\n"+
+			"- Dominance ratio: %.2f\n"+
 			"- Generated files:\n",
 		markdownText(inputs.ReportDirectory),
 		markdownText(evidenceMode),
 		inputs.Duration,
 		inputs.Interval,
+		markdownText(inputs.ConfigSource),
+		thresholds.WriteMiBPerSecond,
+		thresholds.WriteSyscallsPerSecond,
+		thresholds.DominanceRatio,
 	); err != nil {
 		return err
 	}

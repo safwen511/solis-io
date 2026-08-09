@@ -6,20 +6,18 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/safwen511/solis-io/internal/config"
 )
 
 const (
-	nearZeroWriteMiBPerSecond          = 0.01
-	minimumMeaningfulWriteMiBPerSecond = 10.0
-	dominantWriteRatio                 = 2.0
-	nearZeroWriteSyscallsPerSecond     = 1.0
-	minimumMeaningfulSyscwPerSecond    = 10000.0
-	dominantSyscwRatio                 = 2.0
-	dominantConclusion                 = "Suspect QEMU process is the dominant writer during the observation window."
-	noDominantConclusion               = "No dominant QEMU writer identified from process I/O counters."
-	noWritePressureConclusion          = "No meaningful QEMU write pressure observed during the observation window."
-	syscallPressureConclusion          = "QEMU write syscall pressure observed, but byte counters did not advance meaningfully."
-	unavailableConclusion              = "QEMU process I/O counters were unavailable for diagnosis."
+	nearZeroWriteMiBPerSecond      = 0.01
+	nearZeroWriteSyscallsPerSecond = 1.0
+	dominantConclusion             = "Suspect QEMU process is the dominant writer during the observation window."
+	noDominantConclusion           = "No dominant QEMU writer identified from process I/O counters."
+	noWritePressureConclusion      = "No meaningful QEMU write pressure observed during the observation window."
+	syscallPressureConclusion      = "QEMU write syscall pressure observed, but byte counters did not advance meaningfully."
+	unavailableConclusion          = "QEMU process I/O counters were unavailable for diagnosis."
 )
 
 // VMSummary contains time-weighted process I/O aggregates for one target VM.
@@ -42,6 +40,7 @@ type SummaryReport struct {
 	Plan                            Plan
 	Duration                        time.Duration
 	Interval                        time.Duration
+	Thresholds                      config.Thresholds
 	VMs                             []VMSummary
 	VictimAverageWriteMiBPerSecond  float64
 	SuspectAverageWriteMiBPerSecond float64
@@ -75,6 +74,12 @@ type summaryAccumulator struct {
 
 // CollectSummary samples the plan and computes per-VM and group aggregates.
 func CollectSummary(plan Plan, duration, interval time.Duration) (SummaryReport, error) {
+	return CollectSummaryWithThresholds(plan, duration, interval, config.DefaultThresholds())
+}
+
+// CollectSummaryWithThresholds samples a plan with explicit attribution
+// thresholds from the resolved Solis configuration.
+func CollectSummaryWithThresholds(plan Plan, duration, interval time.Duration, thresholds config.Thresholds) (SummaryReport, error) {
 	if err := validateWindow(duration, interval); err != nil {
 		return SummaryReport{}, err
 	}
@@ -87,10 +92,15 @@ func CollectSummary(plan Plan, duration, interval time.Duration) (SummaryReport,
 	if err != nil {
 		return SummaryReport{}, err
 	}
-	return summarizeSamples(plan, duration, interval, samples), nil
+	return summarizeSamplesWithThresholds(plan, duration, interval, samples, thresholds), nil
 }
 
 func summarizeSamples(plan Plan, duration, interval time.Duration, samples []intervalSample) SummaryReport {
+	return summarizeSamplesWithThresholds(plan, duration, interval, samples, config.DefaultThresholds())
+}
+
+func summarizeSamplesWithThresholds(plan Plan, duration, interval time.Duration, samples []intervalSample, thresholds config.Thresholds) SummaryReport {
+	thresholds = EffectiveThresholds(thresholds)
 	accumulators := make(map[string]*summaryAccumulator, len(plan.Targets))
 	for _, target := range plan.Targets {
 		accumulators[target.VM.Name] = &summaryAccumulator{}
@@ -124,7 +134,7 @@ func summarizeSamples(plan Plan, duration, interval time.Duration, samples []int
 		accumulator.successfulSample = true
 	}
 
-	report := SummaryReport{Plan: plan, Duration: duration, Interval: interval}
+	report := SummaryReport{Plan: plan, Duration: duration, Interval: interval, Thresholds: thresholds}
 	for _, target := range plan.Targets {
 		accumulator := accumulators[target.VM.Name]
 		vmSummary := VMSummary{Target: target, Error: accumulator.err}
@@ -151,7 +161,7 @@ func SummaryForPlan(source SummaryReport, plan Plan) SummaryReport {
 	for _, summary := range source.VMs {
 		byName[summary.Target.VM.Name] = summary
 	}
-	report := SummaryReport{Plan: plan, Duration: source.Duration, Interval: source.Interval}
+	report := SummaryReport{Plan: plan, Duration: source.Duration, Interval: source.Interval, Thresholds: EffectiveThresholds(source.Thresholds)}
 	for _, target := range plan.Targets {
 		summary, ok := byName[target.VM.Name]
 		if !ok {
@@ -164,6 +174,8 @@ func SummaryForPlan(source SummaryReport, plan Plan) SummaryReport {
 }
 
 func finalizeSummary(report SummaryReport) SummaryReport {
+	report.Thresholds = EffectiveThresholds(report.Thresholds)
+	thresholds := report.Thresholds
 	for _, vmSummary := range report.VMs {
 		target := vmSummary.Target
 		if vmSummary.Available && targetHasType(target, "victim") {
@@ -191,28 +203,33 @@ func finalizeSummary(report SummaryReport) SummaryReport {
 	report.WriteRatio = formatWriteRatio(
 		report.SuspectAverageWriteMiBPerSecond,
 		report.VictimAverageWriteMiBPerSecond,
+		thresholds,
 	)
 	report.MeaningfulSuspectWritePressure =
-		report.SuspectAverageWriteMiBPerSecond >= minimumMeaningfulWriteMiBPerSecond
+		report.SuspectAverageWriteMiBPerSecond >= thresholds.WriteMiBPerSecond
 	report.SuspectDominant = suspectIsDominant(
 		report.VictimAverageWriteMiBPerSecond,
 		report.SuspectAverageWriteMiBPerSecond,
+		thresholds,
 	)
 	report.SyscwRatio = formatSyscwRatio(
 		report.SuspectAverageSyscwPerSecond,
 		report.VictimAverageSyscwPerSecond,
+		thresholds,
 	)
 	report.MeaningfulSuspectSyscwPressure =
-		report.SuspectAverageSyscwPerSecond >= minimumMeaningfulSyscwPerSecond
+		report.SuspectAverageSyscwPerSecond >= thresholds.WriteSyscallsPerSecond
 	report.SuspectSyscwDominant = suspectSyscwIsDominant(
 		report.VictimAverageSyscwPerSecond,
 		report.SuspectAverageSyscwPerSecond,
+		thresholds,
 	)
 	report.WriteSyscallPressure = syscallPressureClassification(report.MeaningfulSuspectSyscwPressure)
 	report.Conclusion = conclusionForSignals(
 		report.VictimAverageWriteMiBPerSecond,
 		report.SuspectAverageWriteMiBPerSecond,
 		report.SuspectAverageSyscwPerSecond,
+		thresholds,
 	)
 	if report.SuspectDominant {
 		report.DominantWriter = report.Plan.SuspectSelector
@@ -236,8 +253,9 @@ func targetHasType(target Target, targetType string) bool {
 	return false
 }
 
-func formatWriteRatio(suspect, victim float64) string {
-	if suspect < minimumMeaningfulWriteMiBPerSecond {
+func formatWriteRatio(suspect, victim float64, configured ...config.Thresholds) string {
+	thresholds := thresholdArgument(configured)
+	if suspect < thresholds.WriteMiBPerSecond {
 		return "-"
 	}
 	if victim <= nearZeroWriteMiBPerSecond {
@@ -246,30 +264,42 @@ func formatWriteRatio(suspect, victim float64) string {
 	return fmt.Sprintf("%.2fx", suspect/victim)
 }
 
-func suspectIsDominant(victim, suspect float64) bool {
-	if suspect < minimumMeaningfulWriteMiBPerSecond {
+func suspectIsDominant(victim, suspect float64, configured ...config.Thresholds) bool {
+	thresholds := thresholdArgument(configured)
+	if suspect < thresholds.WriteMiBPerSecond {
 		return false
 	}
 	if victim <= nearZeroWriteMiBPerSecond {
 		return true
 	}
-	return suspect/victim >= dominantWriteRatio
+	return suspect/victim >= thresholds.DominanceRatio
 }
 
 // MeaningfulWriteBytes reports whether a write-byte rate is large enough for
 // byte-counter attribution.
 func MeaningfulWriteBytes(averageMiBPerSecond float64) bool {
-	return averageMiBPerSecond >= minimumMeaningfulWriteMiBPerSecond
+	return MeaningfulWriteBytesWithThresholds(averageMiBPerSecond, config.DefaultThresholds())
+}
+
+// MeaningfulWriteBytesWithThresholds applies configured byte pressure.
+func MeaningfulWriteBytesWithThresholds(averageMiBPerSecond float64, thresholds config.Thresholds) bool {
+	return averageMiBPerSecond >= EffectiveThresholds(thresholds).WriteMiBPerSecond
 }
 
 // DominantWriteBytes reports whether a meaningful candidate write-byte rate is
 // at least the configured dominance ratio above the comparison rate.
 func DominantWriteBytes(comparison, candidate float64) bool {
-	return suspectIsDominant(comparison, candidate)
+	return DominantWriteBytesWithThresholds(comparison, candidate, config.DefaultThresholds())
 }
 
-func formatSyscwRatio(suspect, victim float64) string {
-	if suspect < minimumMeaningfulSyscwPerSecond {
+// DominantWriteBytesWithThresholds applies configured byte dominance.
+func DominantWriteBytesWithThresholds(comparison, candidate float64, thresholds config.Thresholds) bool {
+	return suspectIsDominant(comparison, candidate, thresholds)
+}
+
+func formatSyscwRatio(suspect, victim float64, configured ...config.Thresholds) string {
+	thresholds := thresholdArgument(configured)
+	if suspect < thresholds.WriteSyscallsPerSecond {
 		return "-"
 	}
 	if victim <= nearZeroWriteSyscallsPerSecond {
@@ -278,20 +308,26 @@ func formatSyscwRatio(suspect, victim float64) string {
 	return fmt.Sprintf("%.2fx", suspect/victim)
 }
 
-func suspectSyscwIsDominant(victim, suspect float64) bool {
-	if suspect < minimumMeaningfulSyscwPerSecond {
+func suspectSyscwIsDominant(victim, suspect float64, configured ...config.Thresholds) bool {
+	thresholds := thresholdArgument(configured)
+	if suspect < thresholds.WriteSyscallsPerSecond {
 		return false
 	}
 	if victim <= nearZeroWriteSyscallsPerSecond {
 		return true
 	}
-	return suspect/victim >= dominantSyscwRatio
+	return suspect/victim >= thresholds.DominanceRatio
 }
 
 // MeaningfulWriteSyscalls reports whether syscw activity crosses the
 // conservative fallback threshold.
 func MeaningfulWriteSyscalls(averagePerSecond float64) bool {
-	return averagePerSecond >= minimumMeaningfulSyscwPerSecond
+	return MeaningfulWriteSyscallsWithThresholds(averagePerSecond, config.DefaultThresholds())
+}
+
+// MeaningfulWriteSyscallsWithThresholds applies configured syscall pressure.
+func MeaningfulWriteSyscallsWithThresholds(averagePerSecond float64, thresholds config.Thresholds) bool {
+	return averagePerSecond >= EffectiveThresholds(thresholds).WriteSyscallsPerSecond
 }
 
 // WriteActivityObserved reports whether either write-byte or write-syscall
@@ -304,7 +340,12 @@ func WriteActivityObserved(averageMiBPerSecond, averageSyscwPerSecond float64) b
 // DominantWriteSyscalls reports whether meaningful candidate syscw activity is
 // at least the configured dominance ratio above the comparison rate.
 func DominantWriteSyscalls(comparison, candidate float64) bool {
-	return suspectSyscwIsDominant(comparison, candidate)
+	return DominantWriteSyscallsWithThresholds(comparison, candidate, config.DefaultThresholds())
+}
+
+// DominantWriteSyscallsWithThresholds applies configured syscall dominance.
+func DominantWriteSyscallsWithThresholds(comparison, candidate float64, thresholds config.Thresholds) bool {
+	return suspectSyscwIsDominant(comparison, candidate, thresholds)
 }
 
 func syscallPressureClassification(meaningful bool) string {
@@ -314,27 +355,55 @@ func syscallPressureClassification(meaningful bool) string {
 	return "NONE"
 }
 
-func conclusionForSignals(victimWrite, suspectWrite, suspectSyscw float64) string {
-	if suspectWrite >= minimumMeaningfulWriteMiBPerSecond {
-		if suspectIsDominant(victimWrite, suspectWrite) {
+func conclusionForSignals(victimWrite, suspectWrite, suspectSyscw float64, configured ...config.Thresholds) string {
+	thresholds := thresholdArgument(configured)
+	if suspectWrite >= thresholds.WriteMiBPerSecond {
+		if suspectIsDominant(victimWrite, suspectWrite, thresholds) {
 			return dominantConclusion
 		}
 		return noDominantConclusion
 	}
-	if suspectSyscw >= minimumMeaningfulSyscwPerSecond {
+	if suspectSyscw >= thresholds.WriteSyscallsPerSecond {
 		return syscallPressureConclusion
 	}
 	return noWritePressureConclusion
 }
 
+// EffectiveThresholds returns defaults when a zero-value threshold model is
+// supplied by older callers or test fixtures.
+func EffectiveThresholds(thresholds config.Thresholds) config.Thresholds {
+	defaults := config.DefaultThresholds()
+	if thresholds.WriteMiBPerSecond <= 0 {
+		thresholds.WriteMiBPerSecond = defaults.WriteMiBPerSecond
+	}
+	if thresholds.WriteSyscallsPerSecond <= 0 {
+		thresholds.WriteSyscallsPerSecond = defaults.WriteSyscallsPerSecond
+	}
+	if thresholds.DominanceRatio < 1 {
+		thresholds.DominanceRatio = defaults.DominanceRatio
+	}
+	return thresholds
+}
+
+func thresholdArgument(configured []config.Thresholds) config.Thresholds {
+	if len(configured) == 0 {
+		return config.DefaultThresholds()
+	}
+	return EffectiveThresholds(configured[0])
+}
+
 // WriteSummary emits a deterministic, table-like QEMU I/O summary.
 func WriteSummary(dst io.Writer, report SummaryReport) error {
+	thresholds := EffectiveThresholds(report.Thresholds)
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "QEMU I/O Summary")
 	fmt.Fprintf(w, "Victim selector:\t%s\n", emptyDash(report.Plan.VictimSelector))
 	fmt.Fprintf(w, "Suspect selector:\t%s\n", emptyDash(report.Plan.SuspectSelector))
 	fmt.Fprintf(w, "Duration:\t%s\n", report.Duration)
-	fmt.Fprintf(w, "Interval:\t%s\n\n", report.Interval)
+	fmt.Fprintf(w, "Interval:\t%s\n", report.Interval)
+	fmt.Fprintf(w, "Write threshold MiB/s:\t%.2f\n", thresholds.WriteMiBPerSecond)
+	fmt.Fprintf(w, "Write syscall threshold/s:\t%.2f\n", thresholds.WriteSyscallsPerSecond)
+	fmt.Fprintf(w, "Dominance ratio:\t%.2f\n\n", thresholds.DominanceRatio)
 
 	fmt.Fprintln(w, "VM targets")
 	writeTargetRows(w, report.Plan.Targets)

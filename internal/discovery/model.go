@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
@@ -107,6 +108,7 @@ func SamplingPlan(targets Targets) qemuio.Plan {
 // Analyze ranks already sampled candidates using byte counters first and
 // write-syscall pressure only when no candidate has meaningful byte activity.
 func Analyze(targets Targets, sampled qemuio.SummaryReport) Report {
+	thresholds := qemuio.EffectiveThresholds(sampled.Thresholds)
 	summaries := make(map[string]qemuio.VMSummary, len(sampled.VMs))
 	for _, summary := range sampled.VMs {
 		summaries[summary.Target.VM.Name] = summary
@@ -128,17 +130,17 @@ func Analyze(targets Targets, sampled qemuio.SummaryReport) Report {
 		})
 	}
 
-	selectedName, selectedReason := selectCandidate(report.VictimSummary, report.Candidates)
+	selectedName, selectedReason := selectCandidate(report.VictimSummary, report.Candidates, thresholds)
 	for index := range report.Candidates {
 		candidate := &report.Candidates[index]
 		switch {
 		case candidate.VM.Name == selectedName:
 			candidate.Score = "HIGH"
 			candidate.Reason = selectedReason
-		case candidate.Summary.Available && qemuio.MeaningfulWriteBytes(candidate.Summary.AverageWriteMiBPerSecond):
+		case candidate.Summary.Available && qemuio.MeaningfulWriteBytesWithThresholds(candidate.Summary.AverageWriteMiBPerSecond, thresholds):
 			candidate.Score = "MEDIUM"
 			candidate.Reason = "write activity, not dominant"
-		case candidate.Summary.Available && qemuio.MeaningfulWriteSyscalls(candidate.Summary.AverageSyscwPerSecond):
+		case candidate.Summary.Available && qemuio.MeaningfulWriteSyscallsWithThresholds(candidate.Summary.AverageSyscwPerSecond, thresholds):
 			candidate.Score = "MEDIUM"
 			candidate.Reason = "syscall pressure, not dominant"
 		}
@@ -166,16 +168,20 @@ func Analyze(targets Targets, sampled qemuio.SummaryReport) Report {
 	return report
 }
 
-func selectCandidate(victim qemuio.VMSummary, candidates []Candidate) (string, string) {
+func selectCandidate(victim qemuio.VMSummary, candidates []Candidate, configured ...config.Thresholds) (string, string) {
+	thresholds := config.DefaultThresholds()
+	if len(configured) > 0 {
+		thresholds = qemuio.EffectiveThresholds(configured[0])
+	}
 	byteCandidates := rankedCandidates(candidates, func(summary qemuio.VMSummary) (float64, float64, bool) {
 		return summary.AverageWriteMiBPerSecond, summary.MaxWriteMiBPerSecond,
-			summary.Available && qemuio.MeaningfulWriteBytes(summary.AverageWriteMiBPerSecond)
+			summary.Available && qemuio.MeaningfulWriteBytesWithThresholds(summary.AverageWriteMiBPerSecond, thresholds)
 	})
 	if len(byteCandidates) > 0 {
 		comparison := competingRate(victim, candidates, byteCandidates[0].VM.Name, func(summary qemuio.VMSummary) float64 {
 			return summary.AverageWriteMiBPerSecond
 		})
-		if qemuio.DominantWriteBytes(comparison, byteCandidates[0].Summary.AverageWriteMiBPerSecond) {
+		if qemuio.DominantWriteBytesWithThresholds(comparison, byteCandidates[0].Summary.AverageWriteMiBPerSecond, thresholds) {
 			return byteCandidates[0].VM.Name, "dominant byte write rate"
 		}
 		return "", ""
@@ -183,13 +189,13 @@ func selectCandidate(victim qemuio.VMSummary, candidates []Candidate) (string, s
 
 	syscallCandidates := rankedCandidates(candidates, func(summary qemuio.VMSummary) (float64, float64, bool) {
 		return summary.AverageSyscwPerSecond, summary.MaxSyscwPerSecond,
-			summary.Available && qemuio.MeaningfulWriteSyscalls(summary.AverageSyscwPerSecond)
+			summary.Available && qemuio.MeaningfulWriteSyscallsWithThresholds(summary.AverageSyscwPerSecond, thresholds)
 	})
 	if len(syscallCandidates) > 0 {
 		comparison := competingRate(victim, candidates, syscallCandidates[0].VM.Name, func(summary qemuio.VMSummary) float64 {
 			return summary.AverageSyscwPerSecond
 		})
-		if qemuio.DominantWriteSyscalls(comparison, syscallCandidates[0].Summary.AverageSyscwPerSecond) {
+		if qemuio.DominantWriteSyscallsWithThresholds(comparison, syscallCandidates[0].Summary.AverageSyscwPerSecond, thresholds) {
 			return syscallCandidates[0].VM.Name, "dominant syscall pressure"
 		}
 	}

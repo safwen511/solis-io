@@ -4,8 +4,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/inventory"
 )
+
+func TestConfiguredThresholdsChangePressureWithoutChangingDefaults(t *testing.T) {
+	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-web"}}
+	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
+	plan := Plan{VictimSelector: "a-web", SuspectSelector: "b-stress", Targets: []Target{victim, suspect}}
+	samples := []intervalSample{
+		{Target: victim, Interval: time.Second},
+		{Target: suspect, Interval: time.Second, Rates: Rates{WriteMiBPerSecond: 50}},
+	}
+	defaultReport := summarizeSamples(plan, time.Second, time.Second, samples)
+	if !defaultReport.MeaningfulSuspectWritePressure || !defaultReport.SuspectDominant {
+		t.Fatalf("default report = %#v", defaultReport)
+	}
+	configured := config.Thresholds{WriteMiBPerSecond: 100, WriteSyscallsPerSecond: 200000, DominanceRatio: 3}
+	customReport := summarizeSamplesWithThresholds(plan, time.Second, time.Second, samples, configured)
+	if customReport.MeaningfulSuspectWritePressure || customReport.SuspectDominant {
+		t.Fatalf("custom report = %#v", customReport)
+	}
+	if customReport.Thresholds != configured {
+		t.Fatalf("thresholds = %#v, want %#v", customReport.Thresholds, configured)
+	}
+}
 
 func TestSummarizeSamplesCalculatesTimeWeightedAverages(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}

@@ -5,20 +5,30 @@ import (
 	"strings"
 )
 
+// EnrichOptions controls host-side inventory queries.
+type EnrichOptions struct {
+	LibvirtURI string
+}
+
 // Enrich adds host information reported by libvirt and QEMU to each VM.
 func Enrich(vms []VM) []VM {
+	return EnrichWithOptions(vms, EnrichOptions{})
+}
+
+// EnrichWithOptions adds host information using the configured libvirt URI.
+func EnrichWithOptions(vms []VM, options EnrichOptions) []VM {
 	for i := range vms {
-		vms[i].State = domainState(vms[i].Name)
-		vms[i].IPLease = leaseIP(vms[i].Name)
-		vms[i].Disk = diskPath(vms[i].Name)
+		vms[i].State = domainState(vms[i].Name, options.LibvirtURI)
+		vms[i].IPLease = leaseIP(vms[i].Name, options.LibvirtURI)
+		vms[i].Disk = diskPath(vms[i].Name, options.LibvirtURI)
 		vms[i].QEMUPID, vms[i].QEMUCmdline = qemuDetails(vms[i].Name)
 	}
 
 	return vms
 }
 
-func domainState(name string) string {
-	out, err := exec.Command("virsh", "domstate", name).CombinedOutput()
+func domainState(name, uri string) string {
+	out, err := virshCommand(uri, "domstate", name).CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -26,8 +36,8 @@ func domainState(name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func leaseIP(name string) string {
-	out, err := exec.Command("virsh", "domifaddr", name, "--source", "lease").CombinedOutput()
+func leaseIP(name, uri string) string {
+	out, err := virshCommand(uri, "domifaddr", name, "--source", "lease").CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -43,8 +53,8 @@ func leaseIP(name string) string {
 	return ""
 }
 
-func diskPath(name string) string {
-	out, err := exec.Command("virsh", "domblklist", name, "--details").CombinedOutput()
+func diskPath(name, uri string) string {
+	out, err := virshCommand(uri, "domblklist", name, "--details").CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -57,4 +67,11 @@ func diskPath(name string) string {
 	}
 
 	return ""
+}
+
+func virshCommand(uri string, args ...string) *exec.Cmd {
+	if strings.TrimSpace(uri) != "" {
+		args = append([]string{"-c", strings.TrimSpace(uri)}, args...)
+	}
+	return exec.Command("virsh", args...)
 }

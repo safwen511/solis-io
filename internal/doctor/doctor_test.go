@@ -2,12 +2,34 @@ package doctor
 
 import (
 	"bytes"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/safwen511/solis-io/internal/inventory"
 )
+
+func TestProductDoctorDoesNotRequireLabArtifacts(t *testing.T) {
+	report := RunWithOptions(Options{InventoryCSV: filepath.Join(t.TempDir(), "missing.csv")})
+	if len(report.Lab) != 0 {
+		t.Fatalf("product doctor lab checks = %#v, want none", report.Lab)
+	}
+}
+
+func TestLabDoctorIncludesLabSpecificChecks(t *testing.T) {
+	root := t.TempDir()
+	report := RunWithOptions(Options{
+		Root:              root,
+		InventoryCSV:      filepath.Join(root, "missing.csv"),
+		DefaultReportDir:  filepath.Join(root, "reports", "workload"),
+		CaptureOutputRoot: filepath.Join(root, "reports", "captures"),
+		Lab:               true,
+	})
+	if len(report.Lab) == 0 {
+		t.Fatal("lab doctor did not include lab checks")
+	}
+}
 
 func TestOverallResult(t *testing.T) {
 	tests := []struct {

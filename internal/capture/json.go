@@ -12,6 +12,7 @@ import (
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
@@ -19,6 +20,7 @@ import (
 type EvidenceSummary struct {
 	SchemaVersion      string                  `json:"schema_version"`
 	Capture            CaptureSummary          `json:"capture"`
+	Thresholds         ThresholdEvidence       `json:"thresholds"`
 	Victim             VMEvidence              `json:"victim"`
 	SelectedSuspect    SuspectEvidence         `json:"selected_suspect"`
 	ExperimentEvidence ExperimentEvidence      `json:"experiment_evidence"`
@@ -38,6 +40,13 @@ type CaptureSummary struct {
 	ReportDir    string `json:"report_dir"`
 	Duration     string `json:"duration"`
 	Interval     string `json:"interval"`
+	ConfigSource string `json:"config_source"`
+}
+
+type ThresholdEvidence struct {
+	WriteMiBPerSecond      float64 `json:"write_mib_per_sec"`
+	WriteSyscallsPerSecond float64 `json:"write_syscalls_per_sec"`
+	DominanceRatio         float64 `json:"dominance_ratio"`
 }
 
 type VMEvidence struct {
@@ -148,6 +157,7 @@ func WriteEvidenceSummary(dst io.Writer, inputs Inputs, evidence Evidence, times
 }
 
 func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) EvidenceSummary {
+	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
 	victimVM, victimStorage := resolvedTarget(inputs.Victim, "victim", evidence)
 	suspectVM, suspectStorage := resolvedTarget(inputs.Suspect, "suspect", evidence)
 	suspectReason, suspectScore := suspectClassification(inputs, evidence)
@@ -169,6 +179,12 @@ func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) Ev
 			ReportDir:    valueOrDash(inputs.ReportDirectory),
 			Duration:     inputs.Duration.String(),
 			Interval:     inputs.Interval.String(),
+			ConfigSource: valueOrDash(inputs.ConfigSource),
+		},
+		Thresholds: ThresholdEvidence{
+			WriteMiBPerSecond:      thresholds.WriteMiBPerSecond,
+			WriteSyscallsPerSecond: thresholds.WriteSyscallsPerSecond,
+			DominanceRatio:         thresholds.DominanceRatio,
 		},
 		Victim:             vmEvidence(victimVM, victimStorage, inputs.Victim),
 		SelectedSuspect:    selectedSuspectEvidence(inputs, evidence, suspectVM, suspectReason, suspectScore),

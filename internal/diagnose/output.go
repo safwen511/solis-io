@@ -8,6 +8,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
+	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
@@ -22,7 +23,12 @@ func Write(dst io.Writer, report Report) error {
 	fmt.Fprintf(w, "Victim:\t%s\n", valueOrDash(report.Inputs.Victim))
 	fmt.Fprintf(w, "Suspect:\t%s\n", valueOrDash(report.Inputs.Suspect))
 	fmt.Fprintf(w, "Duration:\t%s\n", report.Inputs.Duration)
-	fmt.Fprintf(w, "Interval:\t%s\n\n", report.Inputs.Interval)
+	fmt.Fprintf(w, "Interval:\t%s\n", report.Inputs.Interval)
+	fmt.Fprintf(w, "Config source:\t%s\n", valueOrDash(report.Inputs.ConfigSource))
+	thresholds := qemuio.EffectiveThresholds(report.Inputs.Thresholds)
+	fmt.Fprintf(w, "Write threshold MiB/s:\t%.2f\n", thresholds.WriteMiBPerSecond)
+	fmt.Fprintf(w, "Write syscall threshold/s:\t%.2f\n", thresholds.WriteSyscallsPerSecond)
+	fmt.Fprintf(w, "Dominance ratio:\t%.2f\n\n", thresholds.DominanceRatio)
 
 	fmt.Fprintln(w, "Experiment evidence")
 	if !report.ExperimentAvailable {

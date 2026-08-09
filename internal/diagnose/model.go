@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
@@ -32,6 +33,8 @@ type Inputs struct {
 	Suspect         string
 	Duration        time.Duration
 	Interval        time.Duration
+	ConfigSource    string
+	Thresholds      config.Thresholds
 }
 
 // Evidence captures the boolean conditions used by the verdict rules.

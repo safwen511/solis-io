@@ -4,6 +4,7 @@ package capture
 import (
 	"time"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/discovery"
 	"github.com/safwen511/solis-io/internal/ebpf"
@@ -26,6 +27,8 @@ type Inputs struct {
 	Interval           time.Duration
 	IncludeEBPFLatency bool
 	CaptureMode        string
+	ConfigSource       string
+	Thresholds         config.Thresholds
 }
 
 // Evidence contains the already parsed, resolved, and sampled capture data.

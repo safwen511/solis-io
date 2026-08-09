@@ -10,38 +10,62 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
 const (
-	configPath         = "lab/config/vms.csv"
 	fioScriptPath      = "lab/scripts/run-fio-noise.sh"
-	workloadPath       = "lab/reports/workload/20260808T174825Z"
-	diagnosisPath      = "lab/reports/diagnosis"
-	capturesPath       = "lab/reports/captures"
 	startVMRemedy      = "start VMs with virsh start <vm>"
 	qemuSudoRemedy     = "run qemu io commands with sudo"
 	buildRemedy        = "build with go build -o solis ./cmd/solis"
 	writeExecuteAccess = 3
 )
 
+// Options controls product and optional lab readiness checks.
+type Options struct {
+	Root              string
+	InventoryCSV      string
+	CaptureOutputRoot string
+	DefaultReportDir  string
+	LibvirtURI        string
+	Lab               bool
+}
+
 // Run performs all read-only readiness checks relative to the repository root.
 func Run(root string) Report {
-	report := Report{}
-	report.Host = hostChecks(root)
-	report.Lab = labChecks(root)
+	defaults := config.DevelopmentDefaults().Settings
+	return RunWithOptions(Options{
+		Root:              root,
+		InventoryCSV:      filepath.Join(root, defaults.InventoryCSV),
+		CaptureOutputRoot: filepath.Join(root, defaults.CaptureOutputRoot),
+		DefaultReportDir:  filepath.Join(root, defaults.DefaultReportDir),
+		LibvirtURI:        defaults.LibvirtURI,
+	})
+}
 
-	vms, err := inventory.LoadFromConfig(filepath.Join(root, configPath))
+// RunWithOptions performs product checks and optional repository lab checks.
+func RunWithOptions(options Options) Report {
+	if strings.TrimSpace(options.Root) == "" {
+		options.Root = "."
+	}
+	report := Report{}
+	report.Host = hostChecks(options.Root)
+	if options.Lab {
+		report.Lab = labChecks(options)
+	}
+
+	vms, err := inventory.LoadFromConfig(options.InventoryCSV)
 	if err != nil {
-		report.Inventory = unavailableInventoryChecks(err)
+		report.Inventory = unavailableInventoryChecks(err, options.InventoryCSV)
 		report.Storage = unavailableStorageChecks()
 		report.QEMU = []Check{{Status: SKIP, Name: "QEMU process I/O permission", Detail: "VM inventory is unavailable"}}
 		return report
 	}
 
-	report.Inventory, vms = inventoryChecks(vms)
+	report.Inventory, vms = inventoryChecks(vms, options.InventoryCSV, options.LibvirtURI)
 	report.Storage = storageChecks(vms)
 	report.QEMU = qemuChecks(vms)
 	return report
@@ -68,22 +92,26 @@ func hostChecks(root string) []Check {
 	return checks
 }
 
-func labChecks(root string) []Check {
-	return []Check{
-		pathCheck(filepath.Join(root, configPath), configPath+" exists", false),
-		pathCheck(filepath.Join(root, fioScriptPath), fioScriptPath+" exists", false),
-		pathCheck(filepath.Join(root, workloadPath), workloadPath+" exists", true),
-		directoryOutputCheck(filepath.Join(root, diagnosisPath), diagnosisPath+" exists or can be created"),
-		directoryOutputCheck(filepath.Join(root, capturesPath), capturesPath+" exists or can be created"),
+func labChecks(options Options) []Check {
+	checks := []Check{
+		pathCheck(options.InventoryCSV, options.InventoryCSV+" exists", false),
+		pathCheck(filepath.Join(options.Root, fioScriptPath), fioScriptPath+" exists", false),
 	}
+	if strings.TrimSpace(options.DefaultReportDir) != "" {
+		checks = append(checks, pathCheck(options.DefaultReportDir, options.DefaultReportDir+" exists", true))
+	}
+	if strings.TrimSpace(options.CaptureOutputRoot) != "" {
+		checks = append(checks, directoryOutputCheck(options.CaptureOutputRoot, options.CaptureOutputRoot+" exists or can be created"))
+	}
+	return checks
 }
 
-func inventoryChecks(vms []inventory.VM) ([]Check, []inventory.VM) {
-	checks := []Check{{Status: OK, Name: "Can read configured VMs", Detail: configPath}}
+func inventoryChecks(vms []inventory.VM, inventoryPath, libvirtURI string) ([]Check, []inventory.VM) {
+	checks := []Check{{Status: OK, Name: "Can read configured VMs", Detail: inventoryPath}}
 	configured := len(vms)
 	if configured == 0 {
 		checks = append(checks,
-			Check{Status: FAIL, Name: "Configured VMs", Detail: "0", Remediation: "add VM rows to " + configPath},
+			Check{Status: FAIL, Name: "Configured VMs", Detail: "0", Remediation: "add VM rows to " + inventoryPath},
 			Check{Status: SKIP, Name: "Running VMs", Detail: "no configured VMs"},
 			Check{Status: SKIP, Name: "VMs with QEMU PID", Detail: "no configured VMs"},
 			Check{Status: SKIP, Name: "VMs with lease IP", Detail: "no configured VMs"},
@@ -95,7 +123,7 @@ func inventoryChecks(vms []inventory.VM) ([]Check, []inventory.VM) {
 	}
 
 	checks = append(checks, Check{Status: OK, Name: "Configured VMs", Detail: fmt.Sprintf("%d", configured)})
-	vms = inventory.Enrich(vms)
+	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: libvirtURI})
 	checks = append(checks, inventoryRuntimeChecks(vms)...)
 	return checks, vms
 }
@@ -214,9 +242,9 @@ func qemuChecks(vms []inventory.VM) []Check {
 	return []Check{{Status: SKIP, Name: "QEMU process I/O permission", Detail: "no QEMU PID for a running VM", Remediation: "verify libvirt QEMU PID files"}}
 }
 
-func unavailableInventoryChecks(err error) []Check {
+func unavailableInventoryChecks(err error, inventoryPath string) []Check {
 	return []Check{
-		{Status: FAIL, Name: "Can read configured VMs", Detail: err.Error(), Remediation: "verify " + configPath},
+		{Status: FAIL, Name: "Can read configured VMs", Detail: err.Error(), Remediation: "verify " + inventoryPath},
 		{Status: SKIP, Name: "Configured VMs", Detail: "inventory unavailable"},
 		{Status: SKIP, Name: "Running VMs", Detail: "inventory unavailable", Remediation: startVMRemedy},
 		{Status: SKIP, Name: "VMs with QEMU PID", Detail: "inventory unavailable"},

@@ -3,9 +3,7 @@ package doctor
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -31,7 +29,13 @@ type Options struct {
 	CaptureOutputRoot string
 	DefaultReportDir  string
 	LibvirtURI        string
+	ConfigSource      string
+	SchemaVersion     string
+	Observability     *config.ObservabilityConfig
 	Lab               bool
+	ProcPath          string
+	SysPath           string
+	Probes            *Probes
 }
 
 // Run performs all read-only readiness checks relative to the repository root.
@@ -43,6 +47,9 @@ func Run(root string) Report {
 		CaptureOutputRoot: filepath.Join(root, defaults.CaptureOutputRoot),
 		DefaultReportDir:  filepath.Join(root, defaults.DefaultReportDir),
 		LibvirtURI:        defaults.LibvirtURI,
+		ConfigSource:      config.BuiltInDefaultsSource,
+		SchemaVersion:     defaults.SchemaVersion,
+		Observability:     defaults.Observability,
 	})
 }
 
@@ -51,8 +58,18 @@ func RunWithOptions(options Options) Report {
 	if strings.TrimSpace(options.Root) == "" {
 		options.Root = "."
 	}
+	if strings.TrimSpace(options.ProcPath) == "" {
+		options.ProcPath = "/proc"
+	}
+	if strings.TrimSpace(options.SysPath) == "" {
+		options.SysPath = "/sys"
+	}
+	probes := effectiveProbes(options.Probes)
 	report := Report{}
-	report.Host = hostChecks(options.Root)
+	report.Config = configurationChecks(options, probes)
+	report.Host = hostChecks(options, probes)
+	report.Observability = observabilityChecks(options.Observability)
+	report.Privacy = privacyChecks()
 	if options.Lab {
 		report.Lab = labChecks(options)
 	}
@@ -71,23 +88,25 @@ func RunWithOptions(options Options) Report {
 	return report
 }
 
-func hostChecks(root string) []Check {
+func hostChecks(options Options, probes Probes) []Check {
+	goos := probes.GOOS()
 	checks := []Check{
-		{Status: OK, Name: "OS is Linux", Detail: runtime.GOOS},
-		{Status: SKIP, Name: "Go build", Detail: "not checked at runtime", Remediation: buildRemedy},
+		{Status: OK, Name: "OS is Linux", Detail: goos},
+		directoryReadableCheck(probes, options.ProcPath, "/proc readable"),
+		directoryReadableCheck(probes, options.SysPath, "/sys readable"),
 	}
-	if runtime.GOOS != "linux" {
-		checks[0] = Check{Status: FAIL, Name: "OS is Linux", Detail: runtime.GOOS, Remediation: "run Solis on a Linux host"}
+	if goos != "linux" {
+		checks[0] = Check{Status: FAIL, Name: "OS is Linux", Detail: goos, Remediation: "run Solis on a Linux host"}
 	}
 
-	virsh := executableCheck("virsh", "virsh exists", "install libvirt/virsh")
-	findmnt := executableCheck("findmnt", "findmnt exists", "install findmnt (util-linux)")
-	lsblk := executableCheck("lsblk", "lsblk exists", "install lsblk (util-linux)")
-	checks = append(checks[:1], append([]Check{virsh}, checks[1:]...)...)
-	checks = append(checks, findmnt, lsblk)
+	virsh := executableCheck(probes, "virsh", "virsh command", "install libvirt/virsh")
+	checks = append(checks, virsh)
+	checks = append(checks, libvirtAccessCheck(options.LibvirtURI, virsh.Status, probes))
 	checks = append(checks,
-		pathCheck("/sys/class/block", "/sys/class/block exists", true),
-		pathCheck("/proc", "/proc exists", true),
+		executableCheck(probes, "findmnt", "findmnt command", "install findmnt (util-linux)"),
+		executableCheck(probes, "lsblk", "lsblk command", "install lsblk (util-linux)"),
+		rootUsageCheck(probes.EffectiveUID()),
+		Check{Status: SKIP, Name: "Go build", Detail: "not checked at runtime", Remediation: buildRemedy},
 	)
 	return checks
 }
@@ -100,10 +119,154 @@ func labChecks(options Options) []Check {
 	if strings.TrimSpace(options.DefaultReportDir) != "" {
 		checks = append(checks, pathCheck(options.DefaultReportDir, options.DefaultReportDir+" exists", true))
 	}
-	if strings.TrimSpace(options.CaptureOutputRoot) != "" {
-		checks = append(checks, directoryOutputCheck(options.CaptureOutputRoot, options.CaptureOutputRoot+" exists or can be created"))
-	}
 	return checks
+}
+
+func configurationChecks(options Options, probes Probes) []Check {
+	source := valueOrDefault(options.ConfigSource, config.BuiltInDefaultsSource)
+	schema := valueOrDefault(options.SchemaVersion, "unknown")
+	schemaCheck := Check{Status: OK, Name: "Config schema version", Detail: schema}
+	if schema != config.SchemaVersion && schema != config.SchemaVersion2 {
+		schemaCheck = Check{Status: WARN, Name: "Config schema version", Detail: schema, Remediation: "use a supported schema_version"}
+	}
+	checks := []Check{
+		{Status: OK, Name: "Config source", Detail: source},
+		schemaCheck,
+		fileReadableCheck(probes, options.InventoryCSV, "Inventory file"),
+	}
+	return append(checks, captureOutputChecks(probes, options.CaptureOutputRoot)...)
+}
+
+func fileReadableCheck(probes Probes, path, name string) Check {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return Check{Status: FAIL, Name: name, Detail: "not configured", Remediation: "configure inventory_csv"}
+	}
+	info, err := probes.Stat(path)
+	if err != nil {
+		return Check{Status: FAIL, Name: name, Detail: err.Error(), Remediation: "verify " + path}
+	}
+	if !info.Mode().IsRegular() {
+		return Check{Status: FAIL, Name: name, Detail: "not a regular file: " + path, Remediation: "verify " + path}
+	}
+	if err := probes.OpenReadable(path); err != nil {
+		return Check{Status: FAIL, Name: name, Detail: err.Error(), Remediation: "grant read access to " + path}
+	}
+	return Check{Status: OK, Name: name, Detail: path}
+}
+
+func captureOutputChecks(probes Probes, configuredPath string) []Check {
+	configuredPath = strings.TrimSpace(configuredPath)
+	if configuredPath == "" {
+		return []Check{
+			{Status: WARN, Name: "Capture output writable", Detail: "not configured", Remediation: "configure capture_output_root"},
+			{Status: SKIP, Name: "Capture output ownership", Detail: "not configured"},
+			{Status: SKIP, Name: "Capture output permissions", Detail: "not configured"},
+		}
+	}
+	checkedPath, info, err := nearestExistingDirectory(probes, configuredPath)
+	if err != nil {
+		return []Check{
+			{Status: WARN, Name: "Capture output writable", Detail: err.Error(), Remediation: "verify capture_output_root and parent access"},
+			{Status: SKIP, Name: "Capture output ownership", Detail: "directory unavailable"},
+			{Status: SKIP, Name: "Capture output permissions", Detail: "directory unavailable"},
+		}
+	}
+	detail := checkedPath
+	if filepath.Clean(checkedPath) != filepath.Clean(configuredPath) {
+		detail = "nearest existing parent: " + checkedPath
+	}
+	writable := Check{Status: OK, Name: "Capture output writable", Detail: detail}
+	if err := probes.Access(checkedPath, writeExecuteAccess); err != nil {
+		writable = Check{Status: WARN, Name: "Capture output writable", Detail: err.Error(), Remediation: "grant write and execute access to " + checkedPath}
+	}
+
+	ownership := Check{Status: SKIP, Name: "Capture output ownership", Detail: "ownership unavailable for " + checkedPath}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		owner := int(stat.Uid)
+		ownership = Check{Status: OK, Name: "Capture output ownership", Detail: fmt.Sprintf("uid %d", owner)}
+		if owner != probes.EffectiveUID() {
+			ownership = Check{
+				Status:      WARN,
+				Name:        "Capture output ownership",
+				Detail:      fmt.Sprintf("%s is owned by uid %d; current euid is %d", checkedPath, owner, probes.EffectiveUID()),
+				Remediation: "use an operator-owned capture directory",
+			}
+		}
+	}
+
+	permissions := Check{Status: OK, Name: "Capture output permissions", Detail: fmt.Sprintf("%s mode %04o", checkedPath, info.Mode().Perm())}
+	if info.Mode().Perm()&0o022 != 0 {
+		permissions = Check{
+			Status:      WARN,
+			Name:        "Capture output permissions",
+			Detail:      fmt.Sprintf("%s mode %04o is group/world writable", checkedPath, info.Mode().Perm()),
+			Remediation: "remove unnecessary group/world write permission from the capture parent",
+		}
+	}
+	return []Check{writable, ownership, permissions}
+}
+
+func nearestExistingDirectory(probes Probes, path string) (string, os.FileInfo, error) {
+	candidate := filepath.Clean(path)
+	for {
+		info, err := probes.Stat(candidate)
+		if err == nil {
+			if !info.IsDir() {
+				return "", nil, fmt.Errorf("capture output path is not a directory: %s", candidate)
+			}
+			return candidate, info, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", nil, fmt.Errorf("inspect capture output path %s: %w", candidate, err)
+		}
+		next := filepath.Dir(candidate)
+		if next == candidate {
+			return "", nil, fmt.Errorf("no existing parent for capture output path %s", path)
+		}
+		candidate = next
+	}
+}
+
+func observabilityChecks(observability *config.ObservabilityConfig) []Check {
+	if observability == nil {
+		return []Check{
+			{Status: SKIP, Name: "Host collector", Detail: "not configured"},
+			{Status: SKIP, Name: "Guest collector", Detail: "disabled"},
+			{Status: SKIP, Name: "Service definitions", Detail: "0 configured"},
+			{Status: SKIP, Name: "Database definitions", Detail: "0 configured"},
+		}
+	}
+	host := Check{Status: SKIP, Name: "Host collector", Detail: "disabled"}
+	if observability.Host.Enabled {
+		host = Check{Status: OK, Name: "Host collector", Detail: "enabled; interval " + valueOrDefault(observability.Host.Interval, "default")}
+	}
+	guest := Check{Status: SKIP, Name: "Guest collector", Detail: "disabled"}
+	if observability.Guest.Enabled {
+		guest = Check{Status: OK, Name: "Guest collector", Detail: fmt.Sprintf("enabled; transport %s; max_parallel %d", observability.Guest.Transport, observability.Guest.MaxParallel)}
+	}
+	services := Check{Status: SKIP, Name: "Service definitions", Detail: fmt.Sprintf("%d configured", len(observability.Services))}
+	if len(observability.Services) > 0 {
+		services.Status = OK
+	}
+	databases := Check{Status: SKIP, Name: "Database definitions", Detail: fmt.Sprintf("%d configured", len(observability.Databases))}
+	if len(observability.Databases) > 0 {
+		databases.Status = OK
+	}
+	return []Check{host, guest, services, databases}
+}
+
+func privacyChecks() []Check {
+	return []Check{
+		{Status: OK, Name: "Process arguments", Detail: "not collected by observability/capture paths"},
+		{Status: OK, Name: "Environment variables", Detail: "not collected"},
+		{Status: OK, Name: "Guest files", Detail: "not collected"},
+		{Status: OK, Name: "Request bodies", Detail: "not collected"},
+		{Status: OK, Name: "Response bodies", Detail: "not collected"},
+		{Status: OK, Name: "SQL text", Detail: "not collected"},
+		{Status: OK, Name: "Table data", Detail: "not collected"},
+		{Status: OK, Name: "Secrets", Detail: "not collected"},
+	}
 }
 
 func inventoryChecks(vms []inventory.VM, inventoryPath, libvirtURI string) ([]Check, []inventory.VM) {
@@ -123,7 +286,7 @@ func inventoryChecks(vms []inventory.VM, inventoryPath, libvirtURI string) ([]Ch
 	}
 
 	checks = append(checks, Check{Status: OK, Name: "Configured VMs", Detail: fmt.Sprintf("%d", configured)})
-	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: libvirtURI})
+	vms = inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: libvirtURI, SkipQEMUProcessArguments: true})
 	checks = append(checks, inventoryRuntimeChecks(vms)...)
 	return checks, vms
 }
@@ -262,12 +425,62 @@ func unavailableStorageChecks() []Check {
 	}
 }
 
-func executableCheck(name, checkName, remediation string) Check {
-	path, err := exec.LookPath(name)
+func executableCheck(probes Probes, name, checkName, remediation string) Check {
+	path, err := probes.LookPath(name)
 	if err != nil {
 		return Check{Status: FAIL, Name: checkName, Detail: "not found in PATH", Remediation: remediation}
 	}
 	return Check{Status: OK, Name: checkName, Detail: path}
+}
+
+func directoryReadableCheck(probes Probes, path, checkName string) Check {
+	info, err := probes.Stat(path)
+	if err != nil {
+		return Check{Status: FAIL, Name: checkName, Detail: err.Error(), Remediation: "restore or mount " + path}
+	}
+	if !info.IsDir() {
+		return Check{Status: FAIL, Name: checkName, Detail: "not a directory", Remediation: "restore directory " + path}
+	}
+	if _, err := probes.ReadDir(path); err != nil {
+		return Check{Status: FAIL, Name: checkName, Detail: err.Error(), Remediation: "grant read access to " + path}
+	}
+	return Check{Status: OK, Name: checkName, Detail: path}
+}
+
+func libvirtAccessCheck(uri string, virshStatus Status, probes Probes) Check {
+	if virshStatus != OK {
+		return Check{Status: SKIP, Name: "Read-only libvirt access", Detail: "virsh is unavailable", Remediation: "install libvirt/virsh"}
+	}
+	args := []string{"list", "--all", "--name"}
+	if strings.TrimSpace(uri) != "" {
+		args = append([]string{"-c", strings.TrimSpace(uri)}, args...)
+	}
+	output, err := probes.CommandOutput("virsh", args...)
+	if err != nil {
+		detail := err.Error()
+		if message := oneLine(string(output)); message != "" {
+			detail += ": " + message
+		}
+		return Check{
+			Status:      WARN,
+			Name:        "Read-only libvirt access",
+			Detail:      detail,
+			Remediation: "verify libvirt service state and access to " + valueOrDefault(uri, "the default URI"),
+		}
+	}
+	return Check{Status: OK, Name: "Read-only libvirt access", Detail: valueOrDefault(uri, "default URI")}
+}
+
+func rootUsageCheck(euid int) Check {
+	if euid == 0 {
+		return Check{
+			Status:      WARN,
+			Name:        "Running as root",
+			Detail:      "product doctor does not require root",
+			Remediation: "run solis doctor as an unprivileged user",
+		}
+	}
+	return Check{Status: OK, Name: "Running as root", Detail: "no"}
 }
 
 func pathCheck(path, checkName string, wantDirectory bool) Check {
@@ -282,41 +495,6 @@ func pathCheck(path, checkName string, wantDirectory bool) Check {
 		return Check{Status: FAIL, Name: checkName, Detail: "not a regular file", Remediation: "restore file " + path}
 	}
 	return Check{Status: OK, Name: checkName, Detail: "exists"}
-}
-
-func directoryOutputCheck(path, checkName string) Check {
-	info, err := os.Stat(path)
-	if err == nil {
-		if info.IsDir() {
-			return Check{Status: OK, Name: checkName, Detail: "exists"}
-		}
-		return Check{Status: FAIL, Name: checkName, Detail: "path exists but is not a directory", Remediation: "replace with a directory: " + path}
-	}
-	if !os.IsNotExist(err) {
-		return Check{Status: FAIL, Name: checkName, Detail: err.Error(), Remediation: "check permissions for " + path}
-	}
-
-	parent := filepath.Dir(path)
-	for {
-		parentInfo, parentErr := os.Stat(parent)
-		if parentErr == nil {
-			if !parentInfo.IsDir() {
-				return Check{Status: FAIL, Name: checkName, Detail: "parent is not a directory: " + parent, Remediation: "repair " + parent}
-			}
-			if err := syscall.Access(parent, writeExecuteAccess); err != nil {
-				return Check{Status: FAIL, Name: checkName, Detail: "parent is not writable: " + parent, Remediation: "grant write access to " + parent}
-			}
-			return Check{Status: OK, Name: checkName, Detail: "can be created under " + parent}
-		}
-		if !os.IsNotExist(parentErr) {
-			return Check{Status: FAIL, Name: checkName, Detail: parentErr.Error(), Remediation: "check permissions for " + parent}
-		}
-		next := filepath.Dir(parent)
-		if next == parent {
-			return Check{Status: FAIL, Name: checkName, Detail: "no existing parent directory", Remediation: "create " + path}
-		}
-		parent = next
-	}
 }
 
 func countCheck(name string, count, total int, failIfZero bool, remediation string) Check {
@@ -357,4 +535,16 @@ func firstDevice(devices string) string {
 		}
 	}
 	return ""
+}
+
+func valueOrDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func oneLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }

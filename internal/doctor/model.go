@@ -21,17 +21,29 @@ type Check struct {
 
 // Report contains all doctor sections in deterministic order.
 type Report struct {
-	Host      []Check
-	Lab       []Check
-	Inventory []Check
-	Storage   []Check
-	QEMU      []Check
+	Config        []Check
+	Host          []Check
+	Lab           []Check
+	Inventory     []Check
+	Storage       []Check
+	QEMU          []Check
+	Observability []Check
+	Privacy       []Check
 }
 
 // OverallResult returns FAIL, WARN, or PASS based on all checks.
 func OverallResult(report Report) string {
 	hasWarning := false
-	for _, checks := range [][]Check{report.Host, report.Lab, report.Inventory, report.Storage, report.QEMU} {
+	for _, checks := range [][]Check{
+		report.Config,
+		report.Host,
+		report.Lab,
+		report.Inventory,
+		report.Storage,
+		report.QEMU,
+		report.Observability,
+		report.Privacy,
+	} {
 		for _, check := range checks {
 			switch check.Status {
 			case FAIL:

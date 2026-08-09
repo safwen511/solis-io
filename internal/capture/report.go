@@ -11,6 +11,7 @@ import (
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/experiment"
 	"github.com/safwen511/solis-io/internal/qemuio"
+	"github.com/safwen511/solis-io/internal/version"
 )
 
 // WriteIncidentReport renders a human-readable summary of an existing capture
@@ -24,6 +25,7 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 	evidenceMode := captureEvidenceMode(inputs)
 	suspect := selectedSuspect(inputs, evidence)
 	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
+	build := version.BuildInfo()
 
 	if _, err := fmt.Fprintln(dst, "# Solis Noisy Neighbor Incident Report"); err != nil {
 		return err
@@ -118,6 +120,11 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 			"- Duration: %s\n"+
 			"- Interval: %s\n"+
 			"- Config source: %s\n"+
+			"- Solis version: %s\n"+
+			"- Git commit: %s\n"+
+			"- Build time: %s\n"+
+			"- Go version: %s\n"+
+			"- Platform: %s\n"+
 			"- Write threshold MiB/s: %.2f\n"+
 			"- Write syscall threshold/s: %.2f\n"+
 			"- Dominance ratio: %.2f\n"+
@@ -127,6 +134,11 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 		inputs.Duration,
 		inputs.Interval,
 		markdownText(inputs.ConfigSource),
+		markdownText(build.Version),
+		markdownText(build.GitCommit),
+		markdownText(build.BuildTime),
+		markdownText(build.GoVersion),
+		markdownText(build.Platform),
 		thresholds.WriteMiBPerSecond,
 		thresholds.WriteSyscallsPerSecond,
 		thresholds.DominanceRatio,

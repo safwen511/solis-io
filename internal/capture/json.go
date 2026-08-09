@@ -14,11 +14,13 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
+	"github.com/safwen511/solis-io/internal/version"
 )
 
 // EvidenceSummary is the versioned machine-readable capture schema.
 type EvidenceSummary struct {
 	SchemaVersion      string                  `json:"schema_version"`
+	Build              version.Info            `json:"build"`
 	Capture            CaptureSummary          `json:"capture"`
 	Thresholds         ThresholdEvidence       `json:"thresholds"`
 	Victim             VMEvidence              `json:"victim"`
@@ -173,6 +175,7 @@ func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) Ev
 
 	return EvidenceSummary{
 		SchemaVersion: "1",
+		Build:         version.BuildInfo(),
 		Capture: CaptureSummary{
 			TimestampUTC: timestamp,
 			Mode:         captureMode(inputs),

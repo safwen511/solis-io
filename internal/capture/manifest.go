@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/safwen511/solis-io/internal/version"
 )
 
 const (
@@ -24,6 +26,7 @@ type Manifest struct {
 	SchemaVersion string         `json:"schema_version"`
 	CaptureID     string         `json:"capture_id"`
 	CreatedAtUTC  string         `json:"created_at_utc"`
+	Build         version.Info   `json:"build"`
 	Files         []ManifestFile `json:"files"`
 }
 
@@ -42,6 +45,7 @@ func buildManifest(directory, captureID string, createdAt time.Time, names []str
 		SchemaVersion: manifestSchemaVersion,
 		CaptureID:     captureID,
 		CreatedAtUTC:  createdAt.UTC().Format(time.RFC3339Nano),
+		Build:         version.BuildInfo(),
 		Files:         make([]ManifestFile, 0, len(sortedNames)),
 	}
 	for _, name := range sortedNames {

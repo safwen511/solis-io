@@ -66,6 +66,11 @@ func TestWriteMetadata(t *testing.T) {
 		"Duration: 10s",
 		"Interval: 2s",
 		"Config source: built-in defaults",
+		"Solis version: dev",
+		"Git commit: unknown",
+		"Build time: unknown",
+		"Go version:",
+		"Platform:",
 		"Write threshold MiB/s: 12.00",
 		"Write syscall threshold/s: 12000.00",
 		"Dominance ratio: 3.00",
@@ -155,6 +160,9 @@ func TestCaptureBundlePermissionsAndManifest(t *testing.T) {
 	}
 	if manifest.SchemaVersion != manifestSchemaVersion || manifest.CaptureID != filepath.Base(result.Directory) {
 		t.Fatalf("manifest identity = %#v", manifest)
+	}
+	if manifest.Build.Version != "dev" || manifest.Build.GitCommit != "unknown" || manifest.Build.BuildTime != "unknown" {
+		t.Fatalf("manifest build metadata = %#v", manifest.Build)
 	}
 	if manifest.CreatedAtUTC != now.Format(time.RFC3339Nano) {
 		t.Fatalf("created_at_utc = %q, want %q", manifest.CreatedAtUTC, now.Format(time.RFC3339Nano))
@@ -389,6 +397,9 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 		"  - evidence-summary.json",
 		"  - observe-snapshot.json",
 		"  - manifest.json",
+		"- Solis version: dev",
+		"- Git commit: unknown",
+		"- Build time: unknown",
 	} {
 		if !strings.Contains(string(report), want) {
 			t.Errorf("incident report missing %q:\n%s", want, report)
@@ -525,6 +536,9 @@ func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
 	}
 	if summary.SchemaVersion != "1" || summary.Capture.EvidenceMode != "report-backed" {
 		t.Fatalf("capture summary = %#v", summary.Capture)
+	}
+	if summary.Build.Version != "dev" || summary.Build.GitCommit != "unknown" || summary.Build.BuildTime != "unknown" {
+		t.Fatalf("evidence build metadata = %#v", summary.Build)
 	}
 	if summary.Capture.ConfigSource != config.BuiltInDefaultsSource || summary.Thresholds.WriteMiBPerSecond != 10 || summary.Thresholds.WriteSyscallsPerSecond != 10000 || summary.Thresholds.DominanceRatio != 2 {
 		t.Fatalf("config evidence = %#v / %#v", summary.Capture, summary.Thresholds)

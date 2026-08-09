@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,12 +13,40 @@ import (
 	"github.com/safwen511/solis-io/internal/capture"
 	solisconfig "github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/guest"
+	"github.com/safwen511/solis-io/internal/version"
 )
 
 type fakeGuestRunner struct{ outputs map[string]string }
 
 func (runner fakeGuestRunner) Run(_ context.Context, _ guest.Target, command guest.CommandSpec) (guest.Result, error) {
 	return guest.Result{Output: runner.outputs[command.Key()]}, nil
+}
+
+func TestRunVersionHumanAndJSON(t *testing.T) {
+	var human bytes.Buffer
+	if err := Run([]string{"version"}, &human, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"version: dev", "git_commit: unknown", "build_time: unknown", "go_version:", "platform:"} {
+		if !strings.Contains(human.String(), want) {
+			t.Errorf("human version output missing %q:\n%s", want, human.String())
+		}
+	}
+
+	var jsonOutput bytes.Buffer
+	if err := Run([]string{"version", "--json"}, &jsonOutput, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded version.Info
+	if err := json.Unmarshal(jsonOutput.Bytes(), &decoded); err != nil {
+		t.Fatalf("invalid version JSON: %v\n%s", err, jsonOutput.String())
+	}
+	if decoded != version.BuildInfo() {
+		t.Fatalf("version JSON = %#v, want %#v", decoded, version.BuildInfo())
+	}
+	if err := Run([]string{"version", "--yaml"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "usage: solis version") {
+		t.Fatalf("invalid version flag error = %v", err)
+	}
 }
 
 func TestRunInventoryOutsideRepositoryWithExplicitConfig(t *testing.T) {

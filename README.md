@@ -52,6 +52,8 @@ Commands that use `/proc/<qemu-pid>/io` are shown with `sudo` because that procf
 The explicit `10s` and `2s` values below are example observation settings, not universal defaults; defaults vary by command.
 
 ```text
+./solis version
+./solis version --json
 ./solis doctor
 ./solis doctor --lab
 ./solis ebpf doctor
@@ -171,7 +173,7 @@ Relative paths in an explicit configuration are resolved from the directory cont
 
 The built-in values preserve the repository-relative lab workflow for development and demos. Production or installed use should provide an explicit configuration. `capture_output_root` supplies the default alert-capture location for noisy-neighbor watch, while `default_report_dir` is checked by `doctor --lab`; omitting `--report-dir` from diagnosis or capture still deliberately selects live-only mode. Inventory CSV loading strictly validates required headers and fields, positive memory/vCPU/disk values, portable VM identifiers, IP addresses, duplicate VM names, and empty inventories.
 
-`./solis doctor` performs product and configured-host checks only. Add `--lab` to check the bundled fio script, demo workload report, and configured capture output path. Effective configuration source and attribution thresholds are recorded in diagnosis output and capture metadata; capture JSON also records them in `evidence-summary.json`.
+`./solis doctor` performs product and configured-host checks: configuration identity, inventory readability, Linux `/proc` and `/sys`, required host commands, read-only libvirt access, capture-output writability and permission hygiene, optional observability configuration, storage/QEMU readiness, and explicit privacy guarantees. It does not require sudo and warns when invoked as root unnecessarily. Add `--lab` to include the bundled fio script and demo workload report checks. Effective configuration source and attribution thresholds are recorded in diagnosis output and capture metadata; capture JSON also records them in `evidence-summary.json`.
 
 ### Observability configuration
 
@@ -241,11 +243,49 @@ From the repository root:
 ```bash
 go test ./...
 go build -o solis ./cmd/solis
+./solis version
 ./solis doctor
 ./solis inventory
 ```
 
 The binary is written to `./solis`.
+
+## Version and build metadata
+
+Display the build identity as human-readable text or deterministic JSON:
+
+```bash
+./solis version
+./solis version --json
+```
+
+Development builds report version `dev` with unknown commit and build time. Release or packaging workflows can inject these values without changing source files:
+
+```bash
+go build -ldflags "\
+-X github.com/safwen511/solis-io/internal/version.Version=v0.1.0 \
+-X github.com/safwen511/solis-io/internal/version.GitCommit=abc1234 \
+-X github.com/safwen511/solis-io/internal/version.BuildTime=2026-08-09T22:00:00Z" \
+  -o solis ./cmd/solis
+```
+
+Version, commit, build time, Go version, and platform are also recorded in capture metadata, evidence JSON, integrity manifests, and incident reports.
+
+## Product readiness checks
+
+Run the product doctor without elevation:
+
+```bash
+./solis doctor
+```
+
+Product doctor checks the effective config source and schema, inventory readability, Linux host interfaces, required commands, read-only libvirt access, configured capture-output access and permission hygiene, optional observability configuration, storage mappings, and QEMU procfs permissions. A protected QEMU procfs check may produce a warning suggesting elevation for QEMU-specific commands; doctor itself does not invoke sudo. It also prints a privacy section confirming that observability and capture paths do not collect process arguments, environments, guest files, HTTP bodies, SQL text, table data, or secrets.
+
+The lab mode adds checks for bundled demo assets; it does not replace or weaken product checks:
+
+```bash
+./solis doctor --lab
+```
 
 ## Local host status
 
@@ -448,6 +488,8 @@ Live-only captures mark application evidence unavailable in `diagnosis.txt`, `ex
 `observe-snapshot.json` contains the unified host, VM/QEMU, storage, and configured optional observability view collected for the capture. If that collection is unavailable, capture still completes and the file contains a structured error and evidence-quality record rather than fabricated metrics. Both `metadata.txt` and `incident-report.md` reference the artifact.
 
 Capture bundles are assembled in a private `0700` staging directory under the configured output root. Artifacts and `manifest.json` are written with mode `0600`; only after every artifact and checksum succeeds does Solis atomically rename the staging directory to its final capture name. Failed writes therefore do not expose a normal-looking partial bundle. The manifest intentionally lists every other artifact rather than itself, because a stable manifest self-checksum is not possible.
+
+Capture metadata, `evidence-summary.json`, `manifest.json`, and `incident-report.md` record the effective Solis version, Git commit, build time, Go version, and platform so evidence can be tied to the binary that produced it.
 
 ## Watch live noisy-neighbor evidence
 

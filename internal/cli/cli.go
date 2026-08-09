@@ -35,6 +35,7 @@ import (
 	statusview "github.com/safwen511/solis-io/internal/status"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
+	"github.com/safwen511/solis-io/internal/version"
 	watcher "github.com/safwen511/solis-io/internal/watch"
 )
 
@@ -51,6 +52,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	switch args[0] {
+	case "version":
+		return runVersion(args, stdout)
 	case "doctor":
 		return runDoctor(runtimeConfig, args, stdout)
 	case "ebpf":
@@ -151,6 +154,18 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
+	}
+}
+
+func runVersion(args []string, w io.Writer) error {
+	info := version.BuildInfo()
+	switch {
+	case len(args) == 1:
+		return version.WriteHuman(w, info)
+	case len(args) == 2 && args[1] == "--json":
+		return version.WriteJSON(w, info)
+	default:
+		return errors.New("usage: solis version [--json]")
 	}
 }
 
@@ -1813,6 +1828,9 @@ func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) er
 		CaptureOutputRoot: runtimeConfig.Settings.CaptureOutputRoot,
 		DefaultReportDir:  runtimeConfig.Settings.DefaultReportDir,
 		LibvirtURI:        runtimeConfig.Settings.LibvirtURI,
+		ConfigSource:      runtimeConfig.Source,
+		SchemaVersion:     runtimeConfig.Settings.SchemaVersion,
+		Observability:     runtimeConfig.Settings.Observability,
 		Lab:               lab,
 	})); err != nil {
 		return fmt.Errorf("doctor error: %w", err)
@@ -2393,6 +2411,7 @@ Usage:
   solis [--config <path>] <command> [options]
 
 Commands:
+  solis version [--json]
   solis doctor [--lab]
   solis ebpf doctor
   solis ebpf block-watch [--duration <duration>]

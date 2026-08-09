@@ -17,6 +17,7 @@ import (
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/traceplan"
+	"github.com/safwen511/solis-io/internal/version"
 )
 
 type artifact struct {
@@ -126,6 +127,7 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 	ebpfWritten := yesNo(inputs.IncludeEBPFLatency)
 	evidenceMode := captureEvidenceMode(inputs)
 	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
+	build := version.BuildInfo()
 	if _, err := fmt.Fprintf(
 		dst,
 		"Solis Capture Metadata\n"+
@@ -137,6 +139,11 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Duration: %s\n"+
 			"Interval: %s\n"+
 			"Config source: %s\n"+
+			"Solis version: %s\n"+
+			"Git commit: %s\n"+
+			"Build time: %s\n"+
+			"Go version: %s\n"+
+			"Platform: %s\n"+
 			"Write threshold MiB/s: %.2f\n"+
 			"Write syscall threshold/s: %.2f\n"+
 			"Dominance ratio: %.2f\n"+
@@ -158,6 +165,11 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		inputs.Duration,
 		inputs.Interval,
 		valueOrDash(inputs.ConfigSource),
+		build.Version,
+		build.GitCommit,
+		build.BuildTime,
+		build.GoVersion,
+		build.Platform,
 		thresholds.WriteMiBPerSecond,
 		thresholds.WriteSyscallsPerSecond,
 		thresholds.DominanceRatio,

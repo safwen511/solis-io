@@ -163,6 +163,67 @@ The built-in values preserve the repository-relative lab workflow for developmen
 
 `./solis doctor` performs product and configured-host checks only. Add `--lab` to check the bundled fio script, demo workload report, and configured capture output path. Effective configuration source and attribution thresholds are recorded in diagnosis output and capture metadata; capture JSON also records them in `evidence-summary.json`.
 
+### Observability configuration
+
+Schema version 1 remains supported. Schema version 2 adds an optional, strictly validated `observability` block for future bird's-eye host, guest, service, and database collectors:
+
+```json
+{
+  "schema_version": "2",
+  "inventory_csv": "inventory/vms.csv",
+  "capture_output_root": "captures",
+  "libvirt_uri": "qemu:///system",
+  "thresholds": {
+    "write_mib_per_sec": 10,
+    "write_syscalls_per_sec": 10000,
+    "dominance_ratio": 2.0
+  },
+  "observability": {
+    "host": {
+      "enabled": true,
+      "interval": "1s",
+      "collect_psi": true,
+      "collect_network": true
+    },
+    "guest": {
+      "enabled": false,
+      "transport": "ssh",
+      "user": "flint",
+      "connect_timeout": "5s",
+      "max_parallel": 4,
+      "known_hosts": "known_hosts"
+    },
+    "services": [
+      {
+        "vm": "a-web",
+        "units": ["nginx.service", "solis-workload.service"],
+        "health_checks": [
+          {
+            "name": "web-health",
+            "path": "/health",
+            "port": 80,
+            "collect_body": false
+          }
+        ]
+      }
+    ],
+    "databases": [
+      {
+        "vm": "a-db",
+        "kind": "postgresql",
+        "database": "postgres",
+        "credential_ref": "systemd-credential:solis-a-db-monitor",
+        "collect_pg_stat_statements": true
+      }
+    ]
+  }
+}
+```
+
+Observability is opt-in. Omitting the block leaves host and guest observability disabled and the database list empty; guest collection also requires an explicit `enabled: true`. These settings define future allowlists only—the current change does not run SSH, database queries, health checks, or guest-agent commands.
+
+Do not put passwords, tokens, secrets, private keys, or credential values in the JSON file. `credential_ref` may be empty or refer to `systemd-credential:`, `file:`, or `env:` sources, but Solis does not read those references yet. The schema provides no arbitrary command, arbitrary SQL, table-scan, process-argument, environment, journal, or payload collection fields. Health-check body collection must remain `false`.
+
 ## Quickstart
 
 From the repository root:

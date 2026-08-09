@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 const (
 	SchemaVersion          = "1"
+	SchemaVersion2         = "2"
 	EnvironmentVariable    = "SOLIS_CONFIG"
 	BuiltInDefaultsSource  = "built-in defaults"
 	defaultInventoryCSV    = "lab/config/vms.csv"
@@ -30,12 +32,13 @@ type Thresholds struct {
 
 // Settings is the versioned on-disk Solis configuration model.
 type Settings struct {
-	SchemaVersion     string     `json:"schema_version"`
-	InventoryCSV      string     `json:"inventory_csv"`
-	CaptureOutputRoot string     `json:"capture_output_root"`
-	DefaultReportDir  string     `json:"default_report_dir"`
-	LibvirtURI        string     `json:"libvirt_uri"`
-	Thresholds        Thresholds `json:"thresholds"`
+	SchemaVersion     string               `json:"schema_version"`
+	InventoryCSV      string               `json:"inventory_csv"`
+	CaptureOutputRoot string               `json:"capture_output_root"`
+	DefaultReportDir  string               `json:"default_report_dir"`
+	LibvirtURI        string               `json:"libvirt_uri"`
+	Thresholds        Thresholds           `json:"thresholds"`
+	Observability     *ObservabilityConfig `json:"observability,omitempty"`
 }
 
 // Runtime contains validated settings and their effective source.
@@ -105,7 +108,15 @@ func Load(path string) (Runtime, error) {
 	}
 	defer file.Close()
 
-	decoder := json.NewDecoder(file)
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return Runtime{}, fmt.Errorf("read Solis config %q: %w", absPath, err)
+	}
+	if err := rejectUnsafeConfig(data); err != nil {
+		return Runtime{}, fmt.Errorf("parse Solis config %q: %w", absPath, err)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var settings Settings
 	if err := decoder.Decode(&settings); err != nil {
@@ -122,6 +133,9 @@ func Load(path string) (Runtime, error) {
 	settings.InventoryCSV = resolveRelativePath(baseDir, settings.InventoryCSV)
 	settings.CaptureOutputRoot = resolveRelativePath(baseDir, settings.CaptureOutputRoot)
 	settings.DefaultReportDir = resolveRelativePath(baseDir, settings.DefaultReportDir)
+	if settings.Observability != nil {
+		settings.Observability.Guest.KnownHosts = resolveRelativePath(baseDir, settings.Observability.Guest.KnownHosts)
+	}
 	return Runtime{
 		Settings: settings,
 		Source:   absPath,
@@ -132,8 +146,12 @@ func Load(path string) (Runtime, error) {
 
 // Validate enforces the supported schema and required production settings.
 func Validate(settings Settings) error {
-	if strings.TrimSpace(settings.SchemaVersion) != SchemaVersion {
-		return fmt.Errorf("unsupported schema_version %q; supported version is %q", settings.SchemaVersion, SchemaVersion)
+	schemaVersion := strings.TrimSpace(settings.SchemaVersion)
+	if schemaVersion != SchemaVersion && schemaVersion != SchemaVersion2 {
+		return fmt.Errorf("unsupported schema_version %q; supported versions are %q and %q", settings.SchemaVersion, SchemaVersion, SchemaVersion2)
+	}
+	if schemaVersion == SchemaVersion && settings.Observability != nil {
+		return errors.New("observability requires schema_version \"2\"")
 	}
 	if strings.TrimSpace(settings.InventoryCSV) == "" {
 		return errors.New("inventory_csv is required")
@@ -153,7 +171,7 @@ func Validate(settings Settings) error {
 	if settings.Thresholds.DominanceRatio < 1 {
 		return errors.New("thresholds.dominance_ratio must be at least 1")
 	}
-	return nil
+	return validateObservability(settings.Observability)
 }
 
 func extractConfigFlag(args []string) (string, []string, error) {

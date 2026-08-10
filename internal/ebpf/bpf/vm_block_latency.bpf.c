@@ -23,7 +23,7 @@ static __always_inline struct vmblock_count_values *get_counts(void)
 }
 
 SEC("tp_btf/block_rq_issue")
-int BPF_PROG(on_block_rq_issue, void *unused, struct request *rq)
+int BPF_PROG(on_block_rq_issue, struct request *rq)
 {
 	struct vmblock_count_values *values = get_counts();
 
@@ -36,7 +36,7 @@ int BPF_PROG(on_block_rq_issue, void *unused, struct request *rq)
 }
 
 SEC("tp_btf/block_rq_complete")
-int BPF_PROG(on_block_rq_complete, void *unused, struct request *rq,
+int BPF_PROG(on_block_rq_complete, struct request *rq,
 	     blk_status_t error, unsigned int nr_bytes)
 {
 	struct vmblock_count_values *values = get_counts();

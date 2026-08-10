@@ -203,7 +203,9 @@ func TestVMBlockKernelSourceStructuredErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			source := &fakeVMBlockKernelSource{preflightErr: test.err}
-			report := CollectVMBlockLatencyReportWithKernelSource(context.Background(), VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second}, nil, source)
+			report := CollectVMBlockLatencyReportWithKernelSource(context.Background(), VMBlockLatencyCollectOptions{
+				Duration: time.Second, Interval: time.Second, effectiveUID: func() int { return 1000 },
+			}, nil, source)
 			if report.Availability.Status != test.status || !strings.Contains(report.Availability.Error, test.text) {
 				t.Fatalf("availability = %#v", report.Availability)
 			}

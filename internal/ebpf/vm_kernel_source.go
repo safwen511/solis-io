@@ -233,7 +233,7 @@ func classifyVMBlockLifecycleError(status, operation string, err error) error {
 		status = "deadline_exceeded"
 		operation = "per-VM eBPF collection deadline exceeded"
 	}
-	return &VMBlockKernelStageError{Status: status, Operation: operation, Err: err}
+	return &VMBlockKernelStageError{Status: status, Stage: "collection", Operation: operation, Err: err}
 }
 
 func classifyVMBlockCleanupError(operation string, err error) error {
@@ -245,5 +245,5 @@ func classifyVMBlockCleanupError(operation string, err error) error {
 			return err
 		}
 	}
-	return &VMBlockKernelStageError{Status: "cleanup_failed", Operation: operation, Err: err}
+	return &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: operation, Err: err}
 }

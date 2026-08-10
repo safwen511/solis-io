@@ -18,6 +18,7 @@ type VMBlockLatencyReport struct {
 	AttributionQuality  string                             `json:"attribution_quality"`
 	DeviceFilter        string                             `json:"device_filter"`
 	Availability        VMBlockLatencyAvailability         `json:"availability"`
+	Diagnostics         VMBlockRuntimeDiagnostics          `json:"diagnostics"`
 	VMs                 []VMBlockLatencyVM                 `json:"vms"`
 	HostSummary         VMBlockLatencySummary              `json:"host_summary"`
 	KernelCounters      VMBlockKernelCounters              `json:"kernel_counters"`
@@ -41,6 +42,32 @@ type VMBlockLatencyAvailability struct {
 	Available bool   `json:"available"`
 	Status    string `json:"status"`
 	Error     string `json:"error"`
+}
+
+// VMBlockRuntimeDiagnostics records bounded host state relevant to a failed
+// privileged load or attach. It contains no process arguments, environment,
+// payloads, or secrets.
+type VMBlockRuntimeDiagnostics struct {
+	Stage                   string                   `json:"stage"`
+	EUID                    int                      `json:"euid"`
+	RawError                string                   `json:"raw_error"`
+	CapabilitySummary       VMBlockCapabilitySummary `json:"capability_summary"`
+	LockdownMode            string                   `json:"lockdown_mode"`
+	MemlockLimit            string                   `json:"memlock_limit"`
+	PerfEventParanoid       string                   `json:"perf_event_paranoid"`
+	UnprivilegedBPFDisabled string                   `json:"unprivileged_bpf_disabled"`
+}
+
+// VMBlockCapabilitySummary exposes only the effective capability mask and
+// four capability bits relevant to eBPF setup.
+type VMBlockCapabilitySummary struct {
+	Available      bool   `json:"available"`
+	CapEff         string `json:"cap_eff"`
+	CAPBPF         bool   `json:"cap_bpf"`
+	CAPPerfmon     bool   `json:"cap_perfmon"`
+	CAPSysAdmin    bool   `json:"cap_sys_admin"`
+	CAPSysResource bool   `json:"cap_sys_resource"`
+	Error          string `json:"error"`
 }
 
 // VMBlockLatencyVM contains attributed latency for one inventory VM.

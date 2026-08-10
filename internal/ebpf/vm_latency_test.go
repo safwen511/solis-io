@@ -154,7 +154,7 @@ func TestVMBlockLatencyCountsPendingAtWindowEnd(t *testing.T) {
 }
 
 func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
-	options := VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second}
+	options := VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second, effectiveUID: func() int { return 1000 }}
 	permission := CollectVMBlockLatencyReportWithSource(context.Background(), options, nil, fakeVMBlockEventSource{err: syscall.EPERM})
 	if permission.Availability.Status != "permission_denied" || !strings.Contains(permission.Availability.Error, "try running with sudo") {
 		t.Fatalf("permission report = %#v", permission.Availability)

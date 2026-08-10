@@ -76,9 +76,10 @@ type fakeVMBlockLink struct {
 }
 
 type fakeVMBlockBTFTypeFinder struct {
-	missing map[string]error
-	lookups []string
-	types   []any
+	missing  map[string]error
+	typedefs map[string]*btf.Typedef
+	lookups  []string
+	types    []any
 }
 
 func (finder *fakeVMBlockBTFTypeFinder) TypeByName(name string, target any) error {
@@ -87,6 +88,15 @@ func (finder *fakeVMBlockBTFTypeFinder) TypeByName(name string, target any) erro
 	if err := finder.missing[name]; err != nil {
 		return err
 	}
+	targetPointer, ok := target.(**btf.Typedef)
+	if !ok {
+		return fmt.Errorf("unsupported fake BTF target %T", target)
+	}
+	tracepoint, ok := finder.typedefs[name]
+	if !ok {
+		return btf.ErrNotFound
+	}
+	*targetPointer = tracepoint
 	return nil
 }
 
@@ -150,8 +160,9 @@ func TestCiliumVMBlockBTFMissing(t *testing.T) {
 }
 
 func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
-	finder := &fakeVMBlockBTFTypeFinder{}
-	if err := resolveVMBlockTypedTracepoints(finder); err != nil {
+	finder := &fakeVMBlockBTFTypeFinder{typedefs: testVMBlockTypedTracepointTypedefs()}
+	prototypes, err := resolveVMBlockTypedTracepoints(finder)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantNames := []string{"btf_trace_block_rq_issue", "btf_trace_block_rq_complete"}
@@ -163,16 +174,92 @@ func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
 			t.Fatalf("BTF target type = %T, want **btf.Typedef", target)
 		}
 	}
+	if len(prototypes) != 2 {
+		t.Fatalf("prototypes = %#v", prototypes)
+	}
+	if got, want := fmt.Sprint(prototypes[0].KernelParameters), "[void * struct request *]"; got != want {
+		t.Fatalf("issue kernel parameters = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(prototypes[0].ProgramParameters), "[struct request *]"; got != want {
+		t.Fatalf("issue program parameters = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(prototypes[1].KernelParameters), "[void * struct request * blk_status_t unsigned int]"; got != want {
+		t.Fatalf("complete kernel parameters = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(prototypes[1].ProgramParameters), "[struct request * blk_status_t unsigned int]"; got != want {
+		t.Fatalf("complete program parameters = %s, want %s", got, want)
+	}
 }
 
 func TestResolveVMBlockTypedTracepointsMissingIsStructured(t *testing.T) {
 	finder := &fakeVMBlockBTFTypeFinder{missing: map[string]error{
 		"btf_trace_block_rq_complete": btf.ErrNotFound,
-	}}
-	err := resolveVMBlockTypedTracepoints(finder)
+	}, typedefs: testVMBlockTypedTracepointTypedefs()}
+	_, err := resolveVMBlockTypedTracepoints(finder)
 	if vmBlockStageStatus(err, "") != "typed_tracepoint_missing" || !strings.Contains(err.Error(), "block_rq_complete") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestResolveVMBlockTypedTracepointsRejectsCallbackDataAsProgramArgument(t *testing.T) {
+	typedefs := testVMBlockTypedTracepointTypedefs()
+	issue := typedefs["btf_trace_block_rq_issue"]
+	function := btf.UnderlyingType(btf.UnderlyingType(issue).(*btf.Pointer).Target).(*btf.FuncProto)
+	function.Params = append(function.Params[:1], append([]btf.FuncParam{{Type: &btf.Pointer{Target: &btf.Void{}}}}, function.Params[1:]...)...)
+
+	_, err := resolveVMBlockTypedTracepoints(&fakeVMBlockBTFTypeFinder{typedefs: typedefs})
+	if vmBlockStageStatus(err, "") != "btf_incompatible" || !strings.Contains(err.Error(), "program parameters") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVMBlockCountOnlyCUsesEffectiveTypedBTFProgramSignatures(t *testing.T) {
+	source, err := os.ReadFile("bpf/vm_block_latency.bpf.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, want := range []string{
+		"BPF_PROG(on_block_rq_issue, struct request *rq)",
+		"BPF_PROG(on_block_rq_complete, struct request *rq,",
+		"blk_status_t error, unsigned int nr_bytes)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("count-only source missing effective tp_btf signature %q", want)
+		}
+	}
+	if strings.Contains(text, "void *unused") {
+		t.Fatal("count-only source exposes kernel callback data as a BPF program argument")
+	}
+}
+
+func testVMBlockTypedTracepointTypedefs() map[string]*btf.Typedef {
+	traceData := &btf.Pointer{Target: &btf.Void{}}
+	request := &btf.Pointer{Target: &btf.Struct{Name: "request"}}
+	blkStatus := &btf.Typedef{Name: "blk_status_t", Type: &btf.Int{Name: "unsigned char", Size: 1}}
+	unsignedInt := &btf.Int{Name: "unsigned int", Size: 4}
+	functionTypedef := func(name string, parameters ...btf.Type) *btf.Typedef {
+		functionParameters := make([]btf.FuncParam, 0, len(parameters))
+		for _, parameter := range parameters {
+			functionParameters = append(functionParameters, btf.FuncParam{Type: parameter})
+		}
+		return &btf.Typedef{
+			Name: name,
+			Type: &btf.Pointer{Target: &btf.FuncProto{Return: &btf.Void{}, Params: functionParameters}},
+		}
+	}
+	return map[string]*btf.Typedef{
+		"btf_trace_block_rq_issue":    functionTypedef("btf_trace_block_rq_issue", traceData, request),
+		"btf_trace_block_rq_complete": functionTypedef("btf_trace_block_rq_complete", traceData, request, blkStatus, unsignedInt),
+	}
+}
+
+func testVMBlockTypedTracepointPrototypes() []vmBlockTypedTracepointPrototype {
+	prototypes, err := resolveVMBlockTypedTracepoints(&fakeVMBlockBTFTypeFinder{typedefs: testVMBlockTypedTracepointTypedefs()})
+	if err != nil {
+		panic(err)
+	}
+	return prototypes
 }
 
 func TestCiliumVMBlockPermissionAndVerifierErrors(t *testing.T) {

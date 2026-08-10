@@ -233,7 +233,7 @@ func WriteDoctor(dst io.Writer, report Report) error {
 	if err := writeChecks(dst, report); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(dst, "\nOverall readiness: %s\nSafety: no eBPF programs were loaded or attached\n", readinessText(report))
+	_, err := fmt.Fprintf(dst, "\nOverall readiness: %s\nAttach validation: NOT ATTEMPTED; readiness checks do not prove typed-BTF load/attach permission\nSafety: no eBPF programs were loaded or attached\n", readinessText(report))
 	return err
 }
 

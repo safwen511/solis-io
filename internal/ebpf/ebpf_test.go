@@ -17,6 +17,10 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	debugRoot := filepath.Join(root, "debug")
 	btfPath := filepath.Join(root, "vmlinux")
 	mountInfoPath := filepath.Join(root, "mountinfo")
+	statusPath := filepath.Join(root, "status")
+	lockdownPath := filepath.Join(root, "lockdown")
+	perfPath := filepath.Join(root, "perf_event_paranoid")
+	unprivilegedPath := filepath.Join(root, "unprivileged_bpf_disabled")
 	for _, event := range []string{"block_rq_issue", "block_rq_complete"} {
 		if err := os.MkdirAll(filepath.Join(traceRoot, "events", "block", event), 0o755); err != nil {
 			t.Fatal(err)
@@ -31,6 +35,17 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	if err := os.WriteFile(btfPath, []byte("btf"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	capabilityMask := uint64(1)<<21 | uint64(1)<<24 | uint64(1)<<38 | uint64(1)<<39
+	for path, value := range map[string]string{
+		statusPath:       fmt.Sprintf("Name:\tsolis-test\nCapEff:\t%016x\n", capabilityMask),
+		lockdownPath:     "[none] integrity confidentiality\n",
+		perfPath:         "2\n",
+		unprivilegedPath: "2\n",
+	} {
+		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	mountInfo := fmt.Sprintf(
 		"31 20 0:30 / %s rw - tracefs tracefs rw\n32 20 0:31 / %s rw - debugfs debugfs rw\n",
 		traceRoot,
@@ -41,10 +56,18 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	}
 
 	report := inspect(probeConfig{
-		BTFPath:       btfPath,
-		MountInfoPath: mountInfoPath,
-		TraceRoot:     traceRoot,
-		DebugRoot:     debugRoot,
+		BTFPath:                     btfPath,
+		MountInfoPath:               mountInfoPath,
+		TraceRoot:                   traceRoot,
+		DebugRoot:                   debugRoot,
+		SelfStatusPath:              statusPath,
+		LockdownPath:                lockdownPath,
+		PerfEventParanoidPath:       perfPath,
+		UnprivilegedBPFDisabledPath: unprivilegedPath,
+		GetEUID:                     func() int { return 1000 },
+		GetMemlock:                  func() (string, error) { return "soft=8388608 hard=8388608", nil },
+		ObjectProvider:              func() ([]byte, error) { return []byte("authentic-object-test-boundary"), nil },
+		TypedTracepointInspect:      func() ([]vmBlockTypedTracepointPrototype, error) { return testVMBlockTypedTracepointPrototypes(), nil },
 	})
 	if !Ready(report) {
 		t.Fatalf("Ready() = false, checks = %#v", report.Checks)
@@ -52,6 +75,93 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	if report.TraceRoot != traceRoot {
 		t.Fatalf("TraceRoot = %q, want %q", report.TraceRoot, traceRoot)
 	}
+}
+
+func TestDoctorSeparatesFormattedTracepointsFromTypedBTFReadiness(t *testing.T) {
+	root := t.TempDir()
+	traceRoot := filepath.Join(root, "trace")
+	for _, event := range []string{"block_rq_issue", "block_rq_complete"} {
+		path := filepath.Join(traceRoot, "events", "block", event)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "id"), []byte("42\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := Report{Checks: []Check{
+		tracepointCheck(traceRoot, "block_rq_issue"),
+		tracepointCheck(traceRoot, "block_rq_complete"),
+	}}
+	report.Checks = append(report.Checks, runtimeReadinessChecks(probeConfig{
+		SelfStatusPath: filepath.Join(root, "missing-status"), LockdownPath: filepath.Join(root, "missing-lockdown"),
+		PerfEventParanoidPath: filepath.Join(root, "missing-perf"), UnprivilegedBPFDisabledPath: filepath.Join(root, "missing-unprivileged"),
+		GetEUID: func() int { return 0 }, GetMemlock: func() (string, error) { return "soft=unlimited hard=unlimited", nil },
+		ObjectProvider: func() ([]byte, error) { return []byte("authentic-object-test-boundary"), nil },
+		TypedTracepointInspect: func() ([]vmBlockTypedTracepointPrototype, error) {
+			return nil, fmt.Errorf("btf_trace_block_rq_issue is unavailable")
+		},
+	})...)
+	if findDoctorCheck(report, "formatted block:block_rq_issue").Status != OK || findDoctorCheck(report, "Typed-BTF block tracepoints").Status != FAIL {
+		t.Fatalf("checks = %#v", report.Checks)
+	}
+	if Ready(report) {
+		t.Fatal("typed-BTF failure was hidden by formatted tracepoint readiness")
+	}
+}
+
+func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
+	root := t.TempDir()
+	statusPath := filepath.Join(root, "status")
+	lockdownPath := filepath.Join(root, "lockdown")
+	if err := os.WriteFile(statusPath, []byte("CapEff:\t000000c001200000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockdownPath, []byte("none [integrity] confidentiality\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checks := runtimeReadinessChecks(probeConfig{
+		SelfStatusPath: statusPath, LockdownPath: lockdownPath,
+		PerfEventParanoidPath:       filepath.Join(root, "missing-perf"),
+		UnprivilegedBPFDisabledPath: filepath.Join(root, "missing-unprivileged"),
+		GetEUID:                     func() int { return 0 }, GetMemlock: func() (string, error) { return "soft=unlimited hard=unlimited", nil },
+		ObjectProvider:         func() ([]byte, error) { return []byte("authentic-object-test-boundary"), nil },
+		TypedTracepointInspect: func() ([]vmBlockTypedTracepointPrototype, error) { return testVMBlockTypedTracepointPrototypes(), nil },
+	})
+	report := Report{Checks: checks}
+	if findDoctorCheck(report, "Kernel lockdown mode").Detail != "integrity" || findDoctorCheck(report, "CapEff").Detail != "000000c001200000" {
+		t.Fatalf("checks = %#v", checks)
+	}
+	if findDoctorCheck(report, "Typed-BTF generated object").Status != OK || !strings.Contains(findDoctorCheck(report, "Typed-BTF load/attach").Detail, "not attempted") {
+		t.Fatalf("checks = %#v", checks)
+	}
+	typedDetail := findDoctorCheck(report, "Typed-BTF block tracepoints").Detail
+	for _, want := range []string{
+		"block_rq_issue kernel params (2): [void *, struct request *]",
+		"program params (1): [struct request *]",
+		"block_rq_complete kernel params (4): [void *, struct request *, blk_status_t, unsigned int]",
+		"program params (3): [struct request *, blk_status_t, unsigned int]",
+	} {
+		if !strings.Contains(typedDetail, want) {
+			t.Fatalf("typed-BTF detail missing %q: %s", want, typedDetail)
+		}
+	}
+	var output bytes.Buffer
+	if err := WriteDoctor(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Attach validation: NOT ATTEMPTED") {
+		t.Fatalf("doctor output overclaims attach readiness:\n%s", output.String())
+	}
+}
+
+func findDoctorCheck(report Report, name string) Check {
+	for _, check := range report.Checks {
+		if check.Name == name {
+			return check
+		}
+	}
+	return Check{Name: name}
 }
 
 func TestReadyRejectsFailureButAllowsWarning(t *testing.T) {

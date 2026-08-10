@@ -30,6 +30,7 @@ const vmBlockCountCollectionMode = "typed_btf_count_only"
 // VMBlockKernelStageError gives stable status to loader/attach/cleanup errors.
 type VMBlockKernelStageError struct {
 	Status    string
+	Stage     string
 	Operation string
 	Err       error
 }
@@ -101,35 +102,39 @@ func (source *ciliumVMBlockKernelSource) Preflight(context.Context) (VMBlockKern
 		return VMBlockKernelPreflight{Status: "object_unavailable", Error: ErrVMBlockObjectUnavailable.Error()}, ErrVMBlockObjectUnavailable
 	}
 	if _, err := source.objectProvider(); err != nil {
-		classified := classifyVMBlockObjectProviderError("load embedded typed-BTF object", err)
+		classified := classifyVMBlockObjectProviderError("preflight", "read embedded typed-BTF object", err)
 		return VMBlockKernelPreflight{Status: vmBlockStageStatus(classified, "object_invalid"), Error: classified.Error()}, classified
 	}
 	if source.probeBTF == nil {
 		return VMBlockKernelPreflight{Status: VMBlockCapabilityBTFMissing, Error: ErrVMBlockBTFMissing.Error()}, ErrVMBlockBTFMissing
 	}
 	if err := source.probeBTF(); err != nil {
-		return VMBlockKernelPreflight{Status: classifyVMBlockPreflightStatus(err), Error: err.Error()}, err
+		status := classifyVMBlockPreflightStatus(err)
+		if primaryVMBlockStageError(err) == nil {
+			err = &VMBlockKernelStageError{Status: status, Stage: "preflight", Operation: "typed-BTF preflight", Err: err}
+		}
+		return VMBlockKernelPreflight{Status: status, Error: err.Error()}, err
 	}
 	return VMBlockKernelPreflight{Available: true, Status: "available"}, nil
 }
 
 func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, _ VMBlockLatencyCollectOptions, _ []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	if source == nil || source.objectProvider == nil {
-		return nil, &VMBlockKernelStageError{Status: "object_unavailable", Operation: "prepare typed-BTF count-only collector", Err: ErrVMBlockObjectUnavailable}
+		return nil, &VMBlockKernelStageError{Status: "object_unavailable", Stage: "object_load", Operation: "prepare typed-BTF count-only collector", Err: ErrVMBlockObjectUnavailable}
 	}
 	if source.loader == nil {
-		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Operation: "prepare typed-BTF count-only collector", Err: errors.New("object loader is unavailable")}
+		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Stage: "object_load", Operation: "prepare typed-BTF count-only collector", Err: errors.New("object loader is unavailable")}
 	}
 	object, err := source.objectProvider()
 	if err != nil {
-		return nil, classifyVMBlockObjectProviderError("read embedded typed-BTF object", err)
+		return nil, classifyVMBlockObjectProviderError("object_load", "read embedded typed-BTF object", err)
 	}
 	resources, err := source.loader.Load(object)
 	if err != nil {
 		return nil, classifyVMBlockLoadError(err)
 	}
 	if resources == nil {
-		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Operation: "load embedded typed-BTF object", Err: errors.New("loader returned nil resources")}
+		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Stage: "object_load", Operation: "load embedded typed-BTF object", Err: errors.New("loader returned nil resources")}
 	}
 	return &ciliumVMBlockKernelSession{resources: resources}, nil
 }
@@ -143,11 +148,11 @@ func supportsBPFELArchitecture(architecture string) bool {
 	}
 }
 
-func classifyVMBlockObjectProviderError(operation string, err error) error {
+func classifyVMBlockObjectProviderError(stage, operation string, err error) error {
 	if errors.Is(err, ErrVMBlockObjectUnavailable) || errors.Is(err, fs.ErrNotExist) {
-		return &VMBlockKernelStageError{Status: "object_unavailable", Operation: operation, Err: err}
+		return &VMBlockKernelStageError{Status: "object_unavailable", Stage: stage, Operation: operation, Err: err}
 	}
-	return &VMBlockKernelStageError{Status: "object_invalid", Operation: operation, Err: err}
+	return &VMBlockKernelStageError{Status: "object_invalid", Stage: stage, Operation: operation, Err: err}
 }
 
 func classifyVMBlockPreflightStatus(err error) string {
@@ -168,15 +173,20 @@ func classifyVMBlockPreflightStatus(err error) string {
 }
 
 func probeVMBlockTypedTracepoints() error {
+	_, err := inspectVMBlockTypedTracepoints()
+	return err
+}
+
+func inspectVMBlockTypedTracepoints() ([]vmBlockTypedTracepointPrototype, error) {
 	if _, err := os.Stat("/sys/kernel/btf/vmlinux"); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ErrVMBlockBTFMissing
+			return nil, ErrVMBlockBTFMissing
 		}
-		return fmt.Errorf("read kernel BTF: %w", err)
+		return nil, fmt.Errorf("read kernel BTF: %w", err)
 	}
 	spec, err := btf.LoadKernelSpec()
 	if err != nil {
-		return fmt.Errorf("load kernel BTF: %w", err)
+		return nil, fmt.Errorf("load kernel BTF: %w", err)
 	}
 	return resolveVMBlockTypedTracepoints(spec)
 }
@@ -185,25 +195,132 @@ type vmBlockBTFTypeFinder interface {
 	TypeByName(string, any) error
 }
 
-func resolveVMBlockTypedTracepoints(spec vmBlockBTFTypeFinder) error {
+type vmBlockTypedTracepointPrototype struct {
+	Name              string
+	KernelParameters  []string
+	ProgramParameters []string
+}
+
+type vmBlockTypedTracepointExpectation struct {
+	typedefName       string
+	tracepointName    string
+	programParameters []string
+}
+
+var vmBlockTypedTracepointExpectations = []vmBlockTypedTracepointExpectation{
+	{
+		typedefName:       "btf_trace_block_rq_issue",
+		tracepointName:    "block_rq_issue",
+		programParameters: []string{"struct request *"},
+	},
+	{
+		typedefName:       "btf_trace_block_rq_complete",
+		tracepointName:    "block_rq_complete",
+		programParameters: []string{"struct request *", "blk_status_t", "unsigned int"},
+	},
+}
+
+func resolveVMBlockTypedTracepoints(spec vmBlockBTFTypeFinder) ([]vmBlockTypedTracepointPrototype, error) {
 	if spec == nil {
-		return &VMBlockKernelStageError{
-			Status: VMBlockCapabilityResolutionError, Operation: "resolve typed block tracepoints", Err: errors.New("kernel BTF type finder is unavailable"),
+		return nil, &VMBlockKernelStageError{
+			Status: VMBlockCapabilityResolutionError, Stage: "preflight", Operation: "resolve typed block tracepoints", Err: errors.New("kernel BTF type finder is unavailable"),
 		}
 	}
 
 	// Cilium resolves tp_btf AttachTraceRawTp targets by prefixing AttachTo
 	// with btf_trace_. Kernel BTF publishes these targets as typedefs of
-	// function pointers, not as BTF functions.
-	for _, name := range []string{"btf_trace_block_rq_issue", "btf_trace_block_rq_complete"} {
+	// function pointers, not as BTF functions. The typedef's leading void
+	// pointer is kernel trace callback data and is not an argument exposed to
+	// a tp_btf BPF program. The effective program parameters begin after it.
+	prototypes := make([]vmBlockTypedTracepointPrototype, 0, len(vmBlockTypedTracepointExpectations))
+	for _, expectation := range vmBlockTypedTracepointExpectations {
 		var tracepoint *btf.Typedef
-		if err := spec.TypeByName(name, &tracepoint); err != nil {
-			return &VMBlockKernelStageError{
-				Status: "typed_tracepoint_missing", Operation: "resolve typed tracepoint " + strings.TrimPrefix(name, "btf_trace_"), Err: err,
+		if err := spec.TypeByName(expectation.typedefName, &tracepoint); err != nil {
+			return nil, &VMBlockKernelStageError{
+				Status: "typed_tracepoint_missing", Stage: "preflight", Operation: "resolve typed tracepoint " + expectation.tracepointName, Err: err,
 			}
 		}
+		prototype, err := describeVMBlockTypedTracepoint(tracepoint, expectation)
+		if err != nil {
+			return nil, &VMBlockKernelStageError{
+				Status: "btf_incompatible", Stage: "preflight", Operation: "validate typed tracepoint " + expectation.tracepointName, Err: err,
+			}
+		}
+		prototypes = append(prototypes, prototype)
 	}
-	return nil
+	return prototypes, nil
+}
+
+func describeVMBlockTypedTracepoint(tracepoint *btf.Typedef, expectation vmBlockTypedTracepointExpectation) (vmBlockTypedTracepointPrototype, error) {
+	if tracepoint == nil {
+		return vmBlockTypedTracepointPrototype{}, errors.New("kernel BTF typedef is nil")
+	}
+	pointer, ok := btf.UnderlyingType(tracepoint).(*btf.Pointer)
+	if !ok || pointer == nil {
+		return vmBlockTypedTracepointPrototype{}, fmt.Errorf("%s is not a function-pointer typedef", expectation.typedefName)
+	}
+	function, ok := btf.UnderlyingType(pointer.Target).(*btf.FuncProto)
+	if !ok || function == nil {
+		return vmBlockTypedTracepointPrototype{}, fmt.Errorf("%s does not reference a function prototype", expectation.typedefName)
+	}
+
+	kernelParameters := make([]string, 0, len(function.Params))
+	for _, parameter := range function.Params {
+		kernelParameters = append(kernelParameters, formatVMBlockBTFType(parameter.Type))
+	}
+	if len(kernelParameters) == 0 || kernelParameters[0] != "void *" {
+		return vmBlockTypedTracepointPrototype{}, fmt.Errorf("%s leading trace callback parameter is %q, want void *", expectation.typedefName, firstVMBlockParameter(kernelParameters))
+	}
+	programParameters := append([]string(nil), kernelParameters[1:]...)
+	if !equalVMBlockParameters(programParameters, expectation.programParameters) {
+		return vmBlockTypedTracepointPrototype{}, fmt.Errorf("%s program parameters are %v, want %v", expectation.typedefName, programParameters, expectation.programParameters)
+	}
+	return vmBlockTypedTracepointPrototype{
+		Name:              expectation.tracepointName,
+		KernelParameters:  append([]string(nil), kernelParameters...),
+		ProgramParameters: programParameters,
+	}, nil
+}
+
+func formatVMBlockBTFType(value btf.Type) string {
+	value = btf.QualifiedType(value)
+	switch typed := value.(type) {
+	case *btf.Void:
+		return "void"
+	case *btf.Pointer:
+		return strings.TrimSpace(formatVMBlockBTFType(typed.Target)) + " *"
+	case *btf.Typedef:
+		return firstNonEmpty(strings.TrimSpace(typed.Name), formatVMBlockBTFType(typed.Type))
+	case *btf.Struct:
+		return strings.TrimSpace("struct " + typed.Name)
+	case *btf.Union:
+		return strings.TrimSpace("union " + typed.Name)
+	case *btf.Enum:
+		return strings.TrimSpace("enum " + typed.Name)
+	case *btf.Int:
+		return strings.TrimSpace(typed.Name)
+	default:
+		return fmt.Sprintf("%T", value)
+	}
+}
+
+func equalVMBlockParameters(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func firstVMBlockParameter(parameters []string) string {
+	if len(parameters) == 0 {
+		return "-"
+	}
+	return parameters[0]
 }
 
 type ciliumVMBlockKernelSession struct {
@@ -220,26 +337,26 @@ type ciliumVMBlockKernelSession struct {
 func (session *ciliumVMBlockKernelSession) Start(context.Context) error {
 	issueLink, err := session.resources.AttachIssue()
 	if err != nil {
-		return classifyVMBlockAttachError("attach block_rq_issue typed-BTF program", err)
+		return classifyVMBlockAttachError("issue_attach", "attach block_rq_issue typed-BTF program", err)
 	}
 	if issueLink == nil {
-		return &VMBlockKernelStageError{Status: "attach_failed", Operation: "attach block_rq_issue typed-BTF program", Err: errors.New("attach returned a nil link")}
+		return &VMBlockKernelStageError{Status: "attach_failed", Stage: "issue_attach", Operation: "attach block_rq_issue typed-BTF program", Err: errors.New("attach returned a nil link")}
 	}
 	session.issueLink = issueLink
 	completeLink, err := session.resources.AttachComplete()
 	if err != nil {
 		cleanupErr := closeVMBlockLink(&session.issueLink)
-		attachErr := classifyVMBlockAttachError("attach block_rq_complete typed-BTF program", err)
+		attachErr := classifyVMBlockAttachError("complete_attach", "attach block_rq_complete typed-BTF program", err)
 		if cleanupErr != nil {
-			return errors.Join(attachErr, &VMBlockKernelStageError{Status: "cleanup_failed", Operation: "detach block_rq_issue after partial attach", Err: cleanupErr})
+			return errors.Join(attachErr, &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "detach block_rq_issue after partial attach", Err: cleanupErr})
 		}
 		return attachErr
 	}
 	if completeLink == nil {
 		cleanupErr := closeVMBlockLink(&session.issueLink)
-		attachErr := &VMBlockKernelStageError{Status: "attach_failed", Operation: "attach block_rq_complete typed-BTF program", Err: errors.New("attach returned a nil link")}
+		attachErr := &VMBlockKernelStageError{Status: "attach_failed", Stage: "complete_attach", Operation: "attach block_rq_complete typed-BTF program", Err: errors.New("attach returned a nil link")}
 		if cleanupErr != nil {
-			return errors.Join(attachErr, &VMBlockKernelStageError{Status: "cleanup_failed", Operation: "detach block_rq_issue after partial attach", Err: cleanupErr})
+			return errors.Join(attachErr, &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "detach block_rq_issue after partial attach", Err: cleanupErr})
 		}
 		return attachErr
 	}
@@ -257,7 +374,10 @@ func (session *ciliumVMBlockKernelSession) Collect(ctx context.Context, duration
 	}
 	counters, err := session.resources.ReadCounters()
 	if err != nil {
-		return &VMBlockKernelStageError{Status: "counter_read_failed", Operation: "read typed-BTF count-only counters", Err: err}
+		if isPermissionError(err) {
+			return &VMBlockKernelStageError{Status: "permission_denied", Stage: "map_read", Operation: "read typed-BTF count-only counters", Err: err}
+		}
+		return &VMBlockKernelStageError{Status: "counter_read_failed", Stage: "map_read", Operation: "read typed-BTF count-only counters", Err: err}
 	}
 	session.stats = VMBlockKernelStats{
 		CollectionMode:       vmBlockCountCollectionMode,
@@ -274,7 +394,7 @@ func (session *ciliumVMBlockKernelSession) Stop() error {
 	session.stopOnce.Do(func() {
 		session.stopErr = errors.Join(closeVMBlockLink(&session.completeLink), closeVMBlockLink(&session.issueLink))
 		if session.stopErr != nil {
-			session.stopErr = &VMBlockKernelStageError{Status: "cleanup_failed", Operation: "detach typed-BTF count-only links", Err: session.stopErr}
+			session.stopErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "detach typed-BTF count-only links", Err: session.stopErr}
 		}
 	})
 	return session.stopErr
@@ -286,7 +406,7 @@ func (session *ciliumVMBlockKernelSession) Close() error {
 		resourceErr := session.resources.Close()
 		session.closeErr = errors.Join(stopErr, resourceErr)
 		if session.closeErr != nil {
-			session.closeErr = &VMBlockKernelStageError{Status: "cleanup_failed", Operation: "close typed-BTF count-only resources", Err: session.closeErr}
+			session.closeErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "close typed-BTF count-only resources", Err: session.closeErr}
 		}
 	})
 	return session.closeErr
@@ -301,31 +421,31 @@ func closeVMBlockLink(target *io.Closer) error {
 	return link.Close()
 }
 
-func classifyVMBlockAttachError(operation string, err error) error {
-	if errors.Is(err, os.ErrPermission) {
-		return ErrVMBlockLatencyPermission
+func classifyVMBlockAttachError(stage, operation string, err error) error {
+	if isPermissionError(err) {
+		return &VMBlockKernelStageError{Status: "permission_denied", Stage: stage, Operation: operation, Err: err}
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return &VMBlockKernelStageError{Status: "typed_tracepoint_missing", Operation: operation, Err: err}
+		return &VMBlockKernelStageError{Status: "typed_tracepoint_missing", Stage: stage, Operation: operation, Err: err}
 	}
-	return &VMBlockKernelStageError{Status: "attach_failed", Operation: operation, Err: err}
+	return &VMBlockKernelStageError{Status: "attach_failed", Stage: stage, Operation: operation, Err: err}
 }
 
 func classifyVMBlockLoadError(err error) error {
-	if errors.Is(err, os.ErrPermission) {
-		return ErrVMBlockLatencyPermission
-	}
 	var verifierError *VMBlockVerifierError
 	if errors.As(err, &verifierError) {
 		return verifierError
 	}
+	if isPermissionError(err) {
+		return &VMBlockKernelStageError{Status: "permission_denied", Stage: "object_load", Operation: "load embedded typed-BTF object", Err: err}
+	}
 	if errors.Is(err, ErrVMBlockObjectInvalid) {
-		return &VMBlockKernelStageError{Status: "object_invalid", Operation: "load embedded typed-BTF object", Err: err}
+		return &VMBlockKernelStageError{Status: "object_invalid", Stage: "object_load", Operation: "load embedded typed-BTF object", Err: err}
 	}
 	if errors.Is(err, btf.ErrNotFound) {
-		return &VMBlockKernelStageError{Status: "btf_incompatible", Operation: "relocate embedded typed-BTF object", Err: err}
+		return &VMBlockKernelStageError{Status: "btf_incompatible", Stage: "object_load", Operation: "relocate embedded typed-BTF object", Err: err}
 	}
-	return &VMBlockKernelStageError{Status: "object_load_failed", Operation: "load embedded typed-BTF object", Err: err}
+	return &VMBlockKernelStageError{Status: "object_load_failed", Stage: "object_load", Operation: "load embedded typed-BTF object", Err: err}
 }
 
 type ciliumVMBlockObjectLoader struct{}

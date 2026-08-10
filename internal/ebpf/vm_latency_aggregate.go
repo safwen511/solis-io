@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -17,15 +16,17 @@ var (
 	ErrVMBlockLatencyNotImplemented = errors.New("experimental_not_implemented: typed BTF request-pointer and bio/blkcg eBPF attach is not implemented")
 	// ErrVMBlockLatencyPermission is the stable operator-facing permission
 	// guidance for this experimental collector.
-	ErrVMBlockLatencyPermission = errors.New("permission denied loading or attaching per-VM eBPF block latency programs; try running with sudo")
+	ErrVMBlockLatencyPermission = errors.New("permission denied loading or attaching per-VM eBPF block latency programs")
 )
 
 // VMBlockLatencyCollectOptions controls one experimental observation window.
 type VMBlockLatencyCollectOptions struct {
-	Duration     time.Duration
-	Interval     time.Duration
-	DeviceFilter string
-	ObservedAt   time.Time
+	Duration        time.Duration
+	Interval        time.Duration
+	DeviceFilter    string
+	ObservedAt      time.Time
+	effectiveUID    func() int
+	diagnosticProbe func(string, int, error) VMBlockRuntimeDiagnostics
 }
 
 // VMBlockEventSource isolates the privileged eBPF event source from the
@@ -111,9 +112,11 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 	aggregator.recordKernelStats(stats)
 	aggregator.finish(err == nil && stats.AttributionAvailable)
 	if err != nil {
-		status, message := vmBlockCollectorError(err)
+		euid := vmBlockEffectiveUID(options)
+		status, message := vmBlockCollectorError(err, euid)
 		report.Availability.Status = status
 		report.Availability.Error = message
+		report.Diagnostics = vmBlockDiagnostics(options, vmBlockErrorStage(err), euid, err)
 		report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{
 			Name: "ebpf_attribution", Status: status, Error: message,
 		})
@@ -401,7 +404,7 @@ func mappingAvailabilityStatus(quality string) string {
 	}
 }
 
-func vmBlockCollectorError(err error) (string, string) {
+func vmBlockCollectorError(err error, euid int) (string, string) {
 	var verifierError *VMBlockVerifierError
 	var capabilityError *VMBlockCapabilityError
 	message := boundVMBlockDiagnostic(err.Error(), maxVMBlockVerifierLogBytes)
@@ -409,11 +412,10 @@ func vmBlockCollectorError(err error) (string, string) {
 	switch {
 	case errors.Is(err, ErrVMBlockLatencyNotImplemented):
 		return "experimental_not_implemented", message
-	case errors.Is(err, ErrVMBlockLatencyPermission), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
-		if !strings.Contains(message, "try running with sudo") {
-			message = boundVMBlockDiagnostic(ErrVMBlockLatencyPermission.Error()+": "+message, maxVMBlockVerifierLogBytes)
-		}
-		return "permission_denied", message
+	case errors.As(err, &verifierError):
+		return VMBlockCapabilityVerifierRejected, message
+	case isPermissionError(err):
+		return "permission_denied", permissionDeniedMessage(euid, err)
 	case errors.Is(err, ErrVMBlockObjectUnavailable):
 		return "object_unavailable", message
 	case errors.Is(err, ErrVMBlockObjectInvalid):
@@ -424,8 +426,6 @@ func vmBlockCollectorError(err error) (string, string) {
 		return "unsupported_endianness", message
 	case errors.Is(err, ErrVMBlockUnsupportedKernel):
 		return "unsupported_kernel", message
-	case errors.As(err, &verifierError):
-		return VMBlockCapabilityVerifierRejected, message
 	case errors.As(err, &capabilityError):
 		return firstNonEmpty(capabilityError.Status, VMBlockCapabilityResolutionError), message
 	case stageError != nil:
@@ -433,6 +433,44 @@ func vmBlockCollectorError(err error) (string, string) {
 	default:
 		return "error", boundVMBlockDiagnostic(fmt.Sprintf("per-VM eBPF block latency unavailable: %v", err), maxVMBlockVerifierLogBytes)
 	}
+}
+
+func vmBlockEffectiveUID(options VMBlockLatencyCollectOptions) int {
+	if options.effectiveUID != nil {
+		return options.effectiveUID()
+	}
+	return defaultVMBlockDiagnosticConfig().GetEUID()
+}
+
+func vmBlockDiagnostics(options VMBlockLatencyCollectOptions, stage string, euid int, err error) VMBlockRuntimeDiagnostics {
+	if options.diagnosticProbe != nil {
+		diagnostics := options.diagnosticProbe(stage, euid, err)
+		diagnostics.Stage = firstNonEmpty(strings.TrimSpace(diagnostics.Stage), firstNonEmpty(stage, "unknown"))
+		diagnostics.EUID = euid
+		diagnostics.RawError = boundedError(err)
+		return diagnostics
+	}
+	config := defaultVMBlockDiagnosticConfig()
+	config.GetEUID = func() int { return euid }
+	return collectVMBlockRuntimeDiagnostics(config, stage, err)
+}
+
+func vmBlockErrorStage(err error) string {
+	if stage := primaryVMBlockStageError(err); stage != nil {
+		return firstNonEmpty(strings.TrimSpace(stage.Stage), "unknown")
+	}
+	var verifierError *VMBlockVerifierError
+	if errors.As(err, &verifierError) {
+		return "object_load"
+	}
+	var capabilityError *VMBlockCapabilityError
+	if errors.As(err, &capabilityError) {
+		return "preflight"
+	}
+	if isPermissionError(err) {
+		return "preflight"
+	}
+	return "unknown"
 }
 
 func primaryVMBlockStageError(err error) *VMBlockKernelStageError {

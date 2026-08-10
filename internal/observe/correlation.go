@@ -38,7 +38,7 @@ func finalizeQuality(snapshot *ObserveSnapshot) {
 	snapshot.EvidenceQuality.Overall = overall
 }
 
-func buildCorrelations(snapshot *ObserveSnapshot, ebpfRequested bool) {
+func buildCorrelations(snapshot *ObserveSnapshot) {
 	hostAvailable := snapshot.HostStatus != nil && snapshot.HostStatus.Availability.Available
 	addCorrelation(snapshot, Correlation{
 		Name: "host_metrics_available", Present: hostAvailable, Severity: "info",
@@ -56,10 +56,7 @@ func buildCorrelations(snapshot *ObserveSnapshot, ebpfRequested bool) {
 		Severity: severity(qemuPressure, "likely"), Explanation: "Selected suspect shows dominant QEMU write-byte or write-syscall pressure during the shared observation window; this does not establish guest impact.",
 		EvidenceRefs: []string{"qemu_evidence"},
 	})
-	addCorrelation(snapshot, Correlation{
-		Name: "host_storage_latency_available", Present: false, Severity: "info",
-		Explanation: latencyExplanation(ebpfRequested), EvidenceRefs: []string{"evidence_quality.sections[ebpf_latency]"},
-	})
+	upsertVMAttributionCorrelations(snapshot)
 	addCorrelation(snapshot, availabilityCorrelation("victim_guest_available", snapshot.VictimGuestStatus != nil && snapshot.VictimGuestStatus.Availability.Available, "victim_guest_status"))
 	serviceAvailable := snapshot.VictimServiceStatus != nil && snapshot.VictimServiceStatus.Availability.Available
 	addCorrelation(snapshot, availabilityCorrelation("victim_service_available", serviceAvailable, "victim_service_status"))
@@ -81,18 +78,53 @@ func addCorrelation(snapshot *ObserveSnapshot, correlation Correlation) {
 	snapshot.Correlations = append(snapshot.Correlations, correlation)
 }
 
-func latencyExplanation(requested bool) string {
-	if requested {
-		return "eBPF latency was requested, but observe snapshot does not yet wire a safe host/storage-path latency collector."
-	}
-	return "Host/storage-path eBPF latency was not requested; no per-VM latency claim is made."
-}
-
 func severity(present bool, whenPresent string) string {
 	if present {
 		return whenPresent
 	}
 	return "info"
+}
+
+func upsertVMAttributionCorrelations(snapshot *ObserveSnapshot) {
+	removeCorrelations(snapshot,
+		"host_storage_latency_available",
+		"vm_ebpf_attribution_available",
+		"suspect_vm_attributed_io_observed",
+	)
+	evidence := snapshot.EBPFVMAttribution
+	attributionAvailable := evidence != nil && evidence.Available
+	hostLatencyAvailable := attributionAvailable && evidence.HostTotalOps > 0
+	addCorrelation(snapshot, Correlation{
+		Name: "host_storage_latency_available", Present: hostLatencyAvailable, Severity: "info",
+		Explanation:  "Availability of host block request issue/completion latency from the embedded typed-BTF VM-attribution evidence; this does not establish application impact.",
+		EvidenceRefs: []string{"ebpf_vm_attribution.host_total_ops", "ebpf_vm_attribution.host_p95_ms"},
+	})
+	addCorrelation(snapshot, Correlation{
+		Name: "vm_ebpf_attribution_available", Present: attributionAvailable, Severity: "info",
+		Explanation:  "Availability of experimental exact-match blkcg/cgroup-ID evidence for local libvirt VMs; quality and unattributed work remain explicit.",
+		EvidenceRefs: []string{"ebpf_vm_attribution"},
+	})
+	suspectIO := attributionAvailable && snapshot.SelectedSuspect != "-" && evidence.SuspectTotalOps > 0
+	addCorrelation(snapshot, Correlation{
+		Name: "suspect_vm_attributed_io_observed", Present: suspectIO,
+		Severity:     severity(suspectIO, "warning"),
+		Explanation:  "Block operations were attributed to the selected suspect during the embedded evidence window; this is correlation evidence, not proof of victim impact or root cause.",
+		EvidenceRefs: []string{"ebpf_vm_attribution.suspect_total_ops", "ebpf_vm_attribution.unattributed_percent"},
+	})
+}
+
+func removeCorrelations(snapshot *ObserveSnapshot, names ...string) {
+	remove := make(map[string]bool, len(names))
+	for _, name := range names {
+		remove[name] = true
+	}
+	kept := snapshot.Correlations[:0]
+	for _, correlation := range snapshot.Correlations {
+		if !remove[correlation.Name] {
+			kept = append(kept, correlation)
+		}
+	}
+	snapshot.Correlations = kept
 }
 
 func serviceHealthError(report *servicehealth.Report) bool {

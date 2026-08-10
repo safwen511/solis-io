@@ -11,6 +11,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/config"
 	"github.com/safwen511/solis-io/internal/discovery"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/hostmetrics"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
@@ -177,6 +178,89 @@ func TestCorrelationsDoNotOverstateCausality(t *testing.T) {
 	}
 }
 
+func TestExistingVMAttributionIsProjectedWithoutRuntimeDiagnostics(t *testing.T) {
+	report := fixtureVMAttribution("available")
+	report.Diagnostics.RawError = "forbidden 0xffff request_pointer /proc/123/cmdline"
+	snapshot, err := Collect(context.Background(), Request{
+		Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second,
+		IncludeEBPFLatency: true, EBPFVMAttribution: &report, EBPFSourceWindow: "noisy_neighbor_diagnosis_window",
+	}, fixtureVMs(), fixtureDependencies(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := snapshot.EBPFVMAttribution
+	if evidence == nil || !evidence.Available || evidence.Quality != "available" {
+		t.Fatalf("VM attribution = %#v", evidence)
+	}
+	if evidence.VictimTotalOps != 4 || evidence.SuspectTotalOps != 96 || evidence.UnattributedPercent != 1 {
+		t.Fatalf("VM attribution selection = %#v", evidence)
+	}
+	assertSectionState(t, snapshot, "ebpf_vm_attribution", EvidenceMeasured)
+	for _, name := range []string{"host_storage_latency_available", "vm_ebpf_attribution_available", "suspect_vm_attributed_io_observed"} {
+		correlation, ok := findCorrelation(snapshot, name)
+		if !ok || !correlation.Present {
+			t.Errorf("correlation %q = %#v, present=%v", name, correlation, ok)
+		}
+	}
+	raw := strings.ToLower(render(t, snapshot))
+	for _, forbidden := range []string{"request_pointer", "0xffff", "/proc/", "cmdline"} {
+		if strings.Contains(raw, forbidden) {
+			t.Errorf("observe projection leaked %q", forbidden)
+		}
+	}
+	if !strings.Contains(raw, "does not establish causality") {
+		t.Fatal("observe projection omitted causality caveat")
+	}
+}
+
+func TestDegradedVMAttributionIsPartialAndUnavailableIsNotFabricated(t *testing.T) {
+	degraded := fixtureVMAttribution("degraded")
+	snapshot, err := Collect(context.Background(), Request{
+		Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second,
+		IncludeEBPFLatency: true, EBPFVMAttribution: &degraded,
+	}, fixtureVMs(), fixtureDependencies(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EBPFVMAttribution == nil || !snapshot.EBPFVMAttribution.Available || snapshot.EBPFVMAttribution.Quality != "degraded" {
+		t.Fatalf("degraded attribution = %#v", snapshot.EBPFVMAttribution)
+	}
+	assertSectionState(t, snapshot, "ebpf_vm_attribution", EvidencePartial)
+	if snapshot.EvidenceQuality.Overall != EvidencePartial {
+		t.Fatalf("overall quality = %q, want partial", snapshot.EvidenceQuality.Overall)
+	}
+
+	unavailable := fixtureVMAttribution("unavailable")
+	unavailable.Availability = ebpf.VMBlockLatencyAvailability{Available: false, Status: "permission_denied", Error: "raw detail must not be projected"}
+	snapshot, err = Collect(context.Background(), Request{
+		Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second,
+		IncludeEBPFLatency: true, EBPFVMAttribution: &unavailable,
+	}, fixtureVMs(), fixtureDependencies(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := snapshot.EBPFVMAttribution
+	if evidence == nil || evidence.Available || evidence.AttributedOps != 0 || evidence.VictimTotalOps != 0 || evidence.SuspectTotalOps != 0 || len(evidence.VMs) != 0 {
+		t.Fatalf("unavailable attribution was fabricated: %#v", evidence)
+	}
+	assertSectionState(t, snapshot, "ebpf_vm_attribution", EvidenceUnavailable)
+	if strings.Contains(render(t, snapshot), "raw detail") {
+		t.Fatal("raw collector error was projected into observe JSON")
+	}
+}
+
+func TestVMAttributionPrivacyViolationIsRejected(t *testing.T) {
+	report := fixtureVMAttribution("available")
+	report.Privacy.EnvironmentCollected = true
+	_, err := Collect(context.Background(), Request{
+		Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second,
+		IncludeEBPFLatency: true, EBPFVMAttribution: &report,
+	}, fixtureVMs(), fixtureDependencies(false))
+	if err == nil || !strings.Contains(err.Error(), "cannot contain") {
+		t.Fatalf("unsafe eBPF privacy flags were not rejected: %v", err)
+	}
+}
+
 func TestUnknownVictimAndSuspectAreRejected(t *testing.T) {
 	dependencies := fixtureDependencies(false)
 	_, err := Collect(context.Background(), Request{Victim: "missing", Duration: time.Second, Interval: time.Second}, fixtureVMs(), dependencies)
@@ -242,6 +326,45 @@ func fixtureDependencies(withDiscovery bool) Dependencies {
 
 func measuredAvailability(source string) observability.Availability {
 	return observability.Availability{Available: true, Source: source, Quality: observability.EvidenceQualityMeasured}
+}
+
+func fixtureVMAttribution(quality string) ebpf.VMBlockLatencyReport {
+	return ebpf.VMBlockLatencyReport{
+		SchemaVersion: "1", ObservedAtUTC: "2026-08-09T10:11:12Z", Duration: "10s", Interval: "2s",
+		Mode: "experimental", CollectionMode: "typed_btf_vm_attributed_latency",
+		AttributionMethod: "blkcg_cgroup_id_to_libvirt_vm", AttributionQuality: quality,
+		Availability:       ebpf.VMBlockLatencyAvailability{Available: true, Status: "available"},
+		HostSummary:        ebpf.VMBlockLatencySummary{TotalOps: 101, LatencyP95MS: 2.5},
+		AttributionSummary: ebpf.VMBlockAttributionSummary{AttributedOps: 100, UnattributedOps: 1, AttributedPercent: 99, MatchedVMCount: 2},
+		Unattributed:       ebpf.VMBlockLatencyUnattributed{TotalUnattributedOps: 1, UnattributedPercent: 1},
+		VMs: []ebpf.VMBlockLatencyVM{
+			{Name: "a-web", Tenant: "tenant-a", Role: "web", ReadOps: 4, TotalOps: 4, LatencyP95MS: 1.25, AttributionQuality: quality},
+			{Name: "b-stress", Tenant: "tenant-b", Role: "stress", WriteOps: 96, TotalOps: 96, LatencyP95MS: 2.5, AttributionQuality: quality},
+		},
+		Caveats: []string{"experimental exact-match cgroup attribution"},
+	}
+}
+
+func assertSectionState(t *testing.T, snapshot ObserveSnapshot, section string, state EvidenceState) {
+	t.Helper()
+	for _, value := range snapshot.EvidenceQuality.Sections {
+		if value.Section == section {
+			if value.State != state {
+				t.Fatalf("section %s state = %s, want %s", section, value.State, state)
+			}
+			return
+		}
+	}
+	t.Fatalf("section %s missing from evidence quality", section)
+}
+
+func findCorrelation(snapshot ObserveSnapshot, name string) (Correlation, bool) {
+	for _, correlation := range snapshot.Correlations {
+		if correlation.Name == name {
+			return correlation, true
+		}
+	}
+	return Correlation{}, false
 }
 
 func render(t *testing.T, snapshot ObserveSnapshot) string {

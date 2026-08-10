@@ -27,6 +27,7 @@ The current milestone provides a working experimental single-host path:
 - Requests are attributed through blkcg ownership to exact validated libvirt VM cgroup IDs.
 - Host and per-VM totals, fixed histograms, approximate percentiles, attribution quality, and unattributed counters are reported.
 - VM-attributed latency is integrated into `diagnose noisy-neighbor`, `capture noisy-neighbor`, and `watch noisy-neighbor`.
+- Capture-generated `observe-snapshot.json` reuses the same VM-attribution report without a second eBPF attachment and preserves the report's own timestamp and duration.
 - Diagnosis supports human output and machine-readable JSON.
 
 This is working in the lab, but it remains experimental. Multi-host operation is out of scope, and production packaging and service lifecycle are not implemented.
@@ -40,9 +41,9 @@ Solis builds evidence in layers:
 3. **QEMU pressure** samples `/proc/<qemu-pid>/io` byte and syscall counters. High `syscw/s` is a fallback activity signal when byte counters do not advance meaningfully; it is not treated as an exact byte count.
 4. **Validation counters** use cgroup v2 `io.stat` and `virsh domstats --block` deltas. These provide byte, operation, and virtual-disk timing evidence, not host block-latency histograms.
 5. **Typed-BTF eBPF latency** correlates block request issue and completion, extracts operation and device metadata, and resolves blkcg ownership.
-6. **Diagnosis, capture, and watch** combine storage sharing, QEMU pressure, VM-attributed eBPF evidence, explicit missing evidence, and conservative verdict rules.
+6. **Observe, diagnosis, capture, and watch** combine storage sharing, QEMU pressure, VM-attributed eBPF evidence, explicit missing evidence, and conservative correlations or verdict rules.
 
-The capture workflow writes private, atomic evidence bundles containing the human diagnosis, `incident-report.md`, `evidence-summary.json`, raw `ebpf-vm-block-latency.json` when requested, and `manifest.json` checksums.
+The capture workflow writes private, atomic evidence bundles containing the human diagnosis, `incident-report.md`, `evidence-summary.json`, raw `ebpf-vm-block-latency.json` when requested, a compact privacy-safe attribution projection in `observe-snapshot.json`, and `manifest.json` checksums. The observe projection excludes raw loader diagnostics and cgroup identifiers and labels the reused diagnosis evidence window explicitly.
 
 ## eBPF attribution design
 
@@ -121,6 +122,19 @@ Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then bu
 ./solis status --watch --iterations 5 --sort pressure --no-clear
 ./solis vm storage-stats --victim a-web --suspect b-stress --duration 5s --interval 1s --json
 ```
+
+### Unified observe snapshot
+
+```bash
+./solis observe snapshot \
+  --victim a-web \
+  --discover-suspects \
+  --duration 10s \
+  --interval 2s \
+  --json
+```
+
+The standalone command combines host, VM/QEMU, storage, and configured guest/service/database evidence without claiming causality. When capture is run with `--include-ebpf-latency`, its `observe-snapshot.json` also embeds the already-collected VM-attribution summary; it does not attach a second eBPF collector. The embedded report keeps its original `observed_at_utc`, `duration`, quality, and unattributed percentage so adjacent evidence windows are not presented as identical.
 
 ### eBPF readiness and VM-attributed latency
 

@@ -129,6 +129,51 @@ type Correlation struct {
 	EvidenceRefs []string `json:"evidence_refs"`
 }
 
+// EBPFVMAttribution is a compact, privacy-safe projection of an already
+// collected VM block-latency report. Runtime diagnostics, cgroup paths and
+// identifiers, and other loader details deliberately stay in the raw eBPF
+// artifact rather than the unified bird's-eye snapshot.
+type EBPFVMAttribution struct {
+	Available           bool                       `json:"available"`
+	Status              string                     `json:"status"`
+	ObservedAtUTC       string                     `json:"observed_at_utc"`
+	Duration            string                     `json:"duration"`
+	SourceWindow        string                     `json:"source_window"`
+	CollectionMode      string                     `json:"collection_mode"`
+	AttributionMethod   string                     `json:"attribution_method"`
+	Quality             string                     `json:"quality"`
+	AttributedOps       uint64                     `json:"attributed_ops"`
+	UnattributedOps     uint64                     `json:"unattributed_ops"`
+	AttributedPercent   float64                    `json:"attributed_percent"`
+	UnattributedPercent float64                    `json:"unattributed_percent"`
+	MatchedVMCount      int                        `json:"matched_vm_count"`
+	HostTotalOps        uint64                     `json:"host_total_ops"`
+	HostP95MS           float64                    `json:"host_p95_ms"`
+	VictimTotalOps      uint64                     `json:"victim_total_ops"`
+	VictimP95MS         float64                    `json:"victim_p95_ms"`
+	SuspectTotalOps     uint64                     `json:"suspect_total_ops"`
+	SuspectP95MS        float64                    `json:"suspect_p95_ms"`
+	VMs                 []EBPFVMAttributionVM      `json:"vms"`
+	Caveats             []string                   `json:"caveats"`
+	Privacy             observability.PrivacyFlags `json:"privacy"`
+}
+
+// EBPFVMAttributionVM is the bounded per-VM summary used for bird's-eye
+// correlation. Detailed histograms remain in ebpf-vm-block-latency.json.
+type EBPFVMAttributionVM struct {
+	Name               string  `json:"name"`
+	Tenant             string  `json:"tenant"`
+	Role               string  `json:"role"`
+	ReadOps            uint64  `json:"read_ops"`
+	WriteOps           uint64  `json:"write_ops"`
+	FlushOps           uint64  `json:"flush_ops"`
+	DiscardOps         uint64  `json:"discard_ops"`
+	UnknownOps         uint64  `json:"unknown_ops"`
+	TotalOps           uint64  `json:"total_ops"`
+	LatencyP95MS       float64 `json:"latency_p95_ms"`
+	AttributionQuality string  `json:"attribution_quality"`
+}
+
 type ObserveSnapshot struct {
 	SchemaVersion        string                     `json:"schema_version"`
 	ObservedAtUTC        string                     `json:"observed_at_utc"`
@@ -150,6 +195,7 @@ type ObserveSnapshot struct {
 	StorageTopology      StorageTopology            `json:"storage_topology"`
 	QEMUEvidence         QEMUEvidence               `json:"qemu_evidence"`
 	Discovery            DiscoveryEvidence          `json:"discovery"`
+	EBPFVMAttribution    *EBPFVMAttribution         `json:"ebpf_vm_attribution"`
 	Correlations         []Correlation              `json:"correlations"`
 	EvidenceQuality      EvidenceQuality            `json:"evidence_quality"`
 	Privacy              observability.PrivacyFlags `json:"privacy"`

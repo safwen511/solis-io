@@ -438,6 +438,8 @@ type observeSnapshotOptions struct {
 	IncludeServices    bool
 	IncludeDB          bool
 	IncludeEBPFLatency bool
+	EBPFVMAttribution  *ebpf.VMBlockLatencyReport
+	EBPFSourceWindow   string
 }
 
 type observeWatchOptions struct {
@@ -1613,6 +1615,11 @@ func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedT
 		Victim: evidence.Diagnosis.Inputs.Victim, Suspect: options.Suspect, DiscoverSuspects: options.DiscoverSuspects,
 		Duration: options.Duration, Interval: options.Interval, JSON: true,
 		IncludeEBPFLatency: options.IncludeEBPFLatency,
+		EBPFVMAttribution:  evidence.EBPFVMAttribution,
+		EBPFSourceWindow:   "noisy_neighbor_diagnosis_window",
+	}
+	if observeOptions.EBPFVMAttribution == nil {
+		observeOptions.EBPFVMAttribution = evidence.Diagnosis.EBPFVMAttribution
 	}
 	observeSnapshot, observeErr := collectObserveSnapshot(context.Background(), runtimeConfig, observeOptions)
 	captureEvidence := capture.Evidence{
@@ -2817,6 +2824,7 @@ func collectObserveSnapshot(ctx context.Context, runtimeConfig solisconfig.Runti
 		IncludeGuest: includeGuest, IncludeServices: includeServices, IncludeDB: includeDB,
 		IncludeEBPFLatency: options.IncludeEBPFLatency, GuestEnabled: observabilityConfig.Guest.Enabled,
 		ServiceConfigured: serviceConfigured, DatabaseConfigured: databaseConfigured,
+		EBPFVMAttribution: options.EBPFVMAttribution, EBPFSourceWindow: options.EBPFSourceWindow,
 	}, vms, dependencies)
 	if err != nil {
 		return observe.ObserveSnapshot{}, fmt.Errorf("observe snapshot error: %w", err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/safwen511/solis-io/internal/discovery"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/hostmetrics"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
@@ -33,6 +34,8 @@ type Request struct {
 	GuestEnabled       bool
 	ServiceConfigured  map[string]bool
 	DatabaseConfigured map[string]bool
+	EBPFVMAttribution  *ebpf.VMBlockLatencyReport
+	EBPFSourceWindow   string
 }
 
 type Dependencies struct {
@@ -193,12 +196,14 @@ func Collect(ctx context.Context, request Request, vms []inventory.VM, dependenc
 		collectTargetOptionals(ctx, "suspect", *selected, request, windowID, dependencies, &partial)
 		mergeOptionalResult(&snapshot, optionalResult{snapshot: partial})
 	}
-	if request.IncludeEBPFLatency {
-		addSection(&snapshot, "ebpf_latency", EvidenceUnsupported, "eBPF block latency", "observe snapshot eBPF latency is not wired safely yet")
+	if request.EBPFVMAttribution != nil {
+		ApplyEBPFVMAttribution(&snapshot, request.EBPFVMAttribution, request.EBPFSourceWindow)
+	} else if request.IncludeEBPFLatency {
+		addSection(&snapshot, "ebpf_vm_attribution", EvidenceUnsupported, "typed-BTF VM block-latency attribution", "no existing VM-attribution report was supplied to the observe collector")
 	} else {
-		addSection(&snapshot, "ebpf_latency", EvidenceDisabled, "eBPF block latency", "not requested")
+		addSection(&snapshot, "ebpf_vm_attribution", EvidenceDisabled, "typed-BTF VM block-latency attribution", "not requested")
 	}
-	buildCorrelations(&snapshot, request.IncludeEBPFLatency)
+	buildCorrelations(&snapshot)
 	snapshot.Caveats = append(snapshot.Caveats, "Snapshot records correlation candidates only; it does not establish causality or a customer-impact verdict.")
 	if snapshot.VictimServiceStatus == nil || snapshot.VictimDBStatus == nil ||
 		(snapshot.VictimServiceStatus != nil && !snapshot.VictimServiceStatus.Availability.Available) ||

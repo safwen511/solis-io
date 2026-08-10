@@ -800,6 +800,16 @@ func TestCaptureWritesVMAttributedEBPFEvidence(t *testing.T) {
 	evidence.Diagnosis.Storage = evidence.Storage
 	evidence.Diagnosis.EBPFVMAttribution = &vmReport
 	evidence.EBPFVMAttribution = &vmReport
+	evidence.ObserveSnapshot = &observe.ObserveSnapshot{
+		SchemaVersion: observe.SchemaVersion, ObservedAtUTC: "2026-08-10T12:00:01Z", WindowID: "observe-fixture",
+		Duration: "1s", Interval: "1s", ConfigSource: config.BuiltInDefaultsSource,
+		Victim: observe.Target{Name: "a-web"}, SelectedSuspect: "b-stress", SuspectMode: "pairwise",
+		EvidenceQuality: observe.EvidenceQuality{Overall: observe.EvidenceMeasured, Sections: []observe.SectionQuality{{
+			Section: "ebpf_latency", State: observe.EvidenceUnsupported, Source: "legacy fixture", Error: "not wired",
+		}}},
+		UnavailableSections: []observe.UnavailableSection{{Section: "ebpf_latency", State: observe.EvidenceUnsupported, Reason: "not wired"}},
+		Correlations:        []observe.Correlation{{Name: "host_storage_latency_available", Present: false, Severity: "info", EvidenceRefs: []string{}}},
+	}
 
 	result, err := Write(inputs, evidence, time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -824,6 +834,33 @@ func TestCaptureWritesVMAttributedEBPFEvidence(t *testing.T) {
 	}
 	if info, err := os.Stat(rawPath); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("raw VM attribution mode: info=%v err=%v", info, err)
+	}
+	observeBytes, err := os.ReadFile(filepath.Join(result.Directory, "observe-snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observeSnapshot observe.ObserveSnapshot
+	if err := json.Unmarshal(observeBytes, &observeSnapshot); err != nil {
+		t.Fatalf("observe VM attribution JSON invalid: %v\n%s", err, observeBytes)
+	}
+	if observeSnapshot.EBPFVMAttribution == nil || !observeSnapshot.EBPFVMAttribution.Available ||
+		observeSnapshot.EBPFVMAttribution.SourceWindow != "noisy_neighbor_diagnosis_window" ||
+		observeSnapshot.EBPFVMAttribution.VictimTotalOps != 4 || observeSnapshot.EBPFVMAttribution.SuspectTotalOps != 96 {
+		t.Fatalf("observe VM attribution = %#v", observeSnapshot.EBPFVMAttribution)
+	}
+	for _, section := range observeSnapshot.EvidenceQuality.Sections {
+		if section.Section == "ebpf_latency" && section.State == observe.EvidenceUnsupported {
+			t.Fatalf("observe snapshot retained stale unsupported eBPF section: %#v", section)
+		}
+	}
+	foundAttributionCorrelation := false
+	for _, correlation := range observeSnapshot.Correlations {
+		if correlation.Name == "vm_ebpf_attribution_available" {
+			foundAttributionCorrelation = correlation.Present
+		}
+	}
+	if !foundAttributionCorrelation {
+		t.Fatalf("observe snapshot missing VM attribution correlation: %#v", observeSnapshot.Correlations)
 	}
 
 	var summary EvidenceSummary

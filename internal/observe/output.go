@@ -44,6 +44,9 @@ func validateSnapshotPrivacy(snapshot ObserveSnapshot) error {
 	if snapshot.HostStatus != nil {
 		flags = append(flags, snapshot.HostStatus.Privacy)
 	}
+	if snapshot.EBPFVMAttribution != nil {
+		flags = append(flags, snapshot.EBPFVMAttribution.Privacy)
+	}
 	if snapshot.VictimGuestStatus != nil {
 		flags = append(flags, snapshot.VictimGuestStatus.Privacy)
 	}
@@ -103,6 +106,20 @@ func normalizeSnapshot(snapshot *ObserveSnapshot) {
 	snapshot.EvidenceQuality.Sections = append([]SectionQuality(nil), snapshot.EvidenceQuality.Sections...)
 	snapshot.UnavailableSections = append([]UnavailableSection(nil), snapshot.UnavailableSections...)
 	snapshot.Caveats = append([]string(nil), snapshot.Caveats...)
+	if snapshot.EBPFVMAttribution != nil {
+		snapshot.EBPFVMAttribution.VMs = append([]EBPFVMAttributionVM(nil), snapshot.EBPFVMAttribution.VMs...)
+		snapshot.EBPFVMAttribution.Caveats = append([]string(nil), snapshot.EBPFVMAttribution.Caveats...)
+		if snapshot.EBPFVMAttribution.VMs == nil {
+			snapshot.EBPFVMAttribution.VMs = []EBPFVMAttributionVM{}
+		}
+		if snapshot.EBPFVMAttribution.Caveats == nil {
+			snapshot.EBPFVMAttribution.Caveats = []string{}
+		}
+		sort.Slice(snapshot.EBPFVMAttribution.VMs, func(i, j int) bool {
+			return snapshot.EBPFVMAttribution.VMs[i].Name < snapshot.EBPFVMAttribution.VMs[j].Name
+		})
+		sort.Strings(snapshot.EBPFVMAttribution.Caveats)
+	}
 	if snapshot.StorageTopology.Targets == nil {
 		snapshot.StorageTopology.Targets = []StorageTarget{}
 	}

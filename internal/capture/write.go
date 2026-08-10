@@ -241,6 +241,10 @@ func writeObserveSnapshot(dst io.Writer, inputs Inputs, evidence Evidence, now t
 		)
 		snapshot = &unavailable
 	}
+	if inputs.IncludeEBPFLatency {
+		report := captureVMAttributionReport(inputs, evidence, now)
+		observe.ApplyEBPFVMAttribution(snapshot, &report, "noisy_neighbor_diagnosis_window")
+	}
 	data, err := observe.MarshalJSON(*snapshot)
 	if err != nil {
 		unavailable := observe.NewUnavailableSnapshot(

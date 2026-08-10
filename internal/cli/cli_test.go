@@ -167,6 +167,16 @@ func TestParseEBPFVMBlockLatency(t *testing.T) {
 	}
 }
 
+func TestParseEBPFVMBlockLatencyExplicitBooleanValues(t *testing.T) {
+	options, err := parseEBPFVMBlockLatencyArgs([]string{"ebpf", "vm-block-latency", "--all-vms=true", "--json=true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.JSON || !options.AllVMs {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
 func TestParseEBPFVMBlockLatencyValidation(t *testing.T) {
 	tests := []struct {
 		args []string
@@ -775,6 +785,81 @@ func TestParseDiagnoseNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	}
 }
 
+func TestDiagnoseHelpIsAFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"diagnose", "noisy-neighbor", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), diagnoseNoisyNeighborUsage) || strings.Contains(stdout.String(), "requires a value") {
+		t.Fatalf("help output = %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestParseDiagnoseBooleanForms(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		json string
+		ebpf string
+	}{
+		{name: "bare", json: "--json", ebpf: "--include-ebpf-latency"},
+		{name: "explicit true", json: "--json=true", ebpf: "--include-ebpf-latency=true"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			options, err := parseDiagnoseNoisyNeighborArgs([]string{
+				"diagnose", "noisy-neighbor",
+				"--victim", "a-web", "--suspect", "b-stress",
+				test.json, test.ebpf,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !options.JSON || !options.IncludeEBPFLatency {
+				t.Fatalf("options = %#v", options)
+			}
+		})
+	}
+}
+
+func TestRelocateLeadingGlobalJSONForDiagnose(t *testing.T) {
+	for _, flag := range []string{"--json", "--json=true"} {
+		args, err := relocateLeadingGlobalJSON([]string{
+			flag, "diagnose", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options, err := parseDiagnoseNoisyNeighborArgs(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !options.JSON {
+			t.Fatalf("%s did not enable JSON: %#v", flag, options)
+		}
+	}
+}
+
+func TestParseDiagnoseBooleanFalseAndInvalid(t *testing.T) {
+	options, err := parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
+		"--json=false", "--include-ebpf-latency=false",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.JSON || options.IncludeEBPFLatency {
+		t.Fatalf("false boolean options = %#v", options)
+	}
+	_, err = parseDiagnoseNoisyNeighborArgs([]string{
+		"diagnose", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress", "--json=maybe",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid boolean value for --json") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestParseDiagnoseNoisyNeighborDiscoversSuspects(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -954,6 +1039,19 @@ func TestParseCaptureNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	}
 }
 
+func TestParseCaptureNoisyNeighborExplicitBooleanValues(t *testing.T) {
+	options, err := parseCaptureNoisyNeighborArgs([]string{
+		"capture", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
+		"--include-ebpf-latency=true", "--output-dir", "captures",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.IncludeEBPFLatency {
+		t.Fatalf("options = %#v", options)
+	}
+}
+
 func TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1007,6 +1105,19 @@ func TestParseWatchNoisyNeighbor(t *testing.T) {
 	}
 	if options.Cooldown != 90*time.Second || options.OutputDirectory != "captures" {
 		t.Fatalf("capture options = %#v", options)
+	}
+}
+
+func TestParseWatchNoisyNeighborExplicitBooleanValues(t *testing.T) {
+	options, err := parseWatchNoisyNeighborArgs([]string{
+		"watch", "noisy-neighbor", "--victim", "a-web", "--discover-suspects=true",
+		"--include-ebpf-latency=true", "--capture-on-alert=true", "--verbose=true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.DiscoverSuspects || !options.IncludeEBPFLatency || !options.CaptureOnAlert || !options.Verbose {
+		t.Fatalf("options = %#v", options)
 	}
 }
 
@@ -1066,7 +1177,10 @@ func TestParseWatchNoisyNeighborSelectorValidation(t *testing.T) {
 
 func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
 	var output bytes.Buffer
-	result := capture.Result{Directory: "lab/reports/captures/capture-example"}
+	result := capture.Result{
+		Directory: "lab/reports/captures/capture-example",
+		Files:     []string{"lab/reports/captures/capture-example/ebpf-vm-block-latency.json"},
+	}
 	if err := writeWatchCapturePaths(&output, result); err != nil {
 		t.Fatal(err)
 	}
@@ -1074,6 +1188,7 @@ func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
 		"Capture directory: lab/reports/captures/capture-example",
 		"Incident report: lab/reports/captures/capture-example/incident-report.md",
 		"Evidence JSON: lab/reports/captures/capture-example/evidence-summary.json",
+		"eBPF VM attribution JSON: lab/reports/captures/capture-example/ebpf-vm-block-latency.json",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())

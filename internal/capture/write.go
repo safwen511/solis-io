@@ -82,6 +82,12 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 			"ebpf-block-latency.txt",
 			func(w io.Writer) error { return ebpf.WriteBlockLatencyEvidenceFile(w, latencyEvidence) },
 		})
+		artifacts = append(artifacts, artifact{
+			"ebpf-vm-block-latency.json",
+			func(w io.Writer) error {
+				return ebpf.WriteVMBlockLatencyJSON(w, captureVMAttributionReport(inputs, evidence, now))
+			},
+		})
 	}
 	artifacts = append(artifacts, artifact{"observe-snapshot.json", func(w io.Writer) error {
 		return writeObserveSnapshot(w, inputs, evidence, now)
@@ -156,6 +162,7 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 			"Incident report: incident-report.md\n"+
 			"Evidence JSON: evidence-summary.json\n"+
 			"Observe snapshot: observe-snapshot.json\n"+
+			"eBPF VM attribution JSON: %s\n"+
 			"Manifest: manifest.json\n",
 		timestamp,
 		valueOrDash(inputs.ReportDirectory),
@@ -179,14 +186,49 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 		ebpfRequested,
 		ebpfWritten,
 		discoveryFile,
+		optionalEBPFVMAttributionFilename(inputs),
 	); err != nil {
 		return err
 	}
 	if inputs.IncludeEBPFLatency {
-		_, err := fmt.Fprintln(dst, "eBPF block latency: ebpf-block-latency.txt (experimental; host/storage-path level)")
+		_, err := fmt.Fprintln(dst,
+			"eBPF block latency: ebpf-block-latency.txt (experimental; host/storage-path level)\n"+
+				"eBPF VM attribution: ebpf-vm-block-latency.json (experimental; quality and unattributed work must be reviewed)")
 		return err
 	}
 	return nil
+}
+
+func captureVMAttributionReport(inputs Inputs, evidence Evidence, now time.Time) ebpf.VMBlockLatencyReport {
+	if evidence.EBPFVMAttribution != nil {
+		return *evidence.EBPFVMAttribution
+	}
+	if evidence.Diagnosis.EBPFVMAttribution != nil {
+		return *evidence.Diagnosis.EBPFVMAttribution
+	}
+	return ebpf.VMBlockLatencyReport{
+		SchemaVersion:      "1",
+		ObservedAtUTC:      now.UTC().Format(time.RFC3339Nano),
+		Duration:           inputs.Duration.String(),
+		Interval:           inputs.Interval.String(),
+		Mode:               "experimental",
+		CollectionMode:     "typed_btf_vm_attributed_latency",
+		AttributionMethod:  "blkcg_cgroup_id_to_libvirt_vm",
+		AttributionQuality: "unavailable",
+		Availability: ebpf.VMBlockLatencyAvailability{
+			Available: false,
+			Status:    "collector_unavailable",
+			Error:     "collector did not return eBPF VM-attributed block latency evidence",
+		},
+		VMs: []ebpf.VMBlockLatencyVM{},
+		VMAttributionPreflight: ebpf.VMBlockAttributionPreflight{
+			Status: "unavailable", MissingFields: []string{}, Caveats: []string{"no VM-attributed evidence was collected"},
+		},
+		UnavailableSections: []ebpf.VMBlockLatencyUnavailableSection{{
+			Name: "ebpf_vm_attribution", Status: "collector_unavailable", Error: "collector did not return evidence",
+		}},
+		Caveats: []string{"VM-attributed eBPF latency evidence is unavailable; no operations or latency values were fabricated"},
+	}
 }
 
 func writeObserveSnapshot(dst io.Writer, inputs Inputs, evidence Evidence, now time.Time) error {

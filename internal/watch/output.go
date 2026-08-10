@@ -18,6 +18,8 @@ func WriteIteration(dst io.Writer, summary IterationSummary) error {
 	fmt.Fprintf(w, "Reason:\t%s\n", dash(summary.Reason))
 	fmt.Fprintf(w, "Avg write MiB/s:\t%s\n", metric(summary.AverageWriteMiBPerSec, summary.SuspectMetricsAvailable))
 	fmt.Fprintf(w, "Avg syscw/s:\t%s\n", metric(summary.AverageSyscwPerSec, summary.SuspectMetricsAvailable))
+	fmt.Fprintf(w, "eBPF VM attribution quality:\t%s\n", dash(summary.EBPFVMAttributionQuality))
+	fmt.Fprintf(w, "eBPF unattributed percent:\t%s\n", metric(summary.EBPFVMUnattributedPercent, summary.EBPFVMAttributionAvailable))
 	fmt.Fprintf(w, "Verdict:\t%s\n", dash(summary.Verdict))
 	return w.Flush()
 }

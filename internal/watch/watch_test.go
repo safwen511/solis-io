@@ -8,6 +8,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/diagnose"
 	"github.com/safwen511/solis-io/internal/discovery"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
@@ -40,6 +41,51 @@ func TestIterationSummaryRendersSelectedSuspect(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("iteration output missing %q:\n%s", want, output.String())
 		}
+	}
+}
+
+func TestIterationSummaryIncludesVMAttributionQuality(t *testing.T) {
+	report := diagnose.Report{
+		Inputs:  diagnose.Inputs{Victim: "a-web", Suspect: "b-stress"},
+		Verdict: diagnose.LikelyLiveVerdict,
+		EBPFVMAttribution: &ebpf.VMBlockLatencyReport{
+			Availability:       ebpf.VMBlockLatencyAvailability{Available: true, Status: "available"},
+			AttributionQuality: "degraded",
+			AttributionSummary: ebpf.VMBlockAttributionSummary{AttributedOps: 80, AttributedPercent: 80, MatchedVMCount: 1},
+			Unattributed:       ebpf.VMBlockLatencyUnattributed{UnattributedPercent: 20},
+		},
+	}
+	summary := NewIterationSummary(time.Now(), report)
+	if !summary.EBPFVMAttributionAvailable || summary.EBPFVMAttributionQuality != "degraded" || summary.EBPFVMUnattributedPercent != 20 {
+		t.Fatalf("iteration VM attribution = %#v", summary)
+	}
+	var output bytes.Buffer
+	if err := WriteIteration(&output, summary); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"eBPF VM attribution quality:", "degraded", "eBPF unattributed percent:", "20.00"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestDegradedOrUnavailableEBPFCannotCreateAlert(t *testing.T) {
+	for _, quality := range []string{"degraded", "unavailable"} {
+		report := diagnose.Report{
+			Verdict: diagnose.InsufficientLiveVerdict,
+			EBPFVMAttribution: &ebpf.VMBlockLatencyReport{
+				Availability:       ebpf.VMBlockLatencyAvailability{Available: quality == "degraded"},
+				AttributionQuality: quality,
+			},
+		}
+		if IsAlertReport(report) {
+			t.Fatalf("%s VM attribution created an alert", quality)
+		}
+	}
+	report := diagnose.Report{Verdict: diagnose.LikelyLiveVerdict, EBPFVMAttribution: &ebpf.VMBlockLatencyReport{AttributionQuality: "degraded"}}
+	if !IsAlertReport(report) {
+		t.Fatal("existing non-eBPF likely verdict was suppressed solely because attribution was degraded")
 	}
 }
 

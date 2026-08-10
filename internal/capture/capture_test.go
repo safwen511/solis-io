@@ -767,6 +767,152 @@ func TestWriteContinuesWhenEBPFLatencyUnavailable(t *testing.T) {
 	}
 }
 
+func TestCaptureWritesVMAttributedEBPFEvidence(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	vmReport := ebpf.VMBlockLatencyReport{
+		SchemaVersion:      "1",
+		ObservedAtUTC:      "2026-08-10T12:00:00Z",
+		Duration:           "1s",
+		Interval:           "1s",
+		Mode:               "experimental",
+		CollectionMode:     "typed_btf_vm_attributed_latency",
+		AttributionMethod:  "blkcg_cgroup_id_to_libvirt_vm",
+		AttributionQuality: "available",
+		Availability:       ebpf.VMBlockLatencyAvailability{Available: true, Status: "available"},
+		AttributionSummary: ebpf.VMBlockAttributionSummary{AttributedOps: 100, UnattributedOps: 1, AttributedPercent: 99, MatchedVMCount: 2},
+		Unattributed:       ebpf.VMBlockLatencyUnattributed{TotalUnattributedOps: 1, UnattributedPercent: 1},
+		VMAttributionPreflight: ebpf.VMBlockAttributionPreflight{
+			Available: true, Status: "enabled", MissingFields: []string{}, Caveats: []string{},
+		},
+		VMs: []ebpf.VMBlockLatencyVM{
+			{Name: "a-web", TotalOps: 4, ReadOps: 4, LatencyP95MS: 1.25, AttributionQuality: "available", Devices: []string{}, Histogram: []ebpf.VMBlockLatencyHistogramBucket{}, DeviceOperations: []ebpf.VMBlockLatencyDeviceOperation{}, Caveats: []string{}},
+			{Name: "b-stress", TotalOps: 96, WriteOps: 96, LatencyP95MS: 2.5, AttributionQuality: "available", Devices: []string{}, Histogram: []ebpf.VMBlockLatencyHistogramBucket{}, DeviceOperations: []ebpf.VMBlockLatencyDeviceOperation{}, Caveats: []string{}},
+		},
+		UnavailableSections: []ebpf.VMBlockLatencyUnavailableSection{},
+		Caveats:             []string{"experimental exact-match cgroup attribution"},
+	}
+	evidence := testCaptureEvidence(nil)
+	evidence.Storage = storage.Snapshot{Targets: []storage.VMTarget{
+		{TargetType: "victim", VM: inventory.VM{Name: "a-web"}},
+		{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}},
+	}}
+	evidence.Diagnosis.Inputs = diagnose.Inputs{Victim: "a-web", Suspect: "b-stress", Thresholds: config.DefaultThresholds()}
+	evidence.Diagnosis.Storage = evidence.Storage
+	evidence.Diagnosis.EBPFVMAttribution = &vmReport
+	evidence.EBPFVMAttribution = &vmReport
+
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPath := filepath.Join(result.Directory, "ebpf-vm-block-latency.json")
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ebpf.VMBlockLatencyReport
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("raw VM attribution JSON invalid: %v\n%s", err, raw)
+	}
+	if !decoded.Availability.Available || decoded.VMs[1].TotalOps != 96 || decoded.Unattributed.UnattributedPercent != 1 {
+		t.Fatalf("raw VM attribution = %#v", decoded)
+	}
+	if decoded.Privacy.ProcessArgumentsCollected || decoded.Privacy.EnvironmentCollected || decoded.Privacy.GuestFilesCollected ||
+		decoded.Privacy.QueryTextCollected || decoded.Privacy.TableDataCollected || decoded.Privacy.RequestBodyCollected ||
+		decoded.Privacy.ResponseBodyCollected || decoded.Privacy.SecretsCollected {
+		t.Fatalf("unsafe VM attribution privacy flags = %#v", decoded.Privacy)
+	}
+	if info, err := os.Stat(rawPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("raw VM attribution mode: info=%v err=%v", info, err)
+	}
+
+	var summary EvidenceSummary
+	summaryBytes, err := os.ReadFile(filepath.Join(result.Directory, "evidence-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(summaryBytes, &summary); err != nil {
+		t.Fatal(err)
+	}
+	got := summary.EBPFVMAttribution
+	if !got.Available || got.Quality != "available" || got.AttributedPercent != 99 || got.UnattributedPercent != 1 ||
+		got.SuspectTotalOps != 96 || got.VictimTotalOps != 4 || got.SuspectP95MS != 2.5 || got.VictimP95MS != 1.25 {
+		t.Fatalf("summary VM attribution = %#v", got)
+	}
+	if summary.Files.EBPFVMAttribution != "ebpf-vm-block-latency.json" {
+		t.Fatalf("summary files = %#v", summary.Files)
+	}
+	if summary.Safety.GuestPayloadsInspected || summary.Safety.GuestFilesInspected || summary.Safety.ProcessMemoryInspected ||
+		summary.Safety.ProcessArgumentsCollected || summary.Safety.EnvironmentCollected || summary.Safety.GuestFilesCollected ||
+		summary.Safety.QueryTextCollected || summary.Safety.TableDataCollected || summary.Safety.RequestBodyCollected ||
+		summary.Safety.ResponseBodyCollected || summary.Safety.SecretsCollected {
+		t.Fatalf("unsafe summary flags = %#v", summary.Safety)
+	}
+	for _, name := range []string{"metadata.txt", "incident-report.md"} {
+		value, err := os.ReadFile(filepath.Join(result.Directory, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"ebpf-vm-block-latency.json", "eBPF VM"} {
+			if !strings.Contains(string(value), want) {
+				t.Errorf("%s missing %q:\n%s", name, want, value)
+			}
+		}
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(result.Directory, manifestFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range manifest.Files {
+		if entry.Path == "ebpf-vm-block-latency.json" {
+			found = entry.Mode == "0600" && entry.SHA256 != ""
+		}
+	}
+	if !found {
+		t.Fatalf("manifest missing secured VM attribution artifact: %#v", manifest.Files)
+	}
+	for _, value := range [][]byte{raw, summaryBytes} {
+		for _, forbidden := range []string{"request_pointer", "0xffff", "cmdline", "/proc/"} {
+			if bytes.Contains(value, []byte(forbidden)) {
+				t.Errorf("capture JSON contains forbidden value %q", forbidden)
+			}
+		}
+	}
+}
+
+func TestVMAttributedEBPFUnavailableRemainsHonest(t *testing.T) {
+	inputs := testCaptureInputs(t.TempDir())
+	report := ebpf.VMBlockLatencyReport{
+		AttributionQuality: "unavailable",
+		Availability:       ebpf.VMBlockLatencyAvailability{Available: false, Status: "permission_denied", Error: "permission denied"},
+		VMs:                []ebpf.VMBlockLatencyVM{},
+	}
+	evidence := testCaptureEvidence(nil)
+	evidence.EBPFVMAttribution = &report
+	evidence.Diagnosis.EBPFVMAttribution = &report
+	result, err := Write(inputs, evidence, time.Date(2026, 8, 10, 12, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary EvidenceSummary
+	value, err := os.ReadFile(filepath.Join(result.Directory, "evidence-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(value, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.EBPFVMAttribution.Available || summary.EBPFVMAttribution.Quality != "unavailable" ||
+		summary.EBPFVMAttribution.VictimTotalOps != 0 || summary.EBPFVMAttribution.SuspectTotalOps != 0 {
+		t.Fatalf("unavailable attribution was overstated: %#v", summary.EBPFVMAttribution)
+	}
+}
+
 func TestWriteLiveOnlyCaptureUsesExplicitUnavailableEvidence(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.ReportDirectory = ""

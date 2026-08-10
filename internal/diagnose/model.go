@@ -58,10 +58,105 @@ type Report struct {
 	Storage                  storage.Snapshot
 	QEMU                     qemuio.SummaryReport
 	EBPFLatency              *ebpf.BlockLatencyEvidence
+	EBPFVMAttribution        *ebpf.VMBlockLatencyReport
 	Discovery                *discovery.Report
 	StorageTopologyAvailable bool
 	SharedPhysicalDisk       bool
 	Verdict                  string
+}
+
+// EBPFVMAttributionAssessment is the small, verdict-safe subset of the
+// experimental VM-attributed latency report. Victim values are aggregated
+// across every VM selected as a victim; p95 is the highest selected-VM p95.
+type EBPFVMAttributionAssessment struct {
+	Available           bool
+	Quality             string
+	AttributedPercent   float64
+	UnattributedPercent float64
+	VictimTotalOps      uint64
+	SuspectTotalOps     uint64
+	VictimP95MS         float64
+	SuspectP95MS        float64
+	SuspectDominant     bool
+}
+
+// ApplyEBPFVMAttribution applies VM-attributed latency only as a conservative
+// corroboration/veto layer. It never promotes a non-eBPF result to a positive
+// verdict and ignores degraded or unavailable attribution for verdicts.
+func ApplyEBPFVMAttribution(report Report) Report {
+	assessment := AssessEBPFVMAttribution(report)
+	if !assessment.Available || assessment.Quality != "available" {
+		return report
+	}
+	if assessment.SuspectDominant {
+		return report
+	}
+	switch report.Verdict {
+	case ProbableVerdict:
+		report.Verdict = InsufficientVerdict
+	case LikelyLiveVerdict:
+		report.Verdict = InsufficientLiveVerdict
+	}
+	return report
+}
+
+// AssessEBPFVMAttribution matches report VM names against the already-resolved
+// diagnosis target roles. It performs no host reads.
+func AssessEBPFVMAttribution(report Report) EBPFVMAttributionAssessment {
+	result := EBPFVMAttributionAssessment{Quality: "unavailable"}
+	if report.EBPFVMAttribution == nil {
+		return result
+	}
+	evidence := report.EBPFVMAttribution
+	result.Quality = valueOrUnavailable(evidence.AttributionQuality)
+	result.AttributedPercent = evidence.AttributionSummary.AttributedPercent
+	result.UnattributedPercent = evidence.Unattributed.UnattributedPercent
+	result.Available = evidence.Availability.Available && evidence.AttributionSummary.AttributedOps > 0 &&
+		(result.Quality == "available" || result.Quality == "degraded")
+
+	victims := make(map[string]bool)
+	suspects := make(map[string]bool)
+	for _, target := range report.Storage.Targets {
+		if hasTargetType(target.TargetType, "victim") {
+			victims[target.VM.Name] = true
+		}
+		if hasTargetType(target.TargetType, "suspect") {
+			suspects[target.VM.Name] = true
+		}
+	}
+	if len(suspects) == 0 && strings.TrimSpace(report.Inputs.Suspect) != "" && report.Inputs.Suspect != "-" {
+		suspects[report.Inputs.Suspect] = true
+	}
+	for _, vm := range evidence.VMs {
+		if victims[vm.Name] {
+			result.VictimTotalOps += vm.TotalOps
+			if vm.LatencyP95MS > result.VictimP95MS {
+				result.VictimP95MS = vm.LatencyP95MS
+			}
+		}
+		if suspects[vm.Name] {
+			result.SuspectTotalOps += vm.TotalOps
+			if vm.LatencyP95MS > result.SuspectP95MS {
+				result.SuspectP95MS = vm.LatencyP95MS
+			}
+		}
+	}
+	thresholds := qemuio.EffectiveThresholds(report.Inputs.Thresholds)
+	if result.SuspectTotalOps > 0 {
+		if result.VictimTotalOps == 0 {
+			result.SuspectDominant = true
+		} else {
+			result.SuspectDominant = float64(result.SuspectTotalOps) >= float64(result.VictimTotalOps)*thresholds.DominanceRatio
+		}
+	}
+	return result
+}
+
+func valueOrUnavailable(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unavailable"
+	}
+	return value
 }
 
 // NewReport combines already parsed and sampled evidence without re-reading it.

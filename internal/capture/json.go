@@ -19,20 +19,21 @@ import (
 
 // EvidenceSummary is the versioned machine-readable capture schema.
 type EvidenceSummary struct {
-	SchemaVersion      string                  `json:"schema_version"`
-	Build              version.Info            `json:"build"`
-	Capture            CaptureSummary          `json:"capture"`
-	Thresholds         ThresholdEvidence       `json:"thresholds"`
-	Victim             VMEvidence              `json:"victim"`
-	SelectedSuspect    SuspectEvidence         `json:"selected_suspect"`
-	ExperimentEvidence ExperimentEvidence      `json:"experiment_evidence"`
-	StorageTopology    StorageTopologyEvidence `json:"storage_topology"`
-	QEMUEvidence       QEMUEvidence            `json:"qemu_evidence"`
-	Discovery          DiscoveryEvidence       `json:"discovery"`
-	EBPFLatency        EBPFLatencyEvidence     `json:"ebpf_latency"`
-	Verdict            VerdictEvidence         `json:"verdict"`
-	Safety             SafetyEvidence          `json:"safety"`
-	Files              EvidenceFiles           `json:"files"`
+	SchemaVersion      string                    `json:"schema_version"`
+	Build              version.Info              `json:"build"`
+	Capture            CaptureSummary            `json:"capture"`
+	Thresholds         ThresholdEvidence         `json:"thresholds"`
+	Victim             VMEvidence                `json:"victim"`
+	SelectedSuspect    SuspectEvidence           `json:"selected_suspect"`
+	ExperimentEvidence ExperimentEvidence        `json:"experiment_evidence"`
+	StorageTopology    StorageTopologyEvidence   `json:"storage_topology"`
+	QEMUEvidence       QEMUEvidence              `json:"qemu_evidence"`
+	Discovery          DiscoveryEvidence         `json:"discovery"`
+	EBPFLatency        EBPFLatencyEvidence       `json:"ebpf_latency"`
+	EBPFVMAttribution  EBPFVMAttributionEvidence `json:"ebpf_vm_attribution"`
+	Verdict            VerdictEvidence           `json:"verdict"`
+	Safety             SafetyEvidence            `json:"safety"`
+	Files              EvidenceFiles             `json:"files"`
 }
 
 type CaptureSummary struct {
@@ -124,6 +125,19 @@ type EBPFLatencyEvidence struct {
 	UnavailableReason string                  `json:"unavailable_reason,omitempty"`
 }
 
+// EBPFVMAttributionEvidence is a compact projection of the raw experimental
+// report retained in ebpf-vm-block-latency.json.
+type EBPFVMAttributionEvidence struct {
+	Available           bool    `json:"available"`
+	Quality             string  `json:"quality"`
+	AttributedPercent   float64 `json:"attributed_percent"`
+	UnattributedPercent float64 `json:"unattributed_percent"`
+	SuspectTotalOps     uint64  `json:"suspect_total_ops"`
+	VictimTotalOps      uint64  `json:"victim_total_ops"`
+	SuspectP95MS        float64 `json:"suspect_p95_ms"`
+	VictimP95MS         float64 `json:"victim_p95_ms"`
+}
+
 type EBPFHistogramEvidence struct {
 	Range    string  `json:"range"`
 	Requests uint64  `json:"requests"`
@@ -136,17 +150,26 @@ type VerdictEvidence struct {
 }
 
 type SafetyEvidence struct {
-	GuestPayloadsInspected bool `json:"guest_payloads_inspected"`
-	GuestFilesInspected    bool `json:"guest_files_inspected"`
-	ProcessMemoryInspected bool `json:"process_memory_inspected"`
+	GuestPayloadsInspected    bool `json:"guest_payloads_inspected"`
+	GuestFilesInspected       bool `json:"guest_files_inspected"`
+	ProcessMemoryInspected    bool `json:"process_memory_inspected"`
+	ProcessArgumentsCollected bool `json:"process_arguments_collected"`
+	EnvironmentCollected      bool `json:"environment_collected"`
+	GuestFilesCollected       bool `json:"guest_files_collected"`
+	QueryTextCollected        bool `json:"query_text_collected"`
+	TableDataCollected        bool `json:"table_data_collected"`
+	RequestBodyCollected      bool `json:"request_body_collected"`
+	ResponseBodyCollected     bool `json:"response_body_collected"`
+	SecretsCollected          bool `json:"secrets_collected"`
 }
 
 type EvidenceFiles struct {
-	IncidentReport  string `json:"incident_report"`
-	Diagnosis       string `json:"diagnosis"`
-	Metadata        string `json:"metadata"`
-	EvidenceSummary string `json:"evidence_summary"`
-	ObserveSnapshot string `json:"observe_snapshot"`
+	IncidentReport    string `json:"incident_report"`
+	Diagnosis         string `json:"diagnosis"`
+	Metadata          string `json:"metadata"`
+	EvidenceSummary   string `json:"evidence_summary"`
+	ObserveSnapshot   string `json:"observe_snapshot"`
+	EBPFVMAttribution string `json:"ebpf_vm_attribution"`
 }
 
 // WriteEvidenceSummary writes the deterministic JSON representation of an
@@ -197,22 +220,49 @@ func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) Ev
 			SharedPhysicalDisk: evidence.Diagnosis.StorageTopologyAvailable && evidence.Diagnosis.SharedPhysicalDisk,
 			PhysicalDisk:       topologyPhysicalDisk(victimStorage, suspectStorage, evidence.Diagnosis.SharedPhysicalDisk),
 		},
-		QEMUEvidence: qemuEvidence(evidence),
-		Discovery:    discoveryEvidence(inputs, evidence.Discovery),
-		EBPFLatency:  ebpfLatencyEvidence(inputs, evidence.EBPFLatency),
+		QEMUEvidence:      qemuEvidence(evidence),
+		Discovery:         discoveryEvidence(inputs, evidence.Discovery),
+		EBPFLatency:       ebpfLatencyEvidence(inputs, evidence.EBPFLatency),
+		EBPFVMAttribution: ebpfVMAttributionEvidence(evidence),
 		Verdict: VerdictEvidence{
 			Text:     valueOrDash(evidence.Diagnosis.Verdict),
 			Severity: verdictSeverity(evidence.Diagnosis.Verdict),
 		},
 		Safety: SafetyEvidence{},
 		Files: EvidenceFiles{
-			IncidentReport:  "incident-report.md",
-			Diagnosis:       "diagnosis.txt",
-			Metadata:        "metadata.txt",
-			EvidenceSummary: "evidence-summary.json",
-			ObserveSnapshot: "observe-snapshot.json",
+			IncidentReport:    "incident-report.md",
+			Diagnosis:         "diagnosis.txt",
+			Metadata:          "metadata.txt",
+			EvidenceSummary:   "evidence-summary.json",
+			ObserveSnapshot:   "observe-snapshot.json",
+			EBPFVMAttribution: optionalEBPFVMAttributionFilename(inputs),
 		},
 	}
+}
+
+func ebpfVMAttributionEvidence(evidence Evidence) EBPFVMAttributionEvidence {
+	report := evidence.Diagnosis
+	if report.EBPFVMAttribution == nil {
+		report.EBPFVMAttribution = evidence.EBPFVMAttribution
+	}
+	assessment := diagnose.AssessEBPFVMAttribution(report)
+	return EBPFVMAttributionEvidence{
+		Available:           assessment.Available,
+		Quality:             valueOrDash(assessment.Quality),
+		AttributedPercent:   assessment.AttributedPercent,
+		UnattributedPercent: assessment.UnattributedPercent,
+		SuspectTotalOps:     assessment.SuspectTotalOps,
+		VictimTotalOps:      assessment.VictimTotalOps,
+		SuspectP95MS:        assessment.SuspectP95MS,
+		VictimP95MS:         assessment.VictimP95MS,
+	}
+}
+
+func optionalEBPFVMAttributionFilename(inputs Inputs) string {
+	if inputs.IncludeEBPFLatency {
+		return "ebpf-vm-block-latency.json"
+	}
+	return "-"
 }
 
 func resolvedTarget(selector, targetType string, evidence Evidence) (inventory.VM, hoststorage.Mapping) {

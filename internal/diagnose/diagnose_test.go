@@ -361,3 +361,85 @@ func TestWriteIncludesEBPFUnavailableWarning(t *testing.T) {
 		t.Fatalf("output missing %q:\n%s", want, output.String())
 	}
 }
+
+func TestWriteIncludesVMAttributedEBPFEvidence(t *testing.T) {
+	vmEvidence := attributedLatencyFixture("available", 4, 96, 100)
+	report := Report{
+		Inputs: Inputs{Victim: "a-web", Suspect: "b-stress"},
+		Storage: storage.Snapshot{Targets: []storage.VMTarget{
+			{TargetType: "victim", VM: inventory.VM{Name: "a-web"}},
+			{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}},
+		}},
+		EBPFVMAttribution: &vmEvidence,
+	}
+	var output bytes.Buffer
+	if err := Write(&output, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"eBPF VM-attributed block latency",
+		"Attribution quality:", "available",
+		"Unattributed percent:", "4.00%",
+		"a-web", "b-stress", "100", "2.500",
+		"no guest payloads", "process arguments", "SQL text", "secrets",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+	for _, forbidden := range []string{"request_pointer", "0xffff", "cmdline", "/proc/"} {
+		if strings.Contains(output.String(), forbidden) {
+			t.Errorf("output contains forbidden value %q:\n%s", forbidden, output.String())
+		}
+	}
+}
+
+func TestApplyEBPFVMAttributionIsConservative(t *testing.T) {
+	tests := []struct {
+		name    string
+		quality string
+		victim  uint64
+		suspect uint64
+		want    string
+	}{
+		{name: "available corroborates dominant suspect", quality: "available", victim: 4, suspect: 96, want: LikelyLiveVerdict},
+		{name: "available contradictory evidence vetoes positive verdict", quality: "available", victim: 80, suspect: 20, want: InsufficientLiveVerdict},
+		{name: "degraded evidence cannot veto existing non-ebpf verdict", quality: "degraded", victim: 80, suspect: 20, want: LikelyLiveVerdict},
+		{name: "unavailable evidence cannot create or veto verdict", quality: "unavailable", victim: 0, suspect: 0, want: LikelyLiveVerdict},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			vmEvidence := attributedLatencyFixture(test.quality, 4, test.victim, test.suspect)
+			if test.quality == "unavailable" {
+				vmEvidence.Availability.Available = false
+				vmEvidence.AttributionSummary.AttributedOps = 0
+			}
+			report := Report{
+				Inputs: Inputs{Victim: "a-web", Suspect: "b-stress"},
+				Storage: storage.Snapshot{Targets: []storage.VMTarget{
+					{TargetType: "victim", VM: inventory.VM{Name: "a-web"}},
+					{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}},
+				}},
+				EBPFVMAttribution: &vmEvidence,
+				Verdict:           LikelyLiveVerdict,
+			}
+			if got := ApplyEBPFVMAttribution(report).Verdict; got != test.want {
+				t.Fatalf("verdict = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func attributedLatencyFixture(quality string, unattributedPercent float64, victimOps, suspectOps uint64) ebpf.VMBlockLatencyReport {
+	attributed := victimOps + suspectOps
+	return ebpf.VMBlockLatencyReport{
+		Availability:       ebpf.VMBlockLatencyAvailability{Available: true, Status: "available"},
+		AttributionQuality: quality,
+		AttributionSummary: ebpf.VMBlockAttributionSummary{AttributedOps: attributed, AttributedPercent: 100 - unattributedPercent, MatchedVMCount: 2},
+		Unattributed:       ebpf.VMBlockLatencyUnattributed{UnattributedPercent: unattributedPercent},
+		VMs: []ebpf.VMBlockLatencyVM{
+			{Name: "a-web", TotalOps: victimOps, ReadOps: victimOps, LatencyP95MS: 1.25, AttributionQuality: quality},
+			{Name: "b-stress", TotalOps: suspectOps, WriteOps: suspectOps, LatencyP95MS: 2.5, AttributionQuality: quality},
+		},
+	}
+}

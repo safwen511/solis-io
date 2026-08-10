@@ -97,11 +97,17 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 			return err
 		}
 	}
+	if inputs.IncludeEBPFLatency {
+		if err := writeEBPFVMAttributionEvidence(dst, evidence); err != nil {
+			return err
+		}
+	}
 
 	if _, err := fmt.Fprintln(
 		dst,
 		"\n## Important caveats\n\n"+
 			"- eBPF block latency is host/storage-path level, not exact per-VM attribution.\n"+
+			"- Experimental VM attribution requires exact blkcg cgroup-ID matches and must be interpreted with its quality and unattributed percentage.\n"+
 			"- QEMU io-summary is used for VM writer attribution.\n"+
 			"- No guest payloads, guest files, process memory, or application contents were inspected.",
 	); err != nil {
@@ -151,6 +157,60 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 		}
 	}
 	return nil
+}
+
+func writeEBPFVMAttributionEvidence(dst io.Writer, evidence Evidence) error {
+	report := evidence.Diagnosis
+	if report.EBPFVMAttribution == nil {
+		report.EBPFVMAttribution = evidence.EBPFVMAttribution
+	}
+	assessment := diagnose.AssessEBPFVMAttribution(report)
+	if _, err := fmt.Fprintln(dst, "\n### eBPF VM-attributed block latency"); err != nil {
+		return err
+	}
+	if report.EBPFVMAttribution == nil {
+		_, err := fmt.Fprintln(dst,
+			"\n- Available: no\n"+
+				"- Attribution quality: unavailable\n"+
+				"- Caveat: collector did not return VM-attributed evidence.\n"+
+				"- Privacy: no guest payloads, guest files, process arguments, environments, SQL text, table data, request bodies, response bodies, or secrets were collected.")
+		return err
+	}
+	vmReport := report.EBPFVMAttribution
+	if _, err := fmt.Fprintf(dst,
+		"\n- Available: %s\n"+
+			"- Attribution quality: %s\n"+
+			"- Attributed operations: %d (%.2f%%)\n"+
+			"- Unattributed operations: %d (%.2f%%)\n"+
+			"- Victim attributed operations / p95: %d / %.3f ms\n"+
+			"- Suspect attributed operations / p95: %d / %.3f ms\n",
+		yesNo(assessment.Available), markdownText(vmReport.AttributionQuality),
+		vmReport.AttributionSummary.AttributedOps, vmReport.AttributionSummary.AttributedPercent,
+		vmReport.AttributionSummary.UnattributedOps, vmReport.Unattributed.UnattributedPercent,
+		assessment.VictimTotalOps, assessment.VictimP95MS,
+		assessment.SuspectTotalOps, assessment.SuspectP95MS,
+	); err != nil {
+		return err
+	}
+	if vmReport.Availability.Available {
+		if _, err := fmt.Fprintln(dst, "\n| VM | Attributed operations | Read | Write | p95 ms | Quality |\n|---|---:|---:|---:|---:|---|"); err != nil {
+			return err
+		}
+		for _, vm := range vmReport.VMs {
+			if _, err := fmt.Fprintf(dst, "| %s | %d | %d | %d | %.3f | %s |\n",
+				markdownCell(vm.Name), vm.TotalOps, vm.ReadOps, vm.WriteOps, vm.LatencyP95MS, markdownCell(vm.AttributionQuality)); err != nil {
+				return err
+			}
+		}
+	} else if strings.TrimSpace(vmReport.Availability.Error) != "" {
+		if _, err := fmt.Fprintf(dst, "- Unavailable reason: %s\n", markdownText(vmReport.Availability.Error)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(dst,
+		"- Caveat: attribution is experimental; unmatched ownership, request merging/requeues, and stacked storage can reduce confidence.\n"+
+			"- Privacy: no guest payloads, guest files, process arguments, environments, SQL text, table data, request bodies, response bodies, or secrets were collected.")
+	return err
 }
 
 func writeStorageEvidence(dst io.Writer, evidence Evidence) error {

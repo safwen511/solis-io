@@ -16,6 +16,7 @@ const diagnosisTimestampFormat = "20060102T150405Z"
 type OutputOptions struct {
 	Path      string
 	Directory string
+	JSON      bool
 }
 
 // WriteOutput renders the diagnosis once, then writes it to stdout or a file.
@@ -25,8 +26,14 @@ func WriteOutput(stdout io.Writer, report Report, options OutputOptions, now tim
 	}
 
 	var rendered bytes.Buffer
-	if err := Write(&rendered, report); err != nil {
-		return "", err
+	if options.JSON {
+		if err := WriteJSON(&rendered, report); err != nil {
+			return "", err
+		}
+	} else {
+		if err := Write(&rendered, report); err != nil {
+			return "", err
+		}
 	}
 
 	if options.Path == "" && options.Directory == "" {
@@ -37,11 +44,16 @@ func WriteOutput(stdout io.Writer, report Report, options OutputOptions, now tim
 	path := options.Path
 	exclusive := false
 	if options.Directory != "" {
+		extension := ".txt"
+		if options.JSON {
+			extension = ".json"
+		}
 		filename := fmt.Sprintf(
-			"diagnosis-%s-%s-%s.txt",
+			"diagnosis-%s-%s-%s%s",
 			FormatUTCTimestamp(now),
 			SanitizeFilenamePart(report.Inputs.Victim),
 			SanitizeFilenamePart(report.Inputs.Suspect),
+			extension,
 		)
 		path = filepath.Join(options.Directory, filename)
 		exclusive = true

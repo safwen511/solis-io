@@ -10,15 +10,18 @@ import (
 
 // IterationSummary contains the compact operator view for one sample window.
 type IterationSummary struct {
-	Timestamp               time.Time
-	Victim                  string
-	Suspect                 string
-	Score                   string
-	Reason                  string
-	AverageWriteMiBPerSec   float64
-	AverageSyscwPerSec      float64
-	SuspectMetricsAvailable bool
-	Verdict                 string
+	Timestamp                  time.Time
+	Victim                     string
+	Suspect                    string
+	Score                      string
+	Reason                     string
+	AverageWriteMiBPerSec      float64
+	AverageSyscwPerSec         float64
+	SuspectMetricsAvailable    bool
+	EBPFVMAttributionAvailable bool
+	EBPFVMAttributionQuality   string
+	EBPFVMUnattributedPercent  float64
+	Verdict                    string
 }
 
 // FinalSummary contains counters for one watch process lifetime.
@@ -56,12 +59,23 @@ func NewIterationSummary(timestamp time.Time, report diagnose.Report) IterationS
 		summary.AverageWriteMiBPerSec = report.QEMU.SuspectAverageWriteMiBPerSecond
 		summary.AverageSyscwPerSec = report.QEMU.SuspectAverageSyscwPerSecond
 	}
+	assessment := diagnose.AssessEBPFVMAttribution(report)
+	summary.EBPFVMAttributionAvailable = assessment.Available
+	summary.EBPFVMAttributionQuality = assessment.Quality
+	summary.EBPFVMUnattributedPercent = assessment.UnattributedPercent
 	return summary
 }
 
 // IsAlert reports whether one live diagnosis meets the alert condition.
 func IsAlert(verdict string) bool {
 	return verdict == diagnose.LikelyLiveVerdict
+}
+
+// IsAlertReport keeps alerts anchored to the existing non-eBPF live verdict.
+// Experimental VM attribution may conservatively veto that verdict, but
+// degraded or unavailable attribution can never create an alert by itself.
+func IsAlertReport(report diagnose.Report) bool {
+	return IsAlert(report.Verdict)
 }
 
 // CaptureAllowed applies the capture cooldown. A zero last-capture timestamp

@@ -48,6 +48,18 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("config error: %w", err)
 	}
 	args = commandArgs
+	args, err = relocateLeadingGlobalJSON(args)
+	if err != nil {
+		return err
+	}
+	args, helpRequested, err := stripHelpFlags(args)
+	if err != nil {
+		return err
+	}
+	if helpRequested {
+		fmt.Fprintln(stdout, usageForCommand(args))
+		return nil
+	}
 	if len(args) == 0 {
 		printUsage(stdout)
 		return nil
@@ -170,8 +182,15 @@ func runVersion(args []string, w io.Writer) error {
 	switch {
 	case len(args) == 1:
 		return version.WriteHuman(w, info)
-	case len(args) == 2 && args[1] == "--json":
-		return version.WriteJSON(w, info)
+	case len(args) == 2:
+		jsonOutput, matched, err := booleanFlag(args[1], "--json")
+		if err != nil || !matched {
+			return errors.New("usage: solis version [--json]")
+		}
+		if jsonOutput {
+			return version.WriteJSON(w, info)
+		}
+		return version.WriteHuman(w, info)
 	default:
 		return errors.New("usage: solis version [--json]")
 	}
@@ -183,7 +202,7 @@ const storageSnapshotUsage = "usage: solis storage snapshot --victim <name> --su
 const storageWatchUsage = "usage: solis storage watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOWatchUsage = "usage: solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
 const qemuIOSummaryUsage = "usage: solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]"
-const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]"
+const diagnoseNoisyNeighborUsage = "usage: solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--json] [--output <path> | --output-dir <dir>]"
 const captureNoisyNeighborUsage = "usage: solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>"
 const watchNoisyNeighborUsage = "usage: solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]"
 const ebpfUsage = "usage: solis ebpf doctor | solis ebpf block-watch [--duration <duration>] | solis ebpf block-events --duration <duration> | solis ebpf block-count --duration <duration> | solis ebpf block-latency [--victim <vm> --suspect <vm>] --duration <duration> | solis ebpf vm-block-latency [options] --json"
@@ -201,6 +220,147 @@ const dbStatusUsage = "usage: solis db status --vm <name> --json"
 const observeUsage = "usage: solis observe snapshot|watch [options]"
 const observeSnapshotUsage = "usage: solis observe snapshot --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] --json"
 const observeWatchUsage = "usage: solis observe watch --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] [--output-dir <dir>] --json"
+
+func booleanFlag(token, name string) (value, matched bool, err error) {
+	if token == name {
+		return true, true, nil
+	}
+	prefix := name + "="
+	if !strings.HasPrefix(token, prefix) {
+		return false, false, nil
+	}
+	parsed, parseErr := strconv.ParseBool(strings.TrimPrefix(token, prefix))
+	if parseErr != nil {
+		return false, true, fmt.Errorf("invalid boolean value for %s: %q", name, strings.TrimPrefix(token, prefix))
+	}
+	return parsed, true, nil
+}
+
+func setBooleanOption(token, name, usage string, seen, target *bool) (bool, error) {
+	value, matched, err := booleanFlag(token, name)
+	if err != nil {
+		return matched, fmt.Errorf("%s: %w", usage, err)
+	}
+	if !matched {
+		return false, nil
+	}
+	if *seen {
+		return true, fmt.Errorf("%s: %s specified more than once", usage, name)
+	}
+	*seen = true
+	*target = value
+	return true, nil
+}
+
+func setKnownBooleanOption(token, usage string, seen map[string]bool, targets map[string]*bool) (bool, error) {
+	name := token
+	if separator := strings.IndexByte(name, '='); separator >= 0 {
+		name = name[:separator]
+	}
+	target, ok := targets[name]
+	if !ok {
+		return false, nil
+	}
+	value, matched, err := booleanFlag(token, name)
+	if err != nil {
+		return true, fmt.Errorf("%s: %w", usage, err)
+	}
+	if !matched {
+		return false, nil
+	}
+	if seen[name] {
+		return true, fmt.Errorf("%s: %s specified more than once", usage, name)
+	}
+	seen[name] = true
+	*target = value
+	return true, nil
+}
+
+func stripHelpFlags(args []string) ([]string, bool, error) {
+	filtered := make([]string, 0, len(args))
+	requested := false
+	seen := false
+	for _, token := range args {
+		value, matched, err := booleanFlag(token, "--help")
+		if err != nil {
+			return nil, false, err
+		}
+		if !matched {
+			filtered = append(filtered, token)
+			continue
+		}
+		if seen {
+			return nil, false, errors.New("--help specified more than once")
+		}
+		seen = true
+		requested = value
+	}
+	return filtered, requested, nil
+}
+
+func relocateLeadingGlobalJSON(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+	value, matched, err := booleanFlag(args[0], "--json")
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return args, nil
+	}
+	if len(args) > 1 {
+		if _, duplicate, duplicateErr := booleanFlag(args[1], "--json"); duplicateErr != nil {
+			return nil, duplicateErr
+		} else if duplicate {
+			return nil, errors.New("--json specified more than once")
+		}
+	}
+	relocated := append([]string(nil), args[1:]...)
+	return append(relocated, "--json="+strconv.FormatBool(value)), nil
+}
+
+func usageForCommand(args []string) string {
+	if len(args) >= 2 {
+		switch args[0] + " " + args[1] {
+		case "diagnose noisy-neighbor":
+			return diagnoseNoisyNeighborUsage
+		case "capture noisy-neighbor":
+			return captureNoisyNeighborUsage
+		case "watch noisy-neighbor":
+			return watchNoisyNeighborUsage
+		case "ebpf block-watch":
+			return ebpfBlockWatchUsage
+		case "ebpf block-events":
+			return ebpfBlockEventsUsage
+		case "ebpf block-count":
+			return ebpfBlockCountUsage
+		case "ebpf block-latency":
+			return ebpfBlockLatencyUsage
+		case "ebpf vm-block-latency":
+			return ebpfVMBlockLatencyUsage
+		case "observe snapshot":
+			return observeSnapshotUsage
+		case "observe watch":
+			return observeWatchUsage
+		case "vm storage-stats":
+			return vmStorageStatsUsage
+		}
+	}
+	if len(args) >= 1 {
+		switch args[0] {
+		case "ebpf":
+			return ebpfUsage
+		case "status":
+			return statusUsage
+		case "version":
+			return "usage: solis version [--json]"
+		}
+	}
+	var builder strings.Builder
+	printUsage(&builder)
+	return strings.TrimSpace(builder.String())
+}
 
 type ebpfBlockLatencyOptions struct {
 	Victim   string
@@ -239,6 +399,7 @@ type timedTargetOptions struct {
 	OutputDirectory    string
 	IncludeEBPFLatency bool
 	DiscoverSuspects   bool
+	JSON               bool
 }
 
 type watchNoisyNeighborOptions struct {
@@ -292,25 +453,24 @@ func parseObserveSnapshotArgs(args []string) (observeSnapshotOptions, error) {
 		return observeSnapshotOptions{}, errors.New(observeSnapshotUsage)
 	}
 	seen := make(map[string]bool)
+	booleanTargets := map[string]*bool{
+		"--json": &options.JSON, "--discover-suspects": &options.DiscoverSuspects,
+		"--include-guest": &options.IncludeGuest, "--include-services": &options.IncludeServices,
+		"--include-db": &options.IncludeDB, "--include-ebpf-latency": &options.IncludeEBPFLatency,
+	}
 	for index := 2; index < len(args); index++ {
 		flag := args[index]
+		if matched, err := setKnownBooleanOption(flag, observeSnapshotUsage, seen, booleanTargets); matched {
+			if err != nil {
+				return observeSnapshotOptions{}, err
+			}
+			continue
+		}
 		if seen[flag] {
 			return observeSnapshotOptions{}, fmt.Errorf("%s: %s specified more than once", observeSnapshotUsage, flag)
 		}
 		seen[flag] = true
 		switch flag {
-		case "--json":
-			options.JSON = true
-		case "--discover-suspects":
-			options.DiscoverSuspects = true
-		case "--include-guest":
-			options.IncludeGuest = true
-		case "--include-services":
-			options.IncludeServices = true
-		case "--include-db":
-			options.IncludeDB = true
-		case "--include-ebpf-latency":
-			options.IncludeEBPFLatency = true
 		case "--victim", "--suspect", "--duration", "--interval":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return observeSnapshotOptions{}, fmt.Errorf("%s: %s requires a value", observeSnapshotUsage, flag)
@@ -361,25 +521,24 @@ func parseObserveWatchArgs(args []string) (observeWatchOptions, error) {
 		return observeWatchOptions{}, errors.New(observeWatchUsage)
 	}
 	seen := make(map[string]bool)
+	booleanTargets := map[string]*bool{
+		"--json": &options.JSON, "--discover-suspects": &options.DiscoverSuspects,
+		"--include-guest": &options.IncludeGuest, "--include-services": &options.IncludeServices,
+		"--include-db": &options.IncludeDB, "--include-ebpf-latency": &options.IncludeEBPFLatency,
+	}
 	for index := 2; index < len(args); index++ {
 		flag := args[index]
+		if matched, err := setKnownBooleanOption(flag, observeWatchUsage, seen, booleanTargets); matched {
+			if err != nil {
+				return observeWatchOptions{}, err
+			}
+			continue
+		}
 		if seen[flag] {
 			return observeWatchOptions{}, fmt.Errorf("%s: %s specified more than once", observeWatchUsage, flag)
 		}
 		seen[flag] = true
 		switch flag {
-		case "--json":
-			options.JSON = true
-		case "--discover-suspects":
-			options.DiscoverSuspects = true
-		case "--include-guest":
-			options.IncludeGuest = true
-		case "--include-services":
-			options.IncludeServices = true
-		case "--include-db":
-			options.IncludeDB = true
-		case "--include-ebpf-latency":
-			options.IncludeEBPFLatency = true
 		case "--victim", "--suspect", "--duration", "--interval", "--every", "--iterations", "--output-dir":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return observeWatchOptions{}, fmt.Errorf("%s: %s requires a value", observeWatchUsage, flag)
@@ -436,7 +595,11 @@ func parseObserveWatchArgs(args []string) (observeWatchOptions, error) {
 }
 
 func parseHostStatusArgs(args []string) error {
-	if len(args) != 3 || args[0] != "host" || args[1] != "status" || args[2] != "--json" {
+	if len(args) != 3 || args[0] != "host" || args[1] != "status" {
+		return errors.New(hostStatusUsage)
+	}
+	value, matched, err := booleanFlag(args[2], "--json")
+	if err != nil || !matched || !value {
 		return errors.New(hostStatusUsage)
 	}
 	return nil
@@ -455,12 +618,14 @@ func parseVMJSONStatusArgs(args []string, command string) (string, error) {
 	var name string
 	seenVM, seenJSON := false, false
 	for index := 2; index < len(args); index++ {
-		switch args[index] {
-		case "--json":
-			if seenJSON {
+		if value, matched, err := booleanFlag(args[index], "--json"); matched {
+			if err != nil || !value || seenJSON {
 				return "", errors.New(usage)
 			}
 			seenJSON = true
+			continue
+		}
+		switch args[index] {
 		case "--vm":
 			if seenVM || index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return "", errors.New(usage)
@@ -490,21 +655,42 @@ func parseStatusArgs(args []string) (statusOptions, error) {
 		return statusOptions{}, errors.New(statusUsage)
 	}
 	seen := make(map[string]bool)
+	booleanTargets := map[string]*bool{"--json": &options.JSON, "--watch": &options.Watch}
 	for index := 1; index < len(args); index++ {
 		option := args[index]
+		if matched, err := setKnownBooleanOption(option, statusUsage, seen, booleanTargets); matched {
+			if err != nil {
+				return statusOptions{}, err
+			}
+			continue
+		}
+		if value, matched, err := booleanFlag(option, "--clear"); matched {
+			if err != nil {
+				return statusOptions{}, fmt.Errorf("%s: %w", statusUsage, err)
+			}
+			if seen["--clear"] {
+				return statusOptions{}, fmt.Errorf("%s: --clear specified more than once", statusUsage)
+			}
+			seen["--clear"] = true
+			options.Clear = value
+			continue
+		}
+		if value, matched, err := booleanFlag(option, "--no-clear"); matched {
+			if err != nil {
+				return statusOptions{}, fmt.Errorf("%s: %w", statusUsage, err)
+			}
+			if seen["--no-clear"] {
+				return statusOptions{}, fmt.Errorf("%s: --no-clear specified more than once", statusUsage)
+			}
+			seen["--no-clear"] = true
+			options.Clear = !value
+			continue
+		}
 		if seen[option] {
 			return statusOptions{}, fmt.Errorf("%s: %s specified more than once", statusUsage, option)
 		}
 		seen[option] = true
 		switch option {
-		case "--json":
-			options.JSON = true
-		case "--watch":
-			options.Watch = true
-		case "--clear":
-			options.Clear = true
-		case "--no-clear":
-			options.Clear = false
 		case "--duration", "--interval", "--every", "--iterations", "--sort":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return statusOptions{}, fmt.Errorf("%s: %s requires a value", statusUsage, option)
@@ -648,15 +834,33 @@ func parseEBPFVMBlockLatencyArgs(args []string) (ebpfVMBlockLatencyOptions, erro
 	seen := make(map[string]bool)
 	for index := 2; index < len(args); index++ {
 		option := args[index]
+		if value, matched, err := booleanFlag(option, "--json"); matched {
+			if err != nil {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: %w", ebpfVMBlockLatencyUsage, err)
+			}
+			if seen["--json"] {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: duplicate option --json", ebpfVMBlockLatencyUsage)
+			}
+			seen["--json"] = true
+			options.JSON = value
+			continue
+		}
+		if value, matched, err := booleanFlag(option, "--all-vms"); matched {
+			if err != nil {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: %w", ebpfVMBlockLatencyUsage, err)
+			}
+			if seen["--all-vms"] {
+				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: duplicate option --all-vms", ebpfVMBlockLatencyUsage)
+			}
+			seen["--all-vms"] = true
+			options.AllVMs = value
+			continue
+		}
 		if seen[option] {
 			return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: duplicate option %s", ebpfVMBlockLatencyUsage, option)
 		}
 		seen[option] = true
 		switch option {
-		case "--json":
-			options.JSON = true
-		case "--all-vms":
-			options.AllVMs = true
 		case "--duration", "--interval", "--device", "--victim", "--suspect", "--output":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return ebpfVMBlockLatencyOptions{}, fmt.Errorf("%s: missing value for %s", ebpfVMBlockLatencyUsage, option)
@@ -713,17 +917,20 @@ func parseVMStorageStatsArgs(args []string) (vmStorageStatsOptions, error) {
 	}
 	options := vmStorageStatsOptions{Duration: 10 * time.Second, Interval: time.Second}
 	seen := make(map[string]bool)
+	booleanTargets := map[string]*bool{"--json": &options.JSON, "--all-vms": &options.AllVMs}
 	for index := 2; index < len(args); index++ {
 		option := args[index]
+		if matched, err := setKnownBooleanOption(option, vmStorageStatsUsage, seen, booleanTargets); matched {
+			if err != nil {
+				return vmStorageStatsOptions{}, err
+			}
+			continue
+		}
 		if seen[option] {
 			return vmStorageStatsOptions{}, fmt.Errorf("%s: duplicate option %s", vmStorageStatsUsage, option)
 		}
 		seen[option] = true
 		switch option {
-		case "--json":
-			options.JSON = true
-		case "--all-vms":
-			options.AllVMs = true
 		case "--duration", "--interval", "--victim", "--suspect", "--output":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return vmStorageStatsOptions{}, fmt.Errorf("%s: missing value for %s", vmStorageStatsUsage, option)
@@ -834,6 +1041,7 @@ func parseTimedWatchOptions(args []string, start int, usage, commandName string)
 		false,
 		false,
 		false,
+		false,
 	)
 	if err != nil {
 		return "", "", 0, 0, err
@@ -856,6 +1064,7 @@ func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		true,
 		true,
 		true,
+		true,
 	)
 }
 
@@ -874,6 +1083,7 @@ func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 		true,
 		true,
 		true,
+		false,
 	)
 	if err != nil {
 		return timedTargetOptions{}, err
@@ -902,30 +1112,41 @@ func parseWatchNoisyNeighborArgsWithDefault(args []string, outputDirectory strin
 		Cooldown:        2 * time.Minute,
 	}
 	seen := make(map[string]bool)
+	var discoverSet, includeEBPFSet, captureOnAlertSet, verboseSet bool
 	for index := 2; index < len(args); {
 		option := args[index]
+		if matched, err := setBooleanOption(option, "--discover-suspects", watchNoisyNeighborUsage, &discoverSet, &options.DiscoverSuspects); matched {
+			if err != nil {
+				return watchNoisyNeighborOptions{}, err
+			}
+			index++
+			continue
+		}
+		if matched, err := setBooleanOption(option, "--include-ebpf-latency", watchNoisyNeighborUsage, &includeEBPFSet, &options.IncludeEBPFLatency); matched {
+			if err != nil {
+				return watchNoisyNeighborOptions{}, err
+			}
+			index++
+			continue
+		}
+		if matched, err := setBooleanOption(option, "--capture-on-alert", watchNoisyNeighborUsage, &captureOnAlertSet, &options.CaptureOnAlert); matched {
+			if err != nil {
+				return watchNoisyNeighborOptions{}, err
+			}
+			index++
+			continue
+		}
+		if matched, err := setBooleanOption(option, "--verbose", watchNoisyNeighborUsage, &verboseSet, &options.Verbose); matched {
+			if err != nil {
+				return watchNoisyNeighborOptions{}, err
+			}
+			index++
+			continue
+		}
 		if seen[option] {
 			return watchNoisyNeighborOptions{}, fmt.Errorf("%s: %s specified more than once", watchNoisyNeighborUsage, option)
 		}
 		seen[option] = true
-		switch option {
-		case "--discover-suspects":
-			options.DiscoverSuspects = true
-			index++
-			continue
-		case "--include-ebpf-latency":
-			options.IncludeEBPFLatency = true
-			index++
-			continue
-		case "--capture-on-alert":
-			options.CaptureOnAlert = true
-			index++
-			continue
-		case "--verbose":
-			options.Verbose = true
-			index++
-			continue
-		}
 		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 			return watchNoisyNeighborOptions{}, fmt.Errorf("%s: %s requires a value", watchNoisyNeighborUsage, option)
 		}
@@ -993,32 +1214,39 @@ func parseTimedTargetOptions(
 	allowOutputOptions bool,
 	allowEBPFLatency bool,
 	allowSuspectDiscovery bool,
+	allowJSON bool,
 ) (timedTargetOptions, error) {
 	options := timedTargetOptions{Duration: defaultDuration, Interval: defaultInterval}
-	var durationSet, intervalSet, outputSet, outputDirectorySet, includeEBPFLatencySet, discoverSuspectsSet bool
+	var durationSet, intervalSet, outputSet, outputDirectorySet, includeEBPFLatencySet, discoverSuspectsSet, jsonSet bool
 	for i := start; i < len(args); {
 		option := args[i]
-		if option == "--discover-suspects" {
+		if matched, err := setBooleanOption(option, "--discover-suspects", usage, &discoverSuspectsSet, &options.DiscoverSuspects); matched {
+			if err != nil {
+				return timedTargetOptions{}, err
+			}
 			if !allowSuspectDiscovery {
 				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
 			}
-			if discoverSuspectsSet {
-				return timedTargetOptions{}, fmt.Errorf("%s: --discover-suspects specified more than once", usage)
-			}
-			options.DiscoverSuspects = true
-			discoverSuspectsSet = true
 			i++
 			continue
 		}
-		if option == "--include-ebpf-latency" {
+		if matched, err := setBooleanOption(option, "--include-ebpf-latency", usage, &includeEBPFLatencySet, &options.IncludeEBPFLatency); matched {
+			if err != nil {
+				return timedTargetOptions{}, err
+			}
 			if !allowEBPFLatency {
 				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
 			}
-			if includeEBPFLatencySet {
-				return timedTargetOptions{}, fmt.Errorf("%s: --include-ebpf-latency specified more than once", usage)
+			i++
+			continue
+		}
+		if matched, err := setBooleanOption(option, "--json", usage, &jsonSet, &options.JSON); matched {
+			if err != nil {
+				return timedTargetOptions{}, err
 			}
-			options.IncludeEBPFLatency = true
-			includeEBPFLatencySet = true
+			if !allowJSON {
+				return timedTargetOptions{}, fmt.Errorf("%s: unknown option %s", usage, option)
+			}
 			i++
 			continue
 		}
@@ -1301,14 +1529,15 @@ func runDiagnoseCommand(runtimeConfig solisconfig.Runtime, args []string, w io.W
 }
 
 type noisyNeighborEvidence struct {
-	Experiment  experiment.Report
-	Incident    incident.Explanation
-	TracePlan   traceplan.Plan
-	Storage     storage.Snapshot
-	QEMU        qemuio.SummaryReport
-	EBPFLatency *ebpf.BlockLatencyEvidence
-	Discovery   *discovery.Report
-	Diagnosis   diagnose.Report
+	Experiment        experiment.Report
+	Incident          incident.Explanation
+	TracePlan         traceplan.Plan
+	Storage           storage.Snapshot
+	QEMU              qemuio.SummaryReport
+	EBPFLatency       *ebpf.BlockLatencyEvidence
+	EBPFVMAttribution *ebpf.VMBlockLatencyReport
+	Discovery         *discovery.Report
+	Diagnosis         diagnose.Report
 }
 
 func runNoisyNeighborDiagnosis(runtimeConfig solisconfig.Runtime, options timedTargetOptions, w io.Writer) error {
@@ -1332,6 +1561,7 @@ func runNoisyNeighborDiagnosis(runtimeConfig solisconfig.Runtime, options timedT
 		diagnose.OutputOptions{
 			Path:      options.OutputPath,
 			Directory: options.OutputDirectory,
+			JSON:      options.JSON,
 		},
 		time.Now(),
 	); err != nil {
@@ -1386,14 +1616,15 @@ func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedT
 	}
 	observeSnapshot, observeErr := collectObserveSnapshot(context.Background(), runtimeConfig, observeOptions)
 	captureEvidence := capture.Evidence{
-		Experiment:  evidence.Experiment,
-		Incident:    evidence.Incident,
-		TracePlan:   evidence.TracePlan,
-		Storage:     evidence.Storage,
-		QEMU:        evidence.QEMU,
-		EBPFLatency: evidence.EBPFLatency,
-		Discovery:   evidence.Discovery,
-		Diagnosis:   evidence.Diagnosis,
+		Experiment:        evidence.Experiment,
+		Incident:          evidence.Incident,
+		TracePlan:         evidence.TracePlan,
+		Storage:           evidence.Storage,
+		QEMU:              evidence.QEMU,
+		EBPFLatency:       evidence.EBPFLatency,
+		EBPFVMAttribution: evidence.EBPFVMAttribution,
+		Discovery:         evidence.Discovery,
+		Diagnosis:         evidence.Diagnosis,
 	}
 	if observeErr != nil {
 		captureEvidence.ObserveError = observeErr.Error()
@@ -1489,7 +1720,7 @@ func runNoisyNeighborWatch(ctx context.Context, runtimeConfig solisconfig.Runtim
 			}
 		}
 
-		if watcher.IsAlert(evidence.Diagnosis.Verdict) {
+		if watcher.IsAlertReport(evidence.Diagnosis) {
 			stats.Alerts++
 			if err := watcher.WriteAlert(w, summary); err != nil {
 				return err
@@ -1540,8 +1771,16 @@ func writeWatchCapturePaths(w io.Writer, result capture.Result) error {
 	if _, err := fmt.Fprintf(w, "Incident report: %s\n", filepath.Join(result.Directory, "incident-report.md")); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(w, "Evidence JSON: %s\n", filepath.Join(result.Directory, "evidence-summary.json"))
-	return err
+	if _, err := fmt.Fprintf(w, "Evidence JSON: %s\n", filepath.Join(result.Directory, "evidence-summary.json")); err != nil {
+		return err
+	}
+	for _, path := range result.Files {
+		if filepath.Base(path) == "ebpf-vm-block-latency.json" {
+			_, err := fmt.Fprintf(w, "eBPF VM attribution JSON: %s\n", path)
+			return err
+		}
+	}
+	return nil
 }
 
 func writeWatchHeader(w io.Writer, options watchNoisyNeighborOptions) error {
@@ -1616,8 +1855,14 @@ func collectNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options tim
 		}
 	}
 	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
+	vmLatencyTargets := append([]inventory.VM(nil), plan.VictimTargets...)
+	if _, duplicate := inventory.FindByName(vmLatencyTargets, plan.SuspectTarget.Name); !duplicate {
+		vmLatencyTargets = append(vmLatencyTargets, plan.SuspectTarget)
+	}
+	vmLatencyResult := startVMBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration, options.Interval, vmLatencyTargets)
 	qemuReport, err := qemuio.CollectSummaryWithThresholds(qemuPlan, options.Duration, options.Interval, runtimeConfig.Settings.Thresholds)
 	latencyEvidence := finishBlockLatencyCollection(latencyResult, latencyContext)
+	vmLatencyEvidence := finishVMBlockLatencyCollection(vmLatencyResult, options.Duration, options.Interval)
 	if err != nil {
 		return noisyNeighborEvidence{}, err
 	}
@@ -1640,15 +1885,18 @@ func collectNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options tim
 		return noisyNeighborEvidence{}, err
 	}
 	diagnosisReport.EBPFLatency = latencyEvidence
+	diagnosisReport.EBPFVMAttribution = vmLatencyEvidence
+	diagnosisReport = diagnose.ApplyEBPFVMAttribution(diagnosisReport)
 
 	return noisyNeighborEvidence{
-		Experiment:  experimentReport,
-		Incident:    explanation,
-		TracePlan:   plan,
-		Storage:     storageSnapshot,
-		QEMU:        qemuReport,
-		EBPFLatency: latencyEvidence,
-		Diagnosis:   diagnosisReport,
+		Experiment:        experimentReport,
+		Incident:          explanation,
+		TracePlan:         plan,
+		Storage:           storageSnapshot,
+		QEMU:              qemuReport,
+		EBPFLatency:       latencyEvidence,
+		EBPFVMAttribution: vmLatencyEvidence,
+		Diagnosis:         diagnosisReport,
 	}, nil
 }
 
@@ -1668,6 +1916,11 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 	}
 
 	latencyResult := startBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration)
+	vmLatencyTargets := []inventory.VM{targets.Victim}
+	for _, candidate := range targets.CandidateTargets {
+		vmLatencyTargets = append(vmLatencyTargets, candidate.VM)
+	}
+	vmLatencyResult := startVMBlockLatencyCollection(options.IncludeEBPFLatency, options.Duration, options.Interval, vmLatencyTargets)
 	samplingPlan := discovery.SamplingPlan(targets)
 	sampled, sampleErr := qemuio.CollectSummaryWithThresholds(samplingPlan, options.Duration, options.Interval, runtimeConfig.Settings.Thresholds)
 	discoveryReport := discovery.Analyze(targets, sampled)
@@ -1700,6 +1953,7 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 		}
 	}
 	latencyEvidence := finishBlockLatencyCollection(latencyResult, latencyContext)
+	vmLatencyEvidence := finishVMBlockLatencyCollection(vmLatencyResult, options.Duration, options.Interval)
 	if sampleErr != nil {
 		return noisyNeighborEvidence{}, sampleErr
 	}
@@ -1727,6 +1981,8 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 	}
 	report.Discovery = &discoveryReport
 	report.EBPFLatency = latencyEvidence
+	report.EBPFVMAttribution = vmLatencyEvidence
+	report = diagnose.ApplyEBPFVMAttribution(report)
 	if discoveryReport.Selected == nil {
 		if experimentAvailable {
 			report.Verdict = diagnose.NoDominantCandidateVerdict
@@ -1757,14 +2013,15 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 	}
 
 	return noisyNeighborEvidence{
-		Experiment:  experimentReport,
-		Incident:    explanation,
-		TracePlan:   tracePlan,
-		Storage:     storageSnapshot,
-		QEMU:        qemuReport,
-		EBPFLatency: latencyEvidence,
-		Discovery:   &discoveryReport,
-		Diagnosis:   report,
+		Experiment:        experimentReport,
+		Incident:          explanation,
+		TracePlan:         tracePlan,
+		Storage:           storageSnapshot,
+		QEMU:              qemuReport,
+		EBPFLatency:       latencyEvidence,
+		EBPFVMAttribution: vmLatencyEvidence,
+		Discovery:         &discoveryReport,
+		Diagnosis:         report,
 	}, nil
 }
 
@@ -1819,6 +2076,68 @@ func finishBlockLatencyCollection(results <-chan blockLatencyCollectionResult, c
 type blockLatencyCollectionResult struct {
 	result ebpf.BlockLatencyResult
 	err    error
+}
+
+type vmBlockLatencyCollectionResult struct {
+	report ebpf.VMBlockLatencyReport
+	err    error
+}
+
+func startVMBlockLatencyCollection(enabled bool, duration, interval time.Duration, targets []inventory.VM) <-chan vmBlockLatencyCollectionResult {
+	if !enabled {
+		return nil
+	}
+	results := make(chan vmBlockLatencyCollectionResult, 1)
+	mappings, err := ebpf.BuildVMCgroupMappings(targets)
+	if err != nil {
+		results <- vmBlockLatencyCollectionResult{err: fmt.Errorf("map validated libvirt VM cgroups: %w", err)}
+		return results
+	}
+	go func() {
+		report := ebpf.CollectVMBlockLatencyReport(context.Background(), ebpf.VMBlockLatencyCollectOptions{
+			Duration: duration,
+			Interval: interval,
+		}, mappings)
+		results <- vmBlockLatencyCollectionResult{report: report}
+	}()
+	return results
+}
+
+func finishVMBlockLatencyCollection(results <-chan vmBlockLatencyCollectionResult, duration, interval time.Duration) *ebpf.VMBlockLatencyReport {
+	if results == nil {
+		return nil
+	}
+	collected := <-results
+	if collected.err == nil {
+		return &collected.report
+	}
+	report := ebpf.VMBlockLatencyReport{
+		SchemaVersion:      "1",
+		ObservedAtUTC:      time.Now().UTC().Format(time.RFC3339Nano),
+		Duration:           duration.String(),
+		Interval:           interval.String(),
+		Mode:               "experimental",
+		CollectionMode:     "typed_btf_vm_attributed_latency",
+		AttributionMethod:  "blkcg_cgroup_id_to_libvirt_vm",
+		AttributionQuality: "unavailable",
+		Availability: ebpf.VMBlockLatencyAvailability{
+			Available: false,
+			Status:    "mapping_error",
+			Error:     collected.err.Error(),
+		},
+		VMAttributionPreflight: ebpf.VMBlockAttributionPreflight{
+			Status:        "unavailable",
+			MissingFields: []string{},
+			Caveats:       []string{"VM cgroup mapping failed before eBPF attachment"},
+		},
+		VMs: []ebpf.VMBlockLatencyVM{},
+		UnavailableSections: []ebpf.VMBlockLatencyUnavailableSection{{
+			Name: "cgroup_mapping", Status: "mapping_error", Error: collected.err.Error(),
+		}},
+		Caveats: []string{"no VM-attributed latency was collected because validated libvirt cgroup mapping failed"},
+		Privacy: observability.PrivacyFlags{},
+	}
+	return &report
 }
 
 func loadEnrichedTargetPlan(runtimeConfig solisconfig.Runtime, victim, suspect string) (traceplan.Plan, error) {
@@ -2752,7 +3071,7 @@ Commands:
   solis vm storage-stats [--victim <vm>] [--suspect <vm>] [--all-vms] [--duration <duration>] [--interval <duration>] [--output <path>] --json
   solis qemu io-watch --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
   solis qemu io-summary --victim <name> --suspect <name> [--duration <duration>] [--interval <duration>]
-  solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--output <path> | --output-dir <dir>]
+  solis diagnose noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] [--json] [--output <path> | --output-dir <dir>]
   solis capture noisy-neighbor [--report-dir <dir>] --victim <vm> (--suspect <vm> | --discover-suspects) [--duration <duration>] [--interval <duration>] [--include-ebpf-latency] --output-dir <dir>
   solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]
 

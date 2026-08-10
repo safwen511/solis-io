@@ -97,10 +97,63 @@ func Write(dst io.Writer, report Report) error {
 		}
 		fmt.Fprintln(w)
 	}
+	if report.EBPFVMAttribution != nil {
+		writeEBPFVMAttribution(w, report)
+		fmt.Fprintln(w)
+	}
 
 	fmt.Fprintln(w, "Verdict")
 	fmt.Fprintln(w, report.Verdict)
 	return w.Flush()
+}
+
+func writeEBPFVMAttribution(dst io.Writer, report Report) {
+	evidence := report.EBPFVMAttribution
+	assessment := AssessEBPFVMAttribution(report)
+	fmt.Fprintln(dst, "eBPF VM-attributed block latency")
+	fmt.Fprintf(dst, "Available:\t%s\n", yesNo(assessment.Available))
+	fmt.Fprintf(dst, "Collector available:\t%s\n", yesNo(evidence.Availability.Available))
+	fmt.Fprintf(dst, "Status:\t%s\n", valueOrDash(evidence.Availability.Status))
+	fmt.Fprintf(dst, "Attribution quality:\t%s\n", valueOrDash(evidence.AttributionQuality))
+	fmt.Fprintf(dst, "Attributed operations:\t%d\n", evidence.AttributionSummary.AttributedOps)
+	fmt.Fprintf(dst, "Unattributed operations:\t%d\n", evidence.AttributionSummary.UnattributedOps)
+	fmt.Fprintf(dst, "Attributed percent:\t%.2f%%\n", evidence.AttributionSummary.AttributedPercent)
+	fmt.Fprintf(dst, "Unattributed percent:\t%.2f%%\n", evidence.Unattributed.UnattributedPercent)
+	fmt.Fprintf(dst, "Matched VM count:\t%d\n", evidence.AttributionSummary.MatchedVMCount)
+	fmt.Fprintf(dst, "Victim attributed operations:\t%d\n", assessment.VictimTotalOps)
+	fmt.Fprintf(dst, "Victim p95 latency ms:\t%.3f\n", assessment.VictimP95MS)
+	fmt.Fprintf(dst, "Suspect attributed operations:\t%d\n", assessment.SuspectTotalOps)
+	fmt.Fprintf(dst, "Suspect p95 latency ms:\t%.3f\n", assessment.SuspectP95MS)
+	fmt.Fprintln(dst, "TARGET\tVM\tTOTAL_OPS\tREAD_OPS\tWRITE_OPS\tP95_MS\tATTRIBUTION_QUALITY")
+	for _, vm := range evidence.VMs {
+		fmt.Fprintf(dst, "%s\t%s\t%d\t%d\t%d\t%.3f\t%s\n",
+			ebpfVMTargetType(report, vm.Name), valueOrDash(vm.Name), vm.TotalOps, vm.ReadOps, vm.WriteOps,
+			vm.LatencyP95MS, valueOrDash(vm.AttributionQuality))
+	}
+	if !evidence.Availability.Available && strings.TrimSpace(evidence.Availability.Error) != "" {
+		fmt.Fprintf(dst, "Unavailable reason:\t%s\n", strings.Join(strings.Fields(evidence.Availability.Error), " "))
+	}
+	fmt.Fprintln(dst, "Scope:\texperimental blkcg/cgroup-ID correlation to validated local libvirt VM mappings")
+	fmt.Fprintln(dst, "Privacy:\tno guest payloads, guest files, process arguments, environments, SQL text, table data, request bodies, response bodies, or secrets were collected")
+}
+
+func ebpfVMTargetType(report Report, name string) string {
+	var roles []string
+	for _, target := range report.Storage.Targets {
+		if target.VM.Name != name {
+			continue
+		}
+		for _, role := range strings.Split(target.TargetType, ",") {
+			role = strings.TrimSpace(role)
+			if role != "" {
+				roles = append(roles, role)
+			}
+		}
+	}
+	if len(roles) == 0 {
+		return "other"
+	}
+	return strings.Join(roles, ",")
 }
 
 func writeStorageTarget(dst io.Writer, target storage.VMTarget) {
@@ -148,6 +201,13 @@ func qemuValue(value float64, available bool) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.2f", value)
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func valueOrDash(value string) string {

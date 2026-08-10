@@ -29,12 +29,17 @@ type VMBlockLatencyReport struct {
 	Privacy             observability.PrivacyFlags         `json:"privacy"`
 }
 
-// VMBlockKernelCounters are host-wide typed-BTF attachment proof counters.
-// They are not per-VM operations and do not carry request pointers.
+// VMBlockKernelCounters are host-wide typed-BTF request-correlation counters.
+// They are not per-VM operations and never carry request pointers.
 type VMBlockKernelCounters struct {
-	IssueSeen    uint64 `json:"issue_seen"`
-	CompleteSeen uint64 `json:"complete_seen"`
-	NullRequest  uint64 `json:"null_request"`
+	IssueSeen              uint64 `json:"issue_seen"`
+	CompleteSeen           uint64 `json:"complete_seen"`
+	NullRequest            uint64 `json:"null_request"`
+	DuplicateIssue         uint64 `json:"duplicate_issue"`
+	LookupMiss             uint64 `json:"lookup_miss"`
+	IncompleteAtWindowEnd  uint64 `json:"incomplete_at_window_end"`
+	MapFull                uint64 `json:"map_full"`
+	CompletedLatencyEvents uint64 `json:"completed_latency_events"`
 }
 
 // VMBlockLatencyAvailability describes the runtime collector state.
@@ -99,8 +104,8 @@ type VMBlockLatencyVM struct {
 	Caveats                []string                        `json:"caveats"`
 }
 
-// VMBlockLatencySummary is the attributed host-wide aggregate. It does not
-// include unattributed requests.
+// VMBlockLatencySummary is the host-wide request issue-to-complete aggregate.
+// In the current mode it is deliberately not attributed to individual VMs.
 type VMBlockLatencySummary struct {
 	ReadOps                uint64                          `json:"read_ops"`
 	WriteOps               uint64                          `json:"write_ops"`

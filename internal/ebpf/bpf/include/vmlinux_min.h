@@ -23,7 +23,12 @@ typedef __u32 __wsum;
 typedef __u8 blk_status_t;
 
 enum bpf_map_type {
+	BPF_MAP_TYPE_HASH = 1,
 	BPF_MAP_TYPE_PERCPU_ARRAY = 6,
+};
+
+enum bpf_map_update_elem_flags {
+	BPF_ANY = 0,
 };
 
 /* No request member is dereferenced by the count-only Task 3A programs. */

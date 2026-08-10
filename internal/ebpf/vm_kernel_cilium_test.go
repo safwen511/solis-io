@@ -32,6 +32,7 @@ type fakeVMBlockCountResources struct {
 	issueErr         error
 	completeErr      error
 	counters         VMBlockKernelCounters
+	latency          VMBlockKernelLatency
 	counterErr       error
 	closeErr         error
 	closed           bool
@@ -61,8 +62,8 @@ func (resources *fakeVMBlockCountResources) AttachComplete() (io.Closer, error) 
 	return resources.completeLink, nil
 }
 
-func (resources *fakeVMBlockCountResources) ReadCounters() (VMBlockKernelCounters, error) {
-	return resources.counters, resources.counterErr
+func (resources *fakeVMBlockCountResources) ReadStats() (VMBlockKernelStats, error) {
+	return VMBlockKernelStats{Counters: resources.counters, HostLatency: resources.latency}, resources.counterErr
 }
 
 func (resources *fakeVMBlockCountResources) Close() error {
@@ -159,6 +160,22 @@ func TestCiliumVMBlockBTFMissing(t *testing.T) {
 	}
 }
 
+func TestCiliumVMBlockDeviceFilterIsRejectedWithoutRequestDereference(t *testing.T) {
+	source, _ := fakeCiliumVMBlockSource(&fakeVMBlockCountResources{})
+	report := CollectVMBlockLatencyReportWithKernelSource(
+		context.Background(),
+		VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second, DeviceFilter: "nvme0n1"},
+		nil,
+		source,
+	)
+	if report.Availability.Available || report.Availability.Status != "device_filter_unsupported" {
+		t.Fatalf("availability = %#v", report.Availability)
+	}
+	if report.HostSummary.TotalOps != 0 || report.KernelCounters != (VMBlockKernelCounters{}) {
+		t.Fatalf("unsupported filter fabricated measurement: %#v", report)
+	}
+}
+
 func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
 	finder := &fakeVMBlockBTFTypeFinder{typedefs: testVMBlockTypedTracepointTypedefs()}
 	prototypes, err := resolveVMBlockTypedTracepoints(finder)
@@ -229,7 +246,23 @@ func TestVMBlockCountOnlyCUsesEffectiveTypedBTFProgramSignatures(t *testing.T) {
 		}
 	}
 	if strings.Contains(text, "void *unused") {
-		t.Fatal("count-only source exposes kernel callback data as a BPF program argument")
+		t.Fatal("host request-latency source exposes kernel callback data as a BPF program argument")
+	}
+	for _, forbidden := range []string{"rq->", "BPF_CORE_READ(rq", "bpf_probe_read_kernel"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("host request-latency source dereferences struct request through %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"VM_BLOCK_REQUEST_MAX_ENTRIES 65536",
+		"request_starts SEC(\".maps\")",
+		"latency_stats SEC(\".maps\")",
+		"bpf_ktime_get_ns()",
+		"bpf_map_delete_elem(&request_starts",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("host request-latency source missing bounded correlation element %q", want)
+		}
 	}
 }
 
@@ -374,12 +407,12 @@ func TestCiliumVMBlockCleanupFailuresAreStructured(t *testing.T) {
 			status:    "cleanup_failed", message: "resource close failed",
 		},
 		{
-			name: "collection and cleanup failure",
+			name: "map read and resource cleanup failure",
 			resources: &fakeVMBlockCountResources{
-				counterErr:   errors.New("counter read failed"),
-				completeLink: &fakeVMBlockLink{err: errors.New("complete link close failed")},
+				counterErr: errors.New("counter read failed"),
+				closeErr:   errors.New("resource close failed"),
 			},
-			status: "counter_read_failed", message: "complete link close failed",
+			status: "map_read_failed", message: "resource close failed",
 		},
 	}
 	for _, test := range tests {
@@ -413,9 +446,18 @@ func TestCiliumVMBlockCleanupDiagnosticsAreBounded(t *testing.T) {
 	}
 }
 
-func TestCiliumVMBlockSuccessfulCountOnlyCollection(t *testing.T) {
+func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
+	latency := VMBlockKernelLatency{
+		Count: 3, TotalNS: uint64(6 * time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(3 * time.Millisecond),
+	}
+	latency.Buckets[4] = 1 // 1 ms belongs to <2 ms.
+	latency.Buckets[5] = 2 // 2 ms and 3 ms belong to <5 ms.
 	resources := &fakeVMBlockCountResources{
-		counters: VMBlockKernelCounters{IssueSeen: 41, CompleteSeen: 39, NullRequest: 0},
+		counters: VMBlockKernelCounters{
+			IssueSeen: 41, CompleteSeen: 39, DuplicateIssue: 1, LookupMiss: 2,
+			IncompleteAtWindowEnd: 1, MapFull: 1, CompletedLatencyEvents: 3,
+		},
+		latency: latency,
 	}
 	source, loader := fakeCiliumVMBlockSource(resources)
 	mappings := []VMBlockCgroupMapping{{Name: "a-web", MappingQuality: "cgroup_v2_inode_tree", CgroupIDs: []uint64{11}}}
@@ -423,11 +465,17 @@ func TestCiliumVMBlockSuccessfulCountOnlyCollection(t *testing.T) {
 	if !loader.loaded || !resources.closed || resources.issueLink == nil || !resources.issueLink.closed || resources.completeLink == nil || !resources.completeLink.closed {
 		t.Fatalf("loader/resources lifecycle incomplete: loader=%#v resources=%#v", loader, resources)
 	}
-	if !report.Availability.Available || report.CollectionMode != vmBlockCountCollectionMode || report.AttributionMethod != "none_count_only" || report.AttributionQuality != "unavailable" {
+	if !report.Availability.Available || report.CollectionMode != vmBlockHostLatencyCollectionMode || report.AttributionMethod != "host_request_pointer_correlation_no_vm_attribution" || report.AttributionQuality != "unavailable" {
 		t.Fatalf("report mode = %#v", report)
 	}
-	if report.KernelCounters != resources.counters || report.HostSummary.TotalOps != 0 || len(report.VMs) != 1 || report.VMs[0].TotalOps != 0 || report.VMs[0].LatencyAvgMS != 0 || report.VMs[0].AttributionQuality != "unavailable" {
-		t.Fatalf("count-only report fabricated attribution: %#v", report)
+	if report.KernelCounters != resources.counters || report.HostSummary.TotalOps != 3 || report.HostSummary.UnknownOps != 3 || report.HostSummary.LatencyMinMS != 1 || report.HostSummary.LatencyAvgMS != 2 || report.HostSummary.LatencyP50MS != 5 || report.HostSummary.LatencyMaxMS != 3 {
+		t.Fatalf("host request latency report = %#v", report)
+	}
+	if len(report.VMs) != 1 || report.VMs[0].TotalOps != 0 || report.VMs[0].LatencyAvgMS != 0 || report.VMs[0].AttributionQuality != "unavailable" {
+		t.Fatalf("host-only report fabricated VM attribution: %#v", report.VMs)
+	}
+	if report.Unattributed.LookupMiss != 2 || report.Unattributed.DuplicateIssue != 1 || report.Unattributed.IncompleteAtWindowEnd != 1 || report.Unattributed.MapFull != 1 || report.Unattributed.TotalUnattributedOps != 4 {
+		t.Fatalf("unattributed counters = %#v", report.Unattributed)
 	}
 	if privacyCollected(report) {
 		t.Fatalf("privacy flags = %#v", report.Privacy)
@@ -441,17 +489,28 @@ func TestCiliumVMBlockSuccessfulCountOnlyCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.String() != second.String() {
-		t.Fatal("count-only JSON is not deterministic")
+		t.Fatal("host request-latency JSON is not deterministic")
 	}
-	if strings.Contains(first.String(), "request_pointer") || strings.Contains(first.String(), "request_pointer_value") {
+	if strings.Contains(first.String(), `"request_pointer":`) || strings.Contains(first.String(), `"request_pointer_value":`) || strings.Contains(first.String(), "4276993775") {
 		t.Fatalf("raw request pointer field leaked into JSON: %s", first.String())
 	}
 	var decoded VMBlockLatencyReport
 	if err := json.Unmarshal(first.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.KernelCounters.IssueSeen != 41 || decoded.KernelCounters.CompleteSeen != 39 || decoded.HostSummary.TotalOps != 0 {
+	if decoded.KernelCounters.IssueSeen != 41 || decoded.KernelCounters.CompleteSeen != 39 || decoded.HostSummary.TotalOps != 3 || decoded.VMs[0].TotalOps != 0 {
 		t.Fatalf("decoded = %#v", decoded)
+	}
+}
+
+func TestMergeVMBlockPerCPULatency(t *testing.T) {
+	first := vmBlockLatencyValues{Count: 2, TotalNS: 500, MinNS: 100, MaxNS: 400}
+	first.Buckets[0] = 2
+	second := vmBlockLatencyValues{Count: 1, TotalNS: 900, MinNS: 900, MaxNS: 900}
+	second.Buckets[0] = 1
+	merged := mergeVMBlockPerCPULatency([]vmBlockLatencyValues{first, second})
+	if merged.Count != 3 || merged.TotalNS != 1400 || merged.MinNS != 100 || merged.MaxNS != 900 || merged.Buckets[0] != 3 {
+		t.Fatalf("merged latency = %#v", merged)
 	}
 }
 

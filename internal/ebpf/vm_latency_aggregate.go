@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	// ErrVMBlockLatencyNotImplemented is returned by the system source until a
-	// BTF-aware typed tracepoint loader is implemented and verifier-tested.
-	ErrVMBlockLatencyNotImplemented = errors.New("experimental_not_implemented: typed BTF request-pointer and bio/blkcg eBPF attach is not implemented")
+	// ErrVMBlockLatencyNotImplemented is retained for the still-deferred
+	// request -> bio -> blkcg -> VM ownership attribution stage.
+	ErrVMBlockLatencyNotImplemented = errors.New("experimental_not_implemented: typed BTF bio/blkcg VM attribution is not implemented")
 	// ErrVMBlockLatencyPermission is the stable operator-facing permission
 	// guidance for this experimental collector.
 	ErrVMBlockLatencyPermission = errors.New("permission denied loading or attaching per-VM eBPF block latency programs")
@@ -60,7 +60,7 @@ type vmDeviceOperationKey struct {
 }
 
 // CollectVMBlockLatencyReport returns a structured experimental status. The
-// typed-BTF count-only source never fakes latency or VM attribution.
+// typed-BTF source measures host request latency but never fakes VM ownership.
 func CollectVMBlockLatencyReport(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping) VMBlockLatencyReport {
 	return CollectVMBlockLatencyReportForPlatform(ctx, options, mappings, runtime.GOOS)
 }
@@ -87,7 +87,7 @@ func CollectVMBlockLatencyReportWithSource(ctx context.Context, options VMBlockL
 }
 
 // CollectVMBlockLatencyReportWithKernelSource runs one lifecycle-managed
-// source. Product code uses the count-only Cilium source; fake sources are
+// source. Product code uses the host request-correlation Cilium source; fakes are
 // restricted to tests.
 func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping, source VMBlockKernelSource) VMBlockLatencyReport {
 	report := newVMBlockLatencyReport(options, mappings)
@@ -277,9 +277,17 @@ func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelS
 		aggregator.report.AttributionMethod = stats.AttributionMethod
 	}
 	aggregator.report.KernelCounters = stats.Counters
+	aggregator.hostLatency.mergeKernel(stats.HostLatency)
 	aggregator.report.Unattributed.DroppedEvents += stats.DroppedEvents
 	aggregator.report.Unattributed.RingBufferLost += stats.RingBufferLost
-	aggregator.report.Unattributed.MapFull += stats.MapFull
+	aggregator.report.Unattributed.LookupMiss = saturatingAdd(aggregator.report.Unattributed.LookupMiss, stats.Counters.LookupMiss)
+	aggregator.report.Unattributed.DuplicateIssue = saturatingAdd(aggregator.report.Unattributed.DuplicateIssue, stats.Counters.DuplicateIssue)
+	aggregator.report.Unattributed.IncompleteAtWindowEnd = saturatingAdd(aggregator.report.Unattributed.IncompleteAtWindowEnd, stats.Counters.IncompleteAtWindowEnd)
+	kernelMapFull := stats.Counters.MapFull
+	if stats.MapFull > kernelMapFull {
+		kernelMapFull = stats.MapFull
+	}
+	aggregator.report.Unattributed.MapFull = saturatingAdd(aggregator.report.Unattributed.MapFull, kernelMapFull)
 }
 
 func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
@@ -316,18 +324,23 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 		}
 	}
 	host := &aggregator.report.HostSummary
+	var attributedOperations uint64
 	for _, vm := range aggregator.report.VMs {
 		host.ReadOps += vm.ReadOps
 		host.WriteOps += vm.WriteOps
 		host.FlushOps += vm.FlushOps
 		host.UnknownOps += vm.UnknownOps
+		attributedOperations = saturatingAdd(attributedOperations, vm.TotalOps)
+	}
+	if aggregator.hostLatency.count > attributedOperations {
+		host.UnknownOps = saturatingAdd(host.UnknownOps, aggregator.hostLatency.count-attributedOperations)
 	}
 	host.TotalOps = aggregator.hostLatency.count
 	host.LatencyMinMS, host.LatencyAvgMS, host.LatencyP50MS, host.LatencyP95MS, host.LatencyP99MS, host.LatencyMaxMS = aggregator.hostLatency.summary()
 	host.PercentilesApproximate = aggregator.hostLatency.count > 0
 	host.Histogram = aggregator.hostLatency.publicBuckets()
 	unattributed := &aggregator.report.Unattributed
-	unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd
+	unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd + unattributed.MapFull
 	denominator := host.TotalOps + unattributed.TotalUnattributedOps
 	if denominator > 0 {
 		unattributed.UnattributedPercent = float64(unattributed.TotalUnattributedOps) / float64(denominator) * 100
@@ -345,8 +358,8 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		Duration:           options.Duration.String(),
 		Interval:           options.Interval.String(),
 		Mode:               "experimental",
-		CollectionMode:     "typed_btf_count_only",
-		AttributionMethod:  "none_count_only",
+		CollectionMode:     vmBlockHostLatencyCollectionMode,
+		AttributionMethod:  "host_request_pointer_correlation_no_vm_attribution",
 		AttributionQuality: "unavailable",
 		DeviceFilter:       strings.TrimSpace(options.DeviceFilter),
 		Availability:       VMBlockLatencyAvailability{Status: "pending"},
@@ -366,8 +379,9 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		},
 		Caveats: []string{
 			"experimental collection; it does not prove exact VM latency or customer impact",
-			"typed-BTF count-only mode records host-wide issue and completion hook counts without VM attribution or latency measurement",
-			"count-only programs do not dereference request, bio, blkcg, or cgroup fields and do not expose request pointers",
+			"typed-BTF request correlation measures host-wide request issue-to-complete latency without VM attribution",
+			"request pointers are used only as bounded in-kernel correlation keys and are never emitted in report output",
+			"host request-correlation programs do not dereference request, bio, blkcg, or cgroup fields",
 			"request merging, requeues, flush requests, missing bio or blkcg ownership, and stacked devices can reduce attribution quality",
 			"kernel BTF layout and privileged eBPF tracepoint access are required",
 			"unattributed events must be considered before using per-VM comparisons",
@@ -377,7 +391,7 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		},
 	}
 	for _, mapping := range mappings {
-		mappingCaveats := []string{"blkcg ownership is correlated to a userspace libvirt cgroup inode mapping"}
+		mappingCaveats := []string{"libvirt cgroup mapping is context only; host request latency is not attributed to this VM"}
 		if mapping.MappingQuality != "cgroup_v2_inode_tree" {
 			mappingCaveats = append(mappingCaveats, "cgroup mapping is unavailable or partial: "+mapping.MappingQuality)
 			report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{

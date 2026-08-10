@@ -7,7 +7,7 @@ import (
 	"io/fs"
 )
 
-var ErrVMBlockObjectUnavailable = errors.New("embedded typed-BTF VM block count object is unavailable")
+var ErrVMBlockObjectUnavailable = errors.New("embedded typed-BTF host request-latency object is unavailable")
 
 const vmBlockBPFObjectPath = "bpf/generated/vm_block_latency_bpfel.o"
 
@@ -24,7 +24,7 @@ func embeddedVMBlockObject() ([]byte, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, ErrVMBlockObjectUnavailable
 		}
-		return nil, fmt.Errorf("read embedded VM block count object: %w", err)
+		return nil, fmt.Errorf("read embedded VM block request-latency object: %w", err)
 	}
 	if len(data) == 0 {
 		return nil, ErrVMBlockObjectUnavailable

@@ -30,9 +30,21 @@ type VMBlockKernelStats struct {
 	AttributionMethod    string                `json:"attribution_method"`
 	AttributionAvailable bool                  `json:"attribution_available"`
 	Counters             VMBlockKernelCounters `json:"counters"`
+	HostLatency          VMBlockKernelLatency  `json:"host_latency"`
 	DroppedEvents        uint64                `json:"dropped_events"`
 	RingBufferLost       uint64                `json:"ring_buffer_lost"`
 	MapFull              uint64                `json:"map_full"`
+}
+
+// VMBlockKernelLatency is a bounded host-level aggregate read from kernel
+// maps. It contains exact count/total/min/max values and fixed histogram
+// buckets, but no request keys or per-VM ownership.
+type VMBlockKernelLatency struct {
+	Count   uint64                                   `json:"count"`
+	TotalNS uint64                                   `json:"total_ns"`
+	MinNS   uint64                                   `json:"min_ns"`
+	MaxNS   uint64                                   `json:"max_ns"`
+	Buckets [len(vmBlockLatencyBucketUpperNS)]uint64 `json:"buckets"`
 }
 
 // VMBlockKernelSource is the lifecycle boundary for the future privileged
@@ -106,10 +118,10 @@ func boundVMBlockDiagnostic(value string, maximum int) string {
 	return value[:maximum-len(suffix)] + suffix
 }
 
-// experimentalVMBlockKernelSource represents the still-unimplemented
-// request-pointer latency and VM-attribution stage. The product count-only
-// source uses Cilium and reports object_unavailable until an authentic ELF is
-// embedded; this source remains useful for explicit deferred-feature tests.
+// experimentalVMBlockKernelSource represents the still-unimplemented bio/blkcg
+// VM-attribution stage. The product host request-correlation source uses Cilium
+// and reports object_unavailable until a matching authentic ELF is embedded;
+// this source remains useful for explicit deferred-feature tests.
 type experimentalVMBlockKernelSource struct{}
 
 func (experimentalVMBlockKernelSource) Preflight(context.Context) (VMBlockKernelPreflight, error) {
@@ -221,10 +233,11 @@ func classifyVMBlockLifecycleError(status, operation string, err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, stage := range vmBlockStageErrors(err) {
-		if stage.Status != "cleanup_failed" {
-			return err
-		}
+	// A source-provided stage error is already more precise than the generic
+	// lifecycle wrapper, including cleanup failures produced while freezing
+	// the observation window before map reads.
+	if len(vmBlockStageErrors(err)) > 0 {
+		return err
 	}
 	if errors.Is(err, context.Canceled) {
 		status = "cancelled"

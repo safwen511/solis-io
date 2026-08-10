@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	ErrVMBlockBTFMissing            = errors.New("kernel BTF required for typed-BTF VM block count collection is unavailable")
-	ErrVMBlockObjectInvalid         = errors.New("embedded typed-BTF VM block count object is invalid")
-	ErrVMBlockUnsupportedEndianness = errors.New("embedded typed-BTF VM block count object supports little-endian Linux only")
+	ErrVMBlockBTFMissing            = errors.New("kernel BTF required for typed-BTF host request-latency collection is unavailable")
+	ErrVMBlockObjectInvalid         = errors.New("embedded typed-BTF host request-latency object is invalid")
+	ErrVMBlockUnsupportedEndianness = errors.New("embedded typed-BTF host request-latency object supports little-endian Linux only")
 )
 
-const vmBlockCountCollectionMode = "typed_btf_count_only"
+const vmBlockHostLatencyCollectionMode = "typed_btf_request_correlation_host_only"
 
 // VMBlockKernelStageError gives stable status to loader/attach/cleanup errors.
 type VMBlockKernelStageError struct {
@@ -39,7 +39,7 @@ func (err *VMBlockKernelStageError) Error() string {
 	if err == nil {
 		return ""
 	}
-	message := firstNonEmpty(err.Operation, "typed-BTF VM block count collection")
+	message := firstNonEmpty(err.Operation, "typed-BTF host request-latency collection")
 	if err.Err != nil {
 		message += ": " + err.Err.Error()
 	}
@@ -68,7 +68,7 @@ type vmBlockCountObjectLoader interface {
 type vmBlockCountResources interface {
 	AttachIssue() (io.Closer, error)
 	AttachComplete() (io.Closer, error)
-	ReadCounters() (VMBlockKernelCounters, error)
+	ReadStats() (VMBlockKernelStats, error)
 	Close() error
 }
 
@@ -118,12 +118,18 @@ func (source *ciliumVMBlockKernelSource) Preflight(context.Context) (VMBlockKern
 	return VMBlockKernelPreflight{Available: true, Status: "available"}, nil
 }
 
-func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, _ VMBlockLatencyCollectOptions, _ []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
+func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, options VMBlockLatencyCollectOptions, _ []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
+	if strings.TrimSpace(options.DeviceFilter) != "" {
+		return nil, &VMBlockKernelStageError{
+			Status: "device_filter_unsupported", Stage: "preflight", Operation: "prepare typed-BTF host request-latency collector",
+			Err: errors.New("device filtering requires request field access and is not supported by the host-only request-correlation collector"),
+		}
+	}
 	if source == nil || source.objectProvider == nil {
-		return nil, &VMBlockKernelStageError{Status: "object_unavailable", Stage: "object_load", Operation: "prepare typed-BTF count-only collector", Err: ErrVMBlockObjectUnavailable}
+		return nil, &VMBlockKernelStageError{Status: "object_unavailable", Stage: "object_load", Operation: "prepare typed-BTF host request-latency collector", Err: ErrVMBlockObjectUnavailable}
 	}
 	if source.loader == nil {
-		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Stage: "object_load", Operation: "prepare typed-BTF count-only collector", Err: errors.New("object loader is unavailable")}
+		return nil, &VMBlockKernelStageError{Status: "object_load_failed", Stage: "object_load", Operation: "prepare typed-BTF host request-latency collector", Err: errors.New("object loader is unavailable")}
 	}
 	object, err := source.objectProvider()
 	if err != nil {
@@ -372,19 +378,23 @@ func (session *ciliumVMBlockKernelSession) Collect(ctx context.Context, duration
 		return ctx.Err()
 	case <-timer.C:
 	}
-	counters, err := session.resources.ReadCounters()
+	// Freeze the observation window before reading maps. This makes the number
+	// of request entries left in request_starts a conservative end-of-window
+	// censored-request count instead of racing active hooks.
+	if err := session.Stop(); err != nil {
+		return err
+	}
+	stats, err := session.resources.ReadStats()
 	if err != nil {
 		if isPermissionError(err) {
-			return &VMBlockKernelStageError{Status: "permission_denied", Stage: "map_read", Operation: "read typed-BTF count-only counters", Err: err}
+			return &VMBlockKernelStageError{Status: "permission_denied", Stage: "map_read", Operation: "read typed-BTF request-latency maps", Err: err}
 		}
-		return &VMBlockKernelStageError{Status: "counter_read_failed", Stage: "map_read", Operation: "read typed-BTF count-only counters", Err: err}
+		return &VMBlockKernelStageError{Status: "map_read_failed", Stage: "map_read", Operation: "read typed-BTF request-latency maps", Err: err}
 	}
-	session.stats = VMBlockKernelStats{
-		CollectionMode:       vmBlockCountCollectionMode,
-		AttributionMethod:    "none_count_only",
-		AttributionAvailable: false,
-		Counters:             counters,
-	}
+	stats.CollectionMode = vmBlockHostLatencyCollectionMode
+	stats.AttributionMethod = "host_request_pointer_correlation_no_vm_attribution"
+	stats.AttributionAvailable = false
+	session.stats = stats
 	return nil
 }
 
@@ -392,9 +402,12 @@ func (session *ciliumVMBlockKernelSession) Stats() VMBlockKernelStats { return s
 
 func (session *ciliumVMBlockKernelSession) Stop() error {
 	session.stopOnce.Do(func() {
-		session.stopErr = errors.Join(closeVMBlockLink(&session.completeLink), closeVMBlockLink(&session.issueLink))
+		// Stop new issues first, then allow the completion hook to remain until
+		// its link is closed. This minimizes artificial pending entries at the
+		// observation boundary.
+		session.stopErr = errors.Join(closeVMBlockLink(&session.issueLink), closeVMBlockLink(&session.completeLink))
 		if session.stopErr != nil {
-			session.stopErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "detach typed-BTF count-only links", Err: session.stopErr}
+			session.stopErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "detach typed-BTF request-correlation links", Err: session.stopErr}
 		}
 	})
 	return session.stopErr
@@ -406,7 +419,7 @@ func (session *ciliumVMBlockKernelSession) Close() error {
 		resourceErr := session.resources.Close()
 		session.closeErr = errors.Join(stopErr, resourceErr)
 		if session.closeErr != nil {
-			session.closeErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "close typed-BTF count-only resources", Err: session.closeErr}
+			session.closeErr = &VMBlockKernelStageError{Status: "cleanup_failed", Stage: "cleanup", Operation: "close typed-BTF request-correlation resources", Err: session.closeErr}
 		}
 	})
 	return session.closeErr
@@ -451,9 +464,11 @@ func classifyVMBlockLoadError(err error) error {
 type ciliumVMBlockObjectLoader struct{}
 
 type ciliumVMBlockObjects struct {
-	OnIssue    *ciliumebpf.Program `ebpf:"on_block_rq_issue"`
-	OnComplete *ciliumebpf.Program `ebpf:"on_block_rq_complete"`
-	Counters   *ciliumebpf.Map     `ebpf:"counters"`
+	OnIssue       *ciliumebpf.Program `ebpf:"on_block_rq_issue"`
+	OnComplete    *ciliumebpf.Program `ebpf:"on_block_rq_complete"`
+	Counters      *ciliumebpf.Map     `ebpf:"counters"`
+	RequestStarts *ciliumebpf.Map     `ebpf:"request_starts"`
+	LatencyStats  *ciliumebpf.Map     `ebpf:"latency_stats"`
 }
 
 func (ciliumVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, error) {
@@ -468,7 +483,7 @@ func (ciliumVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, err
 	if err != nil {
 		var verifierError *ciliumebpf.VerifierError
 		if errors.As(err, &verifierError) {
-			return nil, NewVMBlockVerifierError("load typed-BTF count-only object", fmt.Sprintf("%+v", verifierError), err)
+			return nil, NewVMBlockVerifierError("load typed-BTF host request-latency object", fmt.Sprintf("%+v", verifierError), err)
 		}
 		return nil, err
 	}
@@ -483,29 +498,85 @@ func (objects *ciliumVMBlockObjects) AttachComplete() (io.Closer, error) {
 	return link.AttachTracing(link.TracingOptions{Program: objects.OnComplete})
 }
 
-func (objects *ciliumVMBlockObjects) ReadCounters() (VMBlockKernelCounters, error) {
+func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 	var perCPU []vmBlockCountValues
 	key := uint32(0)
 	if err := objects.Counters.Lookup(&key, &perCPU); err != nil {
-		return VMBlockKernelCounters{}, err
+		return VMBlockKernelStats{}, fmt.Errorf("read request-correlation counters: %w", err)
 	}
 	var counters VMBlockKernelCounters
 	for _, value := range perCPU {
 		counters.IssueSeen = saturatingAdd(counters.IssueSeen, value.IssueSeen)
 		counters.CompleteSeen = saturatingAdd(counters.CompleteSeen, value.CompleteSeen)
 		counters.NullRequest = saturatingAdd(counters.NullRequest, value.NullRequest)
+		counters.DuplicateIssue = saturatingAdd(counters.DuplicateIssue, value.DuplicateIssue)
+		counters.LookupMiss = saturatingAdd(counters.LookupMiss, value.LookupMiss)
+		counters.MapFull = saturatingAdd(counters.MapFull, value.MapFull)
+		counters.CompletedLatencyEvents = saturatingAdd(counters.CompletedLatencyEvents, value.CompletedLatencyEvents)
 	}
-	return counters, nil
+
+	var perCPULatency []vmBlockLatencyValues
+	if err := objects.LatencyStats.Lookup(&key, &perCPULatency); err != nil {
+		return VMBlockKernelStats{}, fmt.Errorf("read request-latency histogram: %w", err)
+	}
+	latency := mergeVMBlockPerCPULatency(perCPULatency)
+
+	var requestKey uint64
+	var issuedAtNS uint64
+	iterator := objects.RequestStarts.Iterate()
+	for iterator.Next(&requestKey, &issuedAtNS) {
+		counters.IncompleteAtWindowEnd = saturatingAdd(counters.IncompleteAtWindowEnd, 1)
+	}
+	if err := iterator.Err(); err != nil {
+		return VMBlockKernelStats{}, fmt.Errorf("count incomplete request correlations: %w", err)
+	}
+	return VMBlockKernelStats{Counters: counters, HostLatency: latency}, nil
 }
 
 func (objects *ciliumVMBlockObjects) Close() error {
-	return errors.Join(closeCiliumProgram(objects.OnIssue), closeCiliumProgram(objects.OnComplete), closeCiliumMap(objects.Counters))
+	return errors.Join(
+		closeCiliumProgram(objects.OnIssue),
+		closeCiliumProgram(objects.OnComplete),
+		closeCiliumMap(objects.Counters),
+		closeCiliumMap(objects.RequestStarts),
+		closeCiliumMap(objects.LatencyStats),
+	)
 }
 
 type vmBlockCountValues struct {
-	IssueSeen    uint64
-	CompleteSeen uint64
-	NullRequest  uint64
+	IssueSeen              uint64
+	CompleteSeen           uint64
+	NullRequest            uint64
+	DuplicateIssue         uint64
+	LookupMiss             uint64
+	MapFull                uint64
+	CompletedLatencyEvents uint64
+}
+
+type vmBlockLatencyValues struct {
+	Count   uint64
+	TotalNS uint64
+	MinNS   uint64
+	MaxNS   uint64
+	Buckets [len(vmBlockLatencyBucketUpperNS)]uint64
+}
+
+func mergeVMBlockPerCPULatency(values []vmBlockLatencyValues) VMBlockKernelLatency {
+	var result VMBlockKernelLatency
+	for _, value := range values {
+		if value.Count > 0 && (result.Count == 0 || value.MinNS < result.MinNS) {
+			result.MinNS = value.MinNS
+		}
+		if value.MaxNS > result.MaxNS {
+			result.MaxNS = value.MaxNS
+		}
+		result.Count = saturatingAdd(result.Count, value.Count)
+		result.TotalNS = saturatingAdd(result.TotalNS, value.TotalNS)
+		for index, count := range value.Buckets {
+			result.Buckets[index] = saturatingAdd(result.Buckets[index], count)
+		}
+	}
+	return result
 }
 
 func closeCiliumProgram(program *ciliumebpf.Program) error {

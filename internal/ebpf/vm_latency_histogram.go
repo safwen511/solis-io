@@ -70,6 +70,23 @@ func (histogram *boundedVMBlockLatencyHistogram) observe(latencyNS uint64) {
 	}
 }
 
+func (histogram *boundedVMBlockLatencyHistogram) mergeKernel(value VMBlockKernelLatency) {
+	if value.Count == 0 {
+		return
+	}
+	if histogram.count == 0 || value.MinNS < histogram.minNS {
+		histogram.minNS = value.MinNS
+	}
+	if value.MaxNS > histogram.maxNS {
+		histogram.maxNS = value.MaxNS
+	}
+	histogram.count = saturatingAdd(histogram.count, value.Count)
+	histogram.totalNS = saturatingAdd(histogram.totalNS, value.TotalNS)
+	for index, count := range value.Buckets {
+		histogram.buckets[index] = saturatingAdd(histogram.buckets[index], count)
+	}
+}
+
 func (histogram boundedVMBlockLatencyHistogram) summary() (minimum, average, p50, p95, p99, maximum float64) {
 	if histogram.count == 0 {
 		return 0, 0, 0, 0, 0, 0

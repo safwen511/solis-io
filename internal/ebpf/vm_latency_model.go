@@ -35,40 +35,75 @@ type VMBlockLatencyAvailability struct {
 
 // VMBlockLatencyVM contains attributed latency for one inventory VM.
 type VMBlockLatencyVM struct {
-	Name               string   `json:"name"`
-	Tenant             string   `json:"tenant"`
-	Role               string   `json:"role"`
-	QEMUPID            int      `json:"qemu_pid"`
-	CgroupPath         string   `json:"cgroup_path"`
-	CgroupID           uint64   `json:"cgroup_id"`
-	Disk               string   `json:"disk"`
-	Devices            []string `json:"devices"`
-	ReadOps            uint64   `json:"read_ops"`
-	WriteOps           uint64   `json:"write_ops"`
-	TotalOps           uint64   `json:"total_ops"`
-	LatencyMinMS       float64  `json:"latency_min_ms"`
-	LatencyAvgMS       float64  `json:"latency_avg_ms"`
-	LatencyP50MS       float64  `json:"latency_p50_ms"`
-	LatencyP95MS       float64  `json:"latency_p95_ms"`
-	LatencyP99MS       float64  `json:"latency_p99_ms"`
-	LatencyMaxMS       float64  `json:"latency_max_ms"`
-	MappingQuality     string   `json:"mapping_quality"`
-	AttributionQuality string   `json:"attribution_quality"`
-	Caveats            []string `json:"caveats"`
+	Name                   string                          `json:"name"`
+	Tenant                 string                          `json:"tenant"`
+	Role                   string                          `json:"role"`
+	QEMUPID                int                             `json:"qemu_pid"`
+	CgroupPath             string                          `json:"cgroup_path"`
+	CgroupID               uint64                          `json:"cgroup_id"`
+	Disk                   string                          `json:"disk"`
+	Devices                []string                        `json:"devices"`
+	ReadOps                uint64                          `json:"read_ops"`
+	WriteOps               uint64                          `json:"write_ops"`
+	FlushOps               uint64                          `json:"flush_ops"`
+	UnknownOps             uint64                          `json:"unknown_ops"`
+	TotalOps               uint64                          `json:"total_ops"`
+	LatencyMinMS           float64                         `json:"latency_min_ms"`
+	LatencyAvgMS           float64                         `json:"latency_avg_ms"`
+	LatencyP50MS           float64                         `json:"latency_p50_ms"`
+	LatencyP95MS           float64                         `json:"latency_p95_ms"`
+	LatencyP99MS           float64                         `json:"latency_p99_ms"`
+	LatencyMaxMS           float64                         `json:"latency_max_ms"`
+	PercentilesApproximate bool                            `json:"percentiles_approximate"`
+	Histogram              []VMBlockLatencyHistogramBucket `json:"histogram"`
+	DeviceOperations       []VMBlockLatencyDeviceOperation `json:"device_operations"`
+	MappingQuality         string                          `json:"mapping_quality"`
+	AttributionQuality     string                          `json:"attribution_quality"`
+	Caveats                []string                        `json:"caveats"`
 }
 
 // VMBlockLatencySummary is the attributed host-wide aggregate. It does not
 // include unattributed requests.
 type VMBlockLatencySummary struct {
-	ReadOps      uint64  `json:"read_ops"`
-	WriteOps     uint64  `json:"write_ops"`
-	TotalOps     uint64  `json:"total_ops"`
-	LatencyMinMS float64 `json:"latency_min_ms"`
-	LatencyAvgMS float64 `json:"latency_avg_ms"`
-	LatencyP50MS float64 `json:"latency_p50_ms"`
-	LatencyP95MS float64 `json:"latency_p95_ms"`
-	LatencyP99MS float64 `json:"latency_p99_ms"`
-	LatencyMaxMS float64 `json:"latency_max_ms"`
+	ReadOps                uint64                          `json:"read_ops"`
+	WriteOps               uint64                          `json:"write_ops"`
+	FlushOps               uint64                          `json:"flush_ops"`
+	UnknownOps             uint64                          `json:"unknown_ops"`
+	TotalOps               uint64                          `json:"total_ops"`
+	LatencyMinMS           float64                         `json:"latency_min_ms"`
+	LatencyAvgMS           float64                         `json:"latency_avg_ms"`
+	LatencyP50MS           float64                         `json:"latency_p50_ms"`
+	LatencyP95MS           float64                         `json:"latency_p95_ms"`
+	LatencyP99MS           float64                         `json:"latency_p99_ms"`
+	LatencyMaxMS           float64                         `json:"latency_max_ms"`
+	PercentilesApproximate bool                            `json:"percentiles_approximate"`
+	Histogram              []VMBlockLatencyHistogramBucket `json:"histogram"`
+}
+
+// VMBlockLatencyHistogramBucket is one fixed, bounded latency bucket.
+// Percentiles in this report are derived from these buckets and are therefore
+// approximate; min, max, count, and average remain based on exact event values.
+type VMBlockLatencyHistogramBucket struct {
+	Range   string  `json:"range"`
+	Count   uint64  `json:"count"`
+	Percent float64 `json:"percent"`
+}
+
+// VMBlockLatencyDeviceOperation is a bounded aggregate for one VM, block
+// device, and operation. No individual request latency values are retained.
+type VMBlockLatencyDeviceOperation struct {
+	Device                 string                          `json:"device"`
+	Operation              string                          `json:"operation"`
+	Count                  uint64                          `json:"count"`
+	TotalLatencyMS         float64                         `json:"total_latency_ms"`
+	LatencyMinMS           float64                         `json:"latency_min_ms"`
+	LatencyAvgMS           float64                         `json:"latency_avg_ms"`
+	LatencyP50MS           float64                         `json:"latency_p50_ms"`
+	LatencyP95MS           float64                         `json:"latency_p95_ms"`
+	LatencyP99MS           float64                         `json:"latency_p99_ms"`
+	LatencyMaxMS           float64                         `json:"latency_max_ms"`
+	PercentilesApproximate bool                            `json:"percentiles_approximate"`
+	Histogram              []VMBlockLatencyHistogramBucket `json:"histogram"`
 }
 
 // VMBlockLatencyUnattributed records conditions that prevent or weaken VM
@@ -85,6 +120,9 @@ type VMBlockLatencyUnattributed struct {
 	UnsupportedRequest     uint64  `json:"unsupported_request"`
 	StackedDeviceAmbiguous uint64  `json:"stacked_device_ambiguous"`
 	IncompleteAtWindowEnd  uint64  `json:"incomplete_at_window_end"`
+	DroppedEvents          uint64  `json:"dropped_events"`
+	RingBufferLost         uint64  `json:"ring_buffer_lost"`
+	MapFull                uint64  `json:"map_full"`
 	TotalUnattributedOps   uint64  `json:"total_unattributed_ops"`
 	UnattributedPercent    float64 `json:"unattributed_percent"`
 }

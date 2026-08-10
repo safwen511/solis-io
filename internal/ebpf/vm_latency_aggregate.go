@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"sort"
 	"strings"
@@ -35,12 +34,6 @@ type VMBlockEventSource interface {
 	Collect(context.Context, time.Duration, func(VMBlockEvent) error) error
 }
 
-type unavailableVMBlockEventSource struct{}
-
-func (unavailableVMBlockEventSource) Collect(context.Context, time.Duration, func(VMBlockEvent) error) error {
-	return ErrVMBlockLatencyNotImplemented
-}
-
 type pendingVMBlockIssue struct {
 	timestampNS uint64
 	cgroupID    uint64
@@ -50,11 +43,19 @@ type pendingVMBlockIssue struct {
 }
 
 type vmLatencyAccumulator struct {
-	mappingIndex int
-	latenciesMS  []float64
-	devices      map[string]bool
-	readOps      uint64
-	writeOps     uint64
+	mappingIndex     int
+	latency          boundedVMBlockLatencyHistogram
+	deviceOperations map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram
+	devices          map[string]bool
+	readOps          uint64
+	writeOps         uint64
+	flushOps         uint64
+	unknownOps       uint64
+}
+
+type vmDeviceOperationKey struct {
+	device    string
+	operation string
 }
 
 // CollectVMBlockLatencyReport returns a structured experimental status. Until
@@ -75,12 +76,19 @@ func CollectVMBlockLatencyReportForPlatform(ctx context.Context, options VMBlock
 		})
 		return normalizeVMBlockLatencyReport(report)
 	}
-	return CollectVMBlockLatencyReportWithSource(ctx, options, mappings, unavailableVMBlockEventSource{})
+	return CollectVMBlockLatencyReportWithKernelSource(ctx, options, mappings, experimentalVMBlockKernelSource{})
 }
 
 // CollectVMBlockLatencyReportWithSource is the fake-event test seam and the
 // future integration point for the typed BTF eBPF source.
 func CollectVMBlockLatencyReportWithSource(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping, source VMBlockEventSource) VMBlockLatencyReport {
+	return CollectVMBlockLatencyReportWithKernelSource(ctx, options, mappings, newEventSourceKernelAdapter(source))
+}
+
+// CollectVMBlockLatencyReportWithKernelSource runs one lifecycle-managed
+// source. Product code uses the explicitly unavailable experimental source;
+// fake sources are used only by tests until a real loader is implemented.
+func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping, source VMBlockKernelSource) VMBlockLatencyReport {
 	report := newVMBlockLatencyReport(options, mappings)
 	if options.Duration <= 0 || options.Interval <= 0 || options.Interval > options.Duration {
 		report.Availability.Status = "invalid_options"
@@ -90,10 +98,6 @@ func CollectVMBlockLatencyReportWithSource(ctx context.Context, options VMBlockL
 		})
 		return normalizeVMBlockLatencyReport(report)
 	}
-	if source == nil {
-		source = unavailableVMBlockEventSource{}
-	}
-
 	aggregator, err := newVMBlockEventAggregator(&report, mappings, options.DeviceFilter)
 	if err != nil {
 		report.Availability.Status = "mapping_error"
@@ -103,7 +107,8 @@ func CollectVMBlockLatencyReportWithSource(ctx context.Context, options VMBlockL
 		})
 		return normalizeVMBlockLatencyReport(report)
 	}
-	err = source.Collect(ctx, options.Duration, aggregator.consume)
+	stats, err := runVMBlockKernelSource(ctx, source, options, mappings, aggregator.consume)
+	aggregator.recordKernelStats(stats)
 	aggregator.finish(err == nil)
 	if err != nil {
 		status, message := vmBlockCollectorError(err)
@@ -125,7 +130,7 @@ type vmBlockEventAggregator struct {
 	cgroupIndex map[uint64]int
 	issues      map[uint64]pendingVMBlockIssue
 	byVM        map[int]*vmLatencyAccumulator
-	hostLatency []float64
+	hostLatency boundedVMBlockLatencyHistogram
 	filter      string
 }
 
@@ -218,22 +223,44 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 		unattributed.UnmappedCgroup++
 		return
 	}
-	latencyMS := float64(event.TimestampNS-issue.timestampNS) / 1_000_000
 	accumulator := aggregator.byVM[mappingIndex]
 	if accumulator == nil {
-		accumulator = &vmLatencyAccumulator{mappingIndex: mappingIndex, devices: make(map[string]bool)}
+		accumulator = &vmLatencyAccumulator{
+			mappingIndex: mappingIndex, devices: make(map[string]bool),
+			deviceOperations: make(map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram),
+		}
 		aggregator.byVM[mappingIndex] = accumulator
 	}
-	accumulator.latenciesMS = append(accumulator.latenciesMS, latencyMS)
-	aggregator.hostLatency = append(aggregator.hostLatency, latencyMS)
+	latencyNS := event.TimestampNS - issue.timestampNS
+	accumulator.latency.observe(latencyNS)
+	aggregator.hostLatency.observe(latencyNS)
 	if issue.device != "" {
 		accumulator.devices[issue.device] = true
 	}
-	if issue.operation == "read" {
-		accumulator.readOps++
-	} else {
-		accumulator.writeOps++
+	device := firstNonEmpty(issue.device, "-")
+	key := vmDeviceOperationKey{device: device, operation: issue.operation}
+	operationHistogram := accumulator.deviceOperations[key]
+	if operationHistogram == nil {
+		operationHistogram = &boundedVMBlockLatencyHistogram{}
+		accumulator.deviceOperations[key] = operationHistogram
 	}
+	operationHistogram.observe(latencyNS)
+	switch issue.operation {
+	case "read":
+		accumulator.readOps++
+	case "write":
+		accumulator.writeOps++
+	case "flush":
+		accumulator.flushOps++
+	default:
+		accumulator.unknownOps++
+	}
+}
+
+func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelStats) {
+	aggregator.report.Unattributed.DroppedEvents += stats.DroppedEvents
+	aggregator.report.Unattributed.RingBufferLost += stats.RingBufferLost
+	aggregator.report.Unattributed.MapFull += stats.MapFull
 }
 
 func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
@@ -255,9 +282,14 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 		vm := &aggregator.report.VMs[index]
 		vm.ReadOps = accumulator.readOps
 		vm.WriteOps = accumulator.writeOps
-		vm.TotalOps = accumulator.readOps + accumulator.writeOps
+		vm.FlushOps = accumulator.flushOps
+		vm.UnknownOps = accumulator.unknownOps
+		vm.TotalOps = accumulator.latency.count
 		vm.Devices = mapKeys(accumulator.devices)
-		vm.LatencyMinMS, vm.LatencyAvgMS, vm.LatencyP50MS, vm.LatencyP95MS, vm.LatencyP99MS, vm.LatencyMaxMS = latencyStatistics(accumulator.latenciesMS)
+		vm.LatencyMinMS, vm.LatencyAvgMS, vm.LatencyP50MS, vm.LatencyP95MS, vm.LatencyP99MS, vm.LatencyMaxMS = accumulator.latency.summary()
+		vm.PercentilesApproximate = accumulator.latency.count > 0
+		vm.Histogram = accumulator.latency.publicBuckets()
+		vm.DeviceOperations = deviceOperationSummaries(accumulator.deviceOperations)
 		if collectionAvailable {
 			vm.AttributionQuality = "experimental_blkcg_correlated"
 		} else {
@@ -268,9 +300,13 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 	for _, vm := range aggregator.report.VMs {
 		host.ReadOps += vm.ReadOps
 		host.WriteOps += vm.WriteOps
+		host.FlushOps += vm.FlushOps
+		host.UnknownOps += vm.UnknownOps
 	}
-	host.TotalOps = host.ReadOps + host.WriteOps
-	host.LatencyMinMS, host.LatencyAvgMS, host.LatencyP50MS, host.LatencyP95MS, host.LatencyP99MS, host.LatencyMaxMS = latencyStatistics(aggregator.hostLatency)
+	host.TotalOps = aggregator.hostLatency.count
+	host.LatencyMinMS, host.LatencyAvgMS, host.LatencyP50MS, host.LatencyP95MS, host.LatencyP99MS, host.LatencyMaxMS = aggregator.hostLatency.summary()
+	host.PercentilesApproximate = aggregator.hostLatency.count > 0
+	host.Histogram = aggregator.hostLatency.publicBuckets()
 	unattributed := &aggregator.report.Unattributed
 	unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd
 	denominator := host.TotalOps + unattributed.TotalUnattributedOps
@@ -314,6 +350,8 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 			"kernel BTF layout and privileged eBPF tracepoint access are required",
 			"unattributed events must be considered before using per-VM comparisons",
 			"requests incomplete at the observation-window boundary are censored requests, not necessarily errors",
+			"p50, p95, and p99 latency values are approximate fixed-bucket estimates; min, max, count, and average use exact observed event values",
+			"dropped-event, ring-buffer-loss, and map-full counters describe instrumentation loss and are not treated as exact completed request counts",
 		},
 	}
 	for _, mapping := range mappings {
@@ -327,7 +365,8 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		report.VMs = append(report.VMs, VMBlockLatencyVM{
 			Name: mapping.Name, Tenant: mapping.Tenant, Role: mapping.Role, QEMUPID: mapping.QEMUPID,
 			CgroupPath: mapping.PrimaryPath, CgroupID: mapping.PrimaryID, Disk: mapping.Disk,
-			Devices: []string{}, MappingQuality: mapping.MappingQuality, AttributionQuality: "unavailable",
+			Devices: []string{}, Histogram: emptyVMBlockLatencyBuckets(), DeviceOperations: []VMBlockLatencyDeviceOperation{},
+			MappingQuality: mapping.MappingQuality, AttributionQuality: "unavailable",
 			Caveats: mappingCaveats,
 		})
 	}
@@ -344,11 +383,19 @@ func mappingAvailabilityStatus(quality string) string {
 }
 
 func vmBlockCollectorError(err error) (string, string) {
+	var verifierError *VMBlockVerifierError
+	var capabilityError *VMBlockCapabilityError
 	switch {
 	case errors.Is(err, ErrVMBlockLatencyNotImplemented):
 		return "experimental_not_implemented", ErrVMBlockLatencyNotImplemented.Error()
 	case errors.Is(err, ErrVMBlockLatencyPermission), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
 		return "permission_denied", ErrVMBlockLatencyPermission.Error()
+	case errors.Is(err, ErrVMBlockUnsupportedKernel):
+		return "unsupported_kernel", err.Error()
+	case errors.As(err, &verifierError):
+		return VMBlockCapabilityVerifierRejected, verifierError.Error()
+	case errors.As(err, &capabilityError):
+		return firstNonEmpty(capabilityError.Status, VMBlockCapabilityResolutionError), capabilityError.Error()
 	default:
 		return "error", fmt.Sprintf("per-VM eBPF block latency unavailable: %v", err)
 	}
@@ -356,41 +403,51 @@ func vmBlockCollectorError(err error) (string, string) {
 
 func normalizeBlockOperation(operation string) string {
 	operation = strings.ToLower(strings.TrimSpace(operation))
-	switch {
-	case operation == "read", operation == "r", strings.HasPrefix(operation, "r"):
+	switch operation {
+	case "read", "r":
 		return "read"
-	case operation == "write", operation == "w", strings.HasPrefix(operation, "w"):
+	case "write", "w":
 		return "write"
+	case "flush", "f":
+		return "flush"
 	default:
-		return ""
+		return "unknown"
 	}
 }
 
-func latencyStatistics(values []float64) (minimum, average, p50, p95, p99, maximum float64) {
-	if len(values) == 0 {
-		return 0, 0, 0, 0, 0, 0
+func deviceOperationSummaries(values map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram) []VMBlockLatencyDeviceOperation {
+	keys := make([]vmDeviceOperationKey, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
-	ordered := append([]float64(nil), values...)
-	sort.Float64s(ordered)
-	var total float64
-	for _, value := range ordered {
-		total += value
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].device != keys[j].device {
+			return keys[i].device < keys[j].device
+		}
+		return blockOperationOrder(keys[i].operation) < blockOperationOrder(keys[j].operation)
+	})
+	result := make([]VMBlockLatencyDeviceOperation, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, operationSummary(key.device, key.operation, *values[key]))
 	}
-	return ordered[0], total / float64(len(ordered)), nearestRank(ordered, 0.50), nearestRank(ordered, 0.95), nearestRank(ordered, 0.99), ordered[len(ordered)-1]
+	return result
 }
 
-func nearestRank(ordered []float64, percentile float64) float64 {
-	if len(ordered) == 0 {
+func blockOperationOrder(operation string) int {
+	switch operation {
+	case "read":
 		return 0
+	case "write":
+		return 1
+	case "flush":
+		return 2
+	default:
+		return 3
 	}
-	index := int(math.Ceil(percentile*float64(len(ordered)))) - 1
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(ordered) {
-		index = len(ordered) - 1
-	}
-	return ordered[index]
+}
+
+func emptyVMBlockLatencyBuckets() []VMBlockLatencyHistogramBucket {
+	return (boundedVMBlockLatencyHistogram{}).publicBuckets()
 }
 
 func mapKeys(values map[string]bool) []string {
@@ -406,7 +463,7 @@ func attributionQuality(unattributed VMBlockLatencyUnattributed, attributed uint
 	if attributed == 0 {
 		return "no_attributed_events"
 	}
-	if unattributed.TotalUnattributedOps > 0 {
+	if unattributed.TotalUnattributedOps > 0 || unattributed.DroppedEvents > 0 || unattributed.RingBufferLost > 0 || unattributed.MapFull > 0 {
 		return "experimental_partial"
 	}
 	return "experimental_blkcg_correlated"

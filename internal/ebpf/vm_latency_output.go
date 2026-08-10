@@ -38,6 +38,7 @@ func normalizeVMBlockLatencyReport(report VMBlockLatencyReport) VMBlockLatencyRe
 	report.Validation.Caveats = append([]string(nil), report.Validation.Caveats...)
 	report.UnavailableSections = append([]VMBlockLatencyUnavailableSection(nil), report.UnavailableSections...)
 	report.Caveats = append([]string(nil), report.Caveats...)
+	report.HostSummary.Histogram = append([]VMBlockLatencyHistogramBucket(nil), report.HostSummary.Histogram...)
 	if report.VMs == nil {
 		report.VMs = []VMBlockLatencyVM{}
 	}
@@ -59,9 +60,35 @@ func normalizeVMBlockLatencyReport(report VMBlockLatencyReport) VMBlockLatencyRe
 	if report.Caveats == nil {
 		report.Caveats = []string{}
 	}
+	if report.HostSummary.Histogram == nil {
+		report.HostSummary.Histogram = emptyVMBlockLatencyBuckets()
+	}
 	for index := range report.VMs {
 		report.VMs[index].Devices = sortedUniqueStrings(report.VMs[index].Devices)
+		report.VMs[index].Histogram = append([]VMBlockLatencyHistogramBucket(nil), report.VMs[index].Histogram...)
+		report.VMs[index].DeviceOperations = append([]VMBlockLatencyDeviceOperation(nil), report.VMs[index].DeviceOperations...)
 		report.VMs[index].Caveats = append([]string(nil), report.VMs[index].Caveats...)
+		if report.VMs[index].Histogram == nil {
+			report.VMs[index].Histogram = emptyVMBlockLatencyBuckets()
+		}
+		if report.VMs[index].DeviceOperations == nil {
+			report.VMs[index].DeviceOperations = []VMBlockLatencyDeviceOperation{}
+		}
+		for operationIndex := range report.VMs[index].DeviceOperations {
+			operation := &report.VMs[index].DeviceOperations[operationIndex]
+			operation.Histogram = append([]VMBlockLatencyHistogramBucket(nil), operation.Histogram...)
+			if operation.Histogram == nil {
+				operation.Histogram = emptyVMBlockLatencyBuckets()
+			}
+		}
+		sort.Slice(report.VMs[index].DeviceOperations, func(left, right int) bool {
+			leftOperation := report.VMs[index].DeviceOperations[left]
+			rightOperation := report.VMs[index].DeviceOperations[right]
+			if leftOperation.Device != rightOperation.Device {
+				return leftOperation.Device < rightOperation.Device
+			}
+			return blockOperationOrder(leftOperation.Operation) < blockOperationOrder(rightOperation.Operation)
+		})
 		if report.VMs[index].Caveats == nil {
 			report.VMs[index].Caveats = []string{}
 		}

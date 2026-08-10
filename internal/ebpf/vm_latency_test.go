@@ -59,7 +59,7 @@ func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	if report.VMs[0].MappingQuality != "cgroup_v2_inode_tree" || report.VMs[0].AttributionQuality != "experimental_blkcg_correlated" {
 		t.Fatalf("separate mapping/attribution quality not preserved: %#v", report.VMs[0])
 	}
-	if report.VMs[1].Name != "b-stress" || report.VMs[1].WriteOps != 2 || report.VMs[1].LatencyAvgMS != 3 || report.VMs[1].LatencyP95MS != 4 {
+	if report.VMs[1].Name != "b-stress" || report.VMs[1].WriteOps != 2 || report.VMs[1].LatencyAvgMS != 3 || report.VMs[1].LatencyP95MS != 5 || !report.VMs[1].PercentilesApproximate {
 		t.Fatalf("b-stress = %#v", report.VMs[1])
 	}
 	if report.HostSummary.TotalOps != 3 || report.HostSummary.ReadOps != 1 || report.HostSummary.WriteOps != 2 {
@@ -67,14 +67,18 @@ func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	}
 }
 
-func TestVMBlockLatencyPercentiles(t *testing.T) {
-	values := make([]float64, 100)
-	for index := range values {
-		values[index] = float64(index + 1)
+func TestVMBlockLatencyBoundedHistogramStatistics(t *testing.T) {
+	var histogram boundedVMBlockLatencyHistogram
+	for _, latency := range []time.Duration{50 * time.Microsecond, 100 * time.Microsecond, 750 * time.Microsecond, 4 * time.Millisecond, 2 * time.Second} {
+		histogram.observe(uint64(latency))
 	}
-	minimum, average, p50, p95, p99, maximum := latencyStatistics(values)
-	if minimum != 1 || average != 50.5 || p50 != 50 || p95 != 95 || p99 != 99 || maximum != 100 {
+	minimum, average, p50, p95, p99, maximum := histogram.summary()
+	if minimum != 0.05 || average != 400.98 || p50 != 1 || p95 != 2000 || p99 != 2000 || maximum != 2000 {
 		t.Fatalf("stats = %v %v %v %v %v %v", minimum, average, p50, p95, p99, maximum)
+	}
+	buckets := histogram.publicBuckets()
+	if len(buckets) != 14 || buckets[0].Range != "<100 us" || buckets[0].Count != 1 || buckets[1].Count != 1 || buckets[13].Range != "1 s+" || buckets[13].Count != 1 {
+		t.Fatalf("buckets = %#v", buckets)
 	}
 }
 
@@ -87,7 +91,7 @@ func TestVMBlockLatencyUnattributedCounters(t *testing.T) {
 		{Kind: "complete", RequestPointer: 3, TimestampNS: 2},
 		{Kind: "complete", RequestPointer: 44, TimestampNS: 2},
 		{Kind: "issue", RequestPointer: 5, TimestampNS: 1, CgroupID: 11, Operation: "write", StackedDeviceAmbiguous: true},
-		{Kind: "issue", RequestPointer: 6, TimestampNS: 1, CgroupID: 11, Operation: "flush"},
+		{Kind: "issue", RequestPointer: 6, TimestampNS: 1, UnsupportedRequest: true},
 		{Kind: "issue", RequestPointer: 7, TimestampNS: 1, CgroupID: 11, Operation: "write"},
 		{Kind: "issue", RequestPointer: 7, TimestampNS: 2, CgroupID: 11, Operation: "write"},
 		{Kind: "issue", RequestPointer: 8, TimestampNS: 1, CgroupID: 11, Operation: "write"},
@@ -154,6 +158,9 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	if deferred.HostSummary.TotalOps != 0 || len(deferred.UnavailableSections) == 0 || len(deferred.Caveats) == 0 || privacyCollected(deferred) {
 		t.Fatalf("deferred report falsely claims measurement or misses safeguards: %#v", deferred)
 	}
+	if deferred.HostSummary.LatencyMinMS != 0 || deferred.HostSummary.LatencyAvgMS != 0 || deferred.HostSummary.LatencyP50MS != 0 || deferred.HostSummary.LatencyP95MS != 0 || deferred.HostSummary.LatencyP99MS != 0 || deferred.HostSummary.LatencyMaxMS != 0 || histogramCount(deferred.HostSummary.Histogram) != 0 {
+		t.Fatalf("deferred report contains fake latency: %#v", deferred.HostSummary)
+	}
 	var rendered bytes.Buffer
 	if err := WriteVMBlockLatencyJSON(&rendered, deferred); err != nil {
 		t.Fatal(err)
@@ -165,6 +172,14 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	if decoded.Availability.Available || decoded.Availability.Status != "experimental_not_implemented" || decoded.HostSummary.TotalOps != 0 || privacyCollected(decoded) {
 		t.Fatalf("rendered deferred report = %#v", decoded)
 	}
+}
+
+func histogramCount(buckets []VMBlockLatencyHistogramBucket) uint64 {
+	var count uint64
+	for _, bucket := range buckets {
+		count += bucket.Count
+	}
+	return count
 }
 
 func TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable(t *testing.T) {

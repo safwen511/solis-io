@@ -12,6 +12,7 @@ import (
 
 	"github.com/safwen511/solis-io/internal/capture"
 	solisconfig "github.com/safwen511/solis-io/internal/config"
+	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/guest"
 	"github.com/safwen511/solis-io/internal/inventory"
 	"github.com/safwen511/solis-io/internal/storagevm"
@@ -1222,6 +1223,9 @@ func TestSelectVMStorageStatsTargets(t *testing.T) {
 
 func TestWriteVMStorageStatsOutputIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "stats.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	report := storagevm.VMStorageStatsReport{SchemaVersion: storagevm.SchemaVersion, VMs: []storagevm.VMStorageStatsVM{}}
 	if err := writeVMStorageStatsOutput(path, report); err != nil {
 		t.Fatal(err)
@@ -1243,5 +1247,79 @@ func TestWriteVMStorageStatsOutputIsPrivate(t *testing.T) {
 	}
 	if decoded.SchemaVersion != storagevm.SchemaVersion {
 		t.Fatalf("decoded = %#v", decoded)
+	}
+}
+
+func TestWriteVMBlockLatencyOutputIsPrivateAndDeterministic(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "vm-block.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	report := ebpf.VMBlockLatencyReport{
+		SchemaVersion: "1", ObservedAtUTC: "2026-08-10T00:00:00Z",
+		Mode: "experimental", CollectionMode: "typed_btf_count_only",
+		AttributionMethod: "none_count_only", AttributionQuality: "unavailable",
+		Availability: ebpf.VMBlockLatencyAvailability{Status: "object_unavailable"},
+		VMs:          []ebpf.VMBlockLatencyVM{},
+	}
+	if err := writeVMBlockLatencyOutput(path, report); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", info.Mode().Perm())
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeVMBlockLatencyOutput(path, report); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("atomic report output is not deterministic:\n%s\n%s", first, second)
+	}
+	var decoded ebpf.VMBlockLatencyReport
+	if err := json.Unmarshal(second, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Availability.Status != "object_unavailable" {
+		t.Fatalf("decoded report = %#v", decoded)
+	}
+}
+
+func TestRunEBPFVMBlockLatencyWithoutOutputKeepsJSONOnStdout(t *testing.T) {
+	directory := t.TempDir()
+	inventoryPath := filepath.Join(directory, "vms.csv")
+	if err := os.WriteFile(inventoryPath, []byte(
+		"name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\n"+
+			"a-web,tenant-a,tenant-a-net,192.0.2.10,1024,1,10,web\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, directory, "virsh", "#!/bin/sh\nexit 1\n")
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	runtimeConfig := solisconfig.DevelopmentDefaults()
+	runtimeConfig.Settings.InventoryCSV = inventoryPath
+	var stdout bytes.Buffer
+	if err := runEBPFVMBlockLatency(runtimeConfig, ebpfVMBlockLatencyOptions{
+		Victim: "a-web", Duration: time.Second, Interval: time.Second, JSON: true,
+	}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var decoded ebpf.VMBlockLatencyReport
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.CollectionMode != "typed_btf_count_only" || decoded.AttributionMethod != "none_count_only" {
+		t.Fatalf("stdout report = %#v", decoded)
 	}
 }

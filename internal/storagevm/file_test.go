@@ -63,7 +63,7 @@ func TestWriteJSONFileCleansTempOnRenderFailure(t *testing.T) {
 	if err := WriteJSONFile(path, report); err == nil {
 		t.Fatal("expected privacy failure")
 	}
-	matches, err := filepath.Glob(filepath.Join(root, ".stats.json.tmp-*"))
+	matches, err := filepath.Glob(filepath.Join(root, ".solis-tmp-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package ebpf
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -27,9 +26,13 @@ type VMBlockKernelPreflight struct {
 // VMBlockKernelStats contains bounded loss counters reported by a kernel
 // source. These are instrumentation-quality signals, not fabricated I/O ops.
 type VMBlockKernelStats struct {
-	DroppedEvents  uint64 `json:"dropped_events"`
-	RingBufferLost uint64 `json:"ring_buffer_lost"`
-	MapFull        uint64 `json:"map_full"`
+	CollectionMode       string                `json:"collection_mode"`
+	AttributionMethod    string                `json:"attribution_method"`
+	AttributionAvailable bool                  `json:"attribution_available"`
+	Counters             VMBlockKernelCounters `json:"counters"`
+	DroppedEvents        uint64                `json:"dropped_events"`
+	RingBufferLost       uint64                `json:"ring_buffer_lost"`
+	MapFull              uint64                `json:"map_full"`
 }
 
 // VMBlockKernelSource is the lifecycle boundary for the future privileged
@@ -103,9 +106,10 @@ func boundVMBlockDiagnostic(value string, maximum int) string {
 	return value[:maximum-len(suffix)] + suffix
 }
 
-// experimentalVMBlockKernelSource is the only product source until a real,
-// verifier-tested typed-BTF loader exists. It cannot emit events or claim
-// successful collection.
+// experimentalVMBlockKernelSource represents the still-unimplemented
+// request-pointer latency and VM-attribution stage. The product count-only
+// source uses Cilium and reports object_unavailable until an authentic ELF is
+// embedded; this source remains useful for explicit deferred-feature tests.
 type experimentalVMBlockKernelSource struct{}
 
 func (experimentalVMBlockKernelSource) Preflight(context.Context) (VMBlockKernelPreflight, error) {
@@ -162,9 +166,15 @@ func (session *eventSourceKernelSession) Collect(ctx context.Context, duration t
 	return session.source.Collect(ctx, duration, consume)
 }
 
-func (*eventSourceKernelSession) Stats() VMBlockKernelStats { return VMBlockKernelStats{} }
-func (*eventSourceKernelSession) Stop() error               { return nil }
-func (*eventSourceKernelSession) Close() error              { return nil }
+func (*eventSourceKernelSession) Stats() VMBlockKernelStats {
+	return VMBlockKernelStats{
+		CollectionMode:       "test_event_stream",
+		AttributionMethod:    "request_pointer_correlated+bio_blkcg+cgroup_inode_vm_map",
+		AttributionAvailable: true,
+	}
+}
+func (*eventSourceKernelSession) Stop() error  { return nil }
+func (*eventSourceKernelSession) Close() error { return nil }
 
 func runVMBlockKernelSource(
 	ctx context.Context,
@@ -193,22 +203,47 @@ func runVMBlockKernelSource(
 		return VMBlockKernelStats{}, errors.New("per-VM eBPF kernel source returned a nil session")
 	}
 	defer func() {
-		closeErr := session.Close()
-		if err == nil && closeErr != nil {
-			err = fmt.Errorf("close per-VM eBPF collection: %w", closeErr)
+		closeErr := classifyVMBlockCleanupError("close per-VM eBPF collection", session.Close())
+		if closeErr != nil {
+			err = errors.Join(err, closeErr)
 		}
 	}()
 	if err = session.Start(ctx); err != nil {
-		return VMBlockKernelStats{}, err
+		return VMBlockKernelStats{}, classifyVMBlockLifecycleError("start_failed", "start per-VM eBPF collection", err)
 	}
-	collectErr := session.Collect(ctx, options.Duration, consume)
-	stopErr := session.Stop()
+	collectErr := classifyVMBlockLifecycleError("collection_failed", "collect per-VM eBPF events", session.Collect(ctx, options.Duration, consume))
+	stopErr := classifyVMBlockCleanupError("stop per-VM eBPF collection", session.Stop())
 	stats = session.Stats()
-	if collectErr != nil {
-		return stats, collectErr
+	return stats, errors.Join(collectErr, stopErr)
+}
+
+func classifyVMBlockLifecycleError(status, operation string, err error) error {
+	if err == nil {
+		return nil
 	}
-	if stopErr != nil {
-		return stats, fmt.Errorf("stop per-VM eBPF collection: %w", stopErr)
+	for _, stage := range vmBlockStageErrors(err) {
+		if stage.Status != "cleanup_failed" {
+			return err
+		}
 	}
-	return stats, nil
+	if errors.Is(err, context.Canceled) {
+		status = "cancelled"
+		operation = "per-VM eBPF collection cancelled"
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		status = "deadline_exceeded"
+		operation = "per-VM eBPF collection deadline exceeded"
+	}
+	return &VMBlockKernelStageError{Status: status, Operation: operation, Err: err}
+}
+
+func classifyVMBlockCleanupError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	for _, stage := range vmBlockStageErrors(err) {
+		if stage.Status == "cleanup_failed" {
+			return err
+		}
+	}
+	return &VMBlockKernelStageError{Status: "cleanup_failed", Operation: operation, Err: err}
 }

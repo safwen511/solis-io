@@ -63,6 +63,11 @@ func (session *fakeVMBlockKernelSession) Close() error {
 }
 
 func availableFakeKernelSource(session *fakeVMBlockKernelSession) *fakeVMBlockKernelSource {
+	if session.stats.CollectionMode == "" {
+		session.stats.CollectionMode = "test_event_stream"
+		session.stats.AttributionMethod = "request_pointer_correlated+bio_blkcg+cgroup_inode_vm_map"
+		session.stats.AttributionAvailable = true
+	}
 	return &fakeVMBlockKernelSource{
 		preflight: VMBlockKernelPreflight{Available: true, Status: "available"},
 		session:   session,
@@ -119,7 +124,7 @@ func TestVMBlockKernelSourcePartialStartFailureCleansUp(t *testing.T) {
 	if !session.started || session.stopped || !session.closed {
 		t.Fatalf("partial-start lifecycle = started:%v stopped:%v closed:%v", session.started, session.stopped, session.closed)
 	}
-	if report.Availability.Available || report.Availability.Status != "error" {
+	if report.Availability.Available || report.Availability.Status != "start_failed" {
 		t.Fatalf("availability = %#v", report.Availability)
 	}
 }
@@ -135,8 +140,52 @@ func TestVMBlockKernelSourceCleanupOnCollectError(t *testing.T) {
 	if !session.stopped || !session.closed {
 		t.Fatalf("cleanup = stopped:%v closed:%v", session.stopped, session.closed)
 	}
-	if report.Availability.Available || report.Availability.Status != "error" {
+	if report.Availability.Available || report.Availability.Status != "collection_failed" {
 		t.Fatalf("availability = %#v", report.Availability)
+	}
+}
+
+func TestVMBlockKernelSourcePrimaryErrorsPrecedeCleanupWarnings(t *testing.T) {
+	tests := []struct {
+		name       string
+		startErr   error
+		collectErr error
+		wantStatus string
+		wantText   string
+	}{
+		{name: "context cancellation", collectErr: context.Canceled, wantStatus: "cancelled", wantText: "context canceled"},
+		{name: "collection failure", collectErr: errors.New("event stream failed"), wantStatus: "collection_failed", wantText: "event stream failed"},
+		{name: "attach failure", startErr: &VMBlockKernelStageError{Status: "attach_failed", Operation: "attach issue", Err: errors.New("attach denied")}, wantStatus: "attach_failed", wantText: "attach denied"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := &fakeVMBlockKernelSession{
+				startErr: test.startErr, collectErr: test.collectErr,
+				closeErr: errors.New("resource cleanup failed"),
+			}
+			report := CollectVMBlockLatencyReportWithKernelSource(
+				context.Background(),
+				VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second},
+				nil,
+				availableFakeKernelSource(session),
+			)
+			if report.Availability.Available || report.Availability.Status != test.wantStatus {
+				t.Fatalf("availability = %#v", report.Availability)
+			}
+			if !strings.Contains(report.Availability.Error, test.wantText) || !strings.Contains(report.Availability.Error, "resource cleanup failed") {
+				t.Fatalf("primary and cleanup errors were not preserved: %#v", report.Availability)
+			}
+			if !hasUnavailableSection(report.UnavailableSections, "ebpf_cleanup", "cleanup_failed") {
+				t.Fatalf("cleanup unavailable section missing: %#v", report.UnavailableSections)
+			}
+			var rendered strings.Builder
+			if err := WriteVMBlockLatencyJSON(&rendered, report); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(rendered.String(), test.wantStatus) || !strings.Contains(rendered.String(), "cleanup_failed") {
+				t.Fatalf("rendered JSON lost primary or cleanup status: %s", rendered.String())
+			}
+		})
 	}
 }
 

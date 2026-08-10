@@ -35,7 +35,7 @@ Report-backed mode provides evidence about both sides of an incident: the tenant
 - Run report-backed or live-only noisy-neighbor diagnosis.
 - Monitor live noisy-neighbor conditions in repeated windows, alert on likely pressure, and optionally create cooldown-controlled capture bundles.
 - Collect experimental host/storage-path eBPF block latency counts and histograms, with optional victim/suspect topology context.
-- Expose an experimental per-VM block-latency JSON report contract, libvirt cgroup-inode mapper, fake-event aggregation path, and validation parsers; the privileged typed-BTF request-pointer attachment is deliberately not implemented yet.
+- Expose an experimental VM block-latency JSON contract, libvirt cgroup-inode mapper, bounded aggregation path, validation parsers, and a minimal Cilium typed-BTF count-only loader; request-pointer latency and VM ownership attribution remain deliberately unimplemented.
 - Produce private, atomically finalized capture bundles containing text evidence, a human-readable `incident-report.md`, machine-readable `evidence-summary.json`, and a SHA-256 integrity manifest.
 - Expose live VM status as a terminal table or JSON document.
 - Refresh VM status continuously with sorting, pressure counts, finite iterations, and clean signal handling.
@@ -126,7 +126,7 @@ Solis samples Linux process counters from `/proc/<qemu-pid>/io` and calculates p
 
 `solis vm storage-stats` collects two read-only samples around an observation window. Cgroup v2 `io.stat` provides byte, operation, and optional discard-counter deltas for the mapped libvirt VM cgroup. The collector verifies that the source cgroup inode is unchanged across the window; an emulator-cgroup fallback is labelled partial, and arbitrary vCPU/child cgroups are not treated as aggregate VM accounting. `virsh domstats <vm> --block` provides virtual-disk request, byte, flush, and cumulative timing deltas. `/proc/<qemu-pid>/io` provides optional process-accounting correlation only after the PID is verified as the same QEMU process in the same libvirt machine scope at both samples; insufficient procfs permissions make only that section unavailable.
 
-With no selector, or with `--all-vms`, the command targets all inventory VMs currently reported as running. Explicit `--victim` and optional `--suspect` selectors retain a named VM even when it is shut off so its unavailable state can be represented. JSON is required for now, and `--output` atomically writes the same document to a mode-`0600` regular file while refusing symbolic-link targets.
+With no selector, or with `--all-vms`, the command targets all inventory VMs currently reported as running. Explicit `--victim` and optional `--suspect` selectors retain a named VM even when it is shut off so its unavailable state can be represented. JSON is required for now, and `--output` atomically writes the same document to a mode-`0600` regular file while refusing symbolic links. The output parent directory must already exist; Solis does not create it.
 
 These are validation counters, not per-VM host block-latency measurements. Missing baselines, disappeared rows, duplicate identities, and counter resets are explicit and never converted into apparent window activity. Device-mapper, LVM, partition, and physical-device rows remain separate because summing stacked layers would double-count I/O. The command is intended to validate the cgroup and libvirt evidence used by the experimental `ebpf vm-block-latency` design; it does not prove exact physical-device latency, customer impact, or root cause.
 
@@ -145,13 +145,43 @@ block_rq_issue request pointer
   -> block_rq_complete request pointer latency
 ```
 
-The actual typed-BTF request-pointer attachment is currently deferred because the standard-library loader does not yet implement BTF/CO-RE relocation for nested `request -> bio -> blkcg` reads. The command therefore returns a structured `experimental_not_implemented` availability status instead of pretending that runtime attribution succeeded. JSON can still be emitted successfully with exit code 0 in this state: automation must inspect `availability.available` and `availability.status`, not process exit status alone. When implemented, it will require elevated BPF/tracepoint permissions; Solis will not invoke `sudo` internally.
+Real request-pointer latency and VM ownership attribution are still deferred. Task 3A adds a pinned Cilium loader for a much smaller first step: two `tp_btf` programs attach to `block_rq_issue` and `block_rq_complete` and increment host-wide per-CPU counters only. They do not dereference `request`, `bio`, `blkcg`, or cgroup fields; do not retain or expose request pointers; and do not measure latency or attribute activity to a VM. Successful output is labeled `collection_mode: typed_btf_count_only`, `attribution_method: none_count_only`, and `attribution_quality: unavailable`. Per-VM latency totals remain zero.
 
-Developer scaffolding now includes symbolic typed-BTF capability requirements, a lifecycle-managed kernel-source interface with structured permission/unsupported/verifier failures, and a bounded userspace aggregator. The aggregator keeps fixed buckets (`<100 us` through `1 s+`) per VM, device, and operation instead of retaining individual request latencies. Min, max, count, and average use exact sanitized event values; p50, p95, and p99 are explicitly approximate bucket-derived estimates. These interfaces and fake event sources are exercised only in tests—the product source remains unavailable until a real loader is implemented.
+The authentic embedded ELF object was not generated in this development environment because Clang/LLVM is unavailable. Without that object, the Cilium source preflight returns `availability.available: false` and `availability.status: object_unavailable`; it does not pretend attachment succeeded. `experimental_not_implemented` is reserved for the still-missing request-pointer latency and VM-attribution implementation. JSON may still be emitted with exit code 0 when the object is unavailable, so automation must inspect `availability.available` and `availability.status`, not process exit status alone. Object loading and attachment distinguish `object_invalid`, `object_load_failed`, `btf_incompatible`, `btf_missing`, `typed_tracepoint_missing`, `unsupported_endianness`, `permission_denied`, `verifier_rejected`, `attach_failed`, and `cleanup_failed`. Cleanup failures are retained as structured `ebpf_cleanup` unavailable sections even when another collection stage also fails. Solis never invokes `sudo` internally.
 
-The planned real loader is expected to use a pinned `github.com/cilium/ebpf` version and an embedded, reproducibly generated CO-RE object. Target hosts would not need Clang or `bpf2go` to run Solis, but the controlled generator/build environment would need the appropriate Clang/LLVM toolchain. That dependency and object-generation step have not been added yet.
+Developer scaffolding now includes symbolic typed-BTF capability requirements, a lifecycle-managed kernel-source interface with structured permission/unsupported/verifier failures, a Cilium count-only loader, and a bounded userspace aggregator. The aggregator keeps fixed buckets (`<100 us` through `1 s+`) per VM, device, and operation instead of retaining individual request latencies. Min, max, count, and average use exact sanitized event values; p50, p95, and p99 are explicitly approximate bucket-derived estimates. Fake event and loader sources are exercised only in tests. The product count-only source is implemented but remains unavailable at runtime until an authentic generated ELF object is embedded.
 
-Use `--all-vms` to make the all-running-VM selection explicit, or select one or two exact inventory VM names with `--victim` and `--suspect`. `--device` accepts a kernel block name such as `nvme0n1` or `dm-0`. `--output` writes the same JSON document to a mode-`0600` file while retaining JSON on stdout.
+The loader uses `github.com/cilium/ebpf` v0.22.0. Regenerate the little-endian object on a development host with the matching toolchain:
+
+```bash
+go generate ./internal/ebpf
+```
+
+The generation script pins `bpf2go` v0.22.0, compiles [vm_block_latency.bpf.c](internal/ebpf/bpf/vm_block_latency.bpf.c), and installs only the authentic ELF at `internal/ebpf/bpf/generated/vm_block_latency_bpfel.o`. [build/ebpf/Dockerfile](build/ebpf/Dockerfile) supplies a controlled convenience environment when the development host lacks Clang/LLVM:
+
+```bash
+docker build -t solis-ebpf-gen -f build/ebpf/Dockerfile .
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
+  -e GOPATH=/tmp/go \
+  -e GOMODCACHE=/tmp/go/pkg/mod \
+  -e GOCACHE=/tmp/go-build \
+  -v "$PWD:/src" \
+  -w /src \
+  solis-ebpf-gen \
+  ./internal/ebpf/bpf/generate.sh
+```
+
+This generator image is not yet bit-for-bit reproducible: its base image is not digest-pinned and Debian LLVM/Clang package versions are not locked. Those pins must be added before treating generated objects as reproducible release artifacts. Do not invent pins; record verified image digests and package versions when the release build environment is established. The current object plan targets little-endian Linux first and reports `unsupported_endianness` elsewhere. Target hosts do not need Clang, LLVM, or `bpf2go` for normal builds after the generated object is committed.
+
+Manual privileged smoke test after generation:
+
+```bash
+sudo ./solis ebpf vm-block-latency --duration 1s --interval 1s --json
+```
+
+Use `--all-vms` to make the all-running-VM selection explicit, or select one or two exact inventory VM names with `--victim` and `--suspect`. `--device` accepts a kernel block name such as `nvme0n1` or `dm-0`. `--output` writes the same JSON document to a mode-`0600` temporary file and atomically renames it while retaining JSON on stdout. The parent directory must already exist. Symbolic-link and non-regular targets are rejected, and Linux parent directories are opened through no-follow traversal before writing.
 
 Per-VM attribution will remain experimental because request merging, requeues, flush requests, missing bio/blkcg ownership, stacked devices, kernel/BTF compatibility, and unmapped cgroups can produce unattributed or ambiguous events. Validation against cgroup `io.stat`, `virsh domstats --block`, and QEMU pressure is correlation evidence, not proof of exact VM latency or customer impact.
 
@@ -616,7 +646,7 @@ This is evidence from a controlled demo, not a guarantee that the same conclusio
 ## Current limitations
 
 - Solis is currently a lab/demo project and is not production-ready.
-- Working eBPF block latency is attributed to the host or shared storage path, not to an individual VM. The experimental `vm-block-latency` model, mapper, parsers, capability/source contracts, and bounded fake-event histogram aggregation exist, but its privileged typed-BTF request-pointer attachment and real kernel-fed per-VM histograms are not implemented yet.
+- Working eBPF block latency is attributed to the host or shared storage path, not to an individual VM. The experimental `vm-block-latency` model, mapper, parsers, capability/source contracts, bounded aggregation, and typed-BTF count-only loader exist, but the generated object is not present in this revision and request-pointer latency plus VM ownership attribution are not implemented yet.
 - QEMU process I/O counters require sufficient procfs permissions. Write-syscall pressure is an activity signal and must not be interpreted as an exact byte count.
 - Live-only diagnosis can identify likely provider-side storage-neighbor pressure, but it cannot prove application-level slowdown without report or external application evidence.
 - Inventory configuration, bundled workload reports, doctor lab checks, and demo scripts still reflect the included lab environment.

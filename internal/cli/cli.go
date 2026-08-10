@@ -2121,26 +2121,8 @@ func runEBPFVMBlockLatency(runtimeConfig solisconfig.Runtime, options ebpfVMBloc
 		Duration: options.Duration, Interval: options.Interval, DeviceFilter: options.Device,
 	}, mappings, runtime.GOOS)
 	if options.Output != "" {
-		parent := filepath.Dir(options.Output)
-		if parent != "." {
-			if err := os.MkdirAll(parent, 0o700); err != nil {
-				return fmt.Errorf("ebpf vm-block-latency error: create output directory: %w", err)
-			}
-		}
-		file, err := os.OpenFile(options.Output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-		if err != nil {
-			return fmt.Errorf("ebpf vm-block-latency error: open output %q: %w", options.Output, err)
-		}
-		if err := file.Chmod(0o600); err != nil {
-			file.Close()
-			return fmt.Errorf("ebpf vm-block-latency error: secure output %q: %w", options.Output, err)
-		}
-		if err := ebpf.WriteVMBlockLatencyJSON(file, report); err != nil {
-			file.Close()
-			return fmt.Errorf("ebpf vm-block-latency error: write output %q: %w", options.Output, err)
-		}
-		if err := file.Close(); err != nil {
-			return fmt.Errorf("ebpf vm-block-latency error: close output %q: %w", options.Output, err)
+		if err := writeVMBlockLatencyOutput(options.Output, report); err != nil {
+			return fmt.Errorf("ebpf vm-block-latency error: %w", err)
 		}
 	}
 	if err := ebpf.WriteVMBlockLatencyJSON(w, report); err != nil {
@@ -2216,6 +2198,12 @@ func selectVMStorageStatsTargets(vms []inventory.VM, options vmStorageStatsOptio
 
 func writeVMStorageStatsOutput(path string, report storagevm.VMStorageStatsReport) error {
 	return storagevm.WriteJSONFile(path, report)
+}
+
+func writeVMBlockLatencyOutput(path string, report ebpf.VMBlockLatencyReport) error {
+	return output.WritePrivateAtomicFile(path, func(writer io.Writer) error {
+		return ebpf.WriteVMBlockLatencyJSON(writer, report)
+	})
 }
 
 func selectVMBlockLatencyTargets(vms []inventory.VM, options ebpfVMBlockLatencyOptions) ([]inventory.VM, error) {

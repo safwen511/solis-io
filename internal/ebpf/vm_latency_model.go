@@ -13,17 +13,27 @@ type VMBlockLatencyReport struct {
 	Duration            string                             `json:"duration"`
 	Interval            string                             `json:"interval"`
 	Mode                string                             `json:"mode"`
+	CollectionMode      string                             `json:"collection_mode"`
 	AttributionMethod   string                             `json:"attribution_method"`
 	AttributionQuality  string                             `json:"attribution_quality"`
 	DeviceFilter        string                             `json:"device_filter"`
 	Availability        VMBlockLatencyAvailability         `json:"availability"`
 	VMs                 []VMBlockLatencyVM                 `json:"vms"`
 	HostSummary         VMBlockLatencySummary              `json:"host_summary"`
+	KernelCounters      VMBlockKernelCounters              `json:"kernel_counters"`
 	Validation          VMBlockLatencyValidation           `json:"validation"`
 	Unattributed        VMBlockLatencyUnattributed         `json:"unattributed"`
 	UnavailableSections []VMBlockLatencyUnavailableSection `json:"unavailable_sections"`
 	Caveats             []string                           `json:"caveats"`
 	Privacy             observability.PrivacyFlags         `json:"privacy"`
+}
+
+// VMBlockKernelCounters are host-wide typed-BTF attachment proof counters.
+// They are not per-VM operations and do not carry request pointers.
+type VMBlockKernelCounters struct {
+	IssueSeen    uint64 `json:"issue_seen"`
+	CompleteSeen uint64 `json:"complete_seen"`
+	NullRequest  uint64 `json:"null_request"`
 }
 
 // VMBlockLatencyAvailability describes the runtime collector state.
@@ -205,7 +215,7 @@ type VMBlockCgroupMapping struct {
 // fake tests. It contains no payload, process arguments, or process memory.
 type VMBlockEvent struct {
 	Kind                   string
-	RequestPointer         uint64
+	RequestPointer         uint64 `json:"-"`
 	TimestampNS            uint64
 	CgroupID               uint64
 	Device                 string

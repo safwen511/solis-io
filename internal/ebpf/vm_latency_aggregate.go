@@ -58,8 +58,8 @@ type vmDeviceOperationKey struct {
 	operation string
 }
 
-// CollectVMBlockLatencyReport returns a structured experimental status. Until
-// the typed BTF loader is complete it never fakes successful attribution.
+// CollectVMBlockLatencyReport returns a structured experimental status. The
+// typed-BTF count-only source never fakes latency or VM attribution.
 func CollectVMBlockLatencyReport(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping) VMBlockLatencyReport {
 	return CollectVMBlockLatencyReportForPlatform(ctx, options, mappings, runtime.GOOS)
 }
@@ -76,7 +76,7 @@ func CollectVMBlockLatencyReportForPlatform(ctx context.Context, options VMBlock
 		})
 		return normalizeVMBlockLatencyReport(report)
 	}
-	return CollectVMBlockLatencyReportWithKernelSource(ctx, options, mappings, experimentalVMBlockKernelSource{})
+	return CollectVMBlockLatencyReportWithKernelSource(ctx, options, mappings, runtimeVMBlockKernelSource())
 }
 
 // CollectVMBlockLatencyReportWithSource is the fake-event test seam and the
@@ -86,8 +86,8 @@ func CollectVMBlockLatencyReportWithSource(ctx context.Context, options VMBlockL
 }
 
 // CollectVMBlockLatencyReportWithKernelSource runs one lifecycle-managed
-// source. Product code uses the explicitly unavailable experimental source;
-// fake sources are used only by tests until a real loader is implemented.
+// source. Product code uses the count-only Cilium source; fake sources are
+// restricted to tests.
 func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping, source VMBlockKernelSource) VMBlockLatencyReport {
 	report := newVMBlockLatencyReport(options, mappings)
 	if options.Duration <= 0 || options.Interval <= 0 || options.Interval > options.Duration {
@@ -109,7 +109,7 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 	}
 	stats, err := runVMBlockKernelSource(ctx, source, options, mappings, aggregator.consume)
 	aggregator.recordKernelStats(stats)
-	aggregator.finish(err == nil)
+	aggregator.finish(err == nil && stats.AttributionAvailable)
 	if err != nil {
 		status, message := vmBlockCollectorError(err)
 		report.Availability.Status = status
@@ -117,10 +117,19 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 		report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{
 			Name: "ebpf_attribution", Status: status, Error: message,
 		})
+		if cleanup := vmBlockCleanupWarning(err); cleanup != "" {
+			report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{
+				Name: "ebpf_cleanup", Status: "cleanup_failed", Error: cleanup,
+			})
+		}
 		return normalizeVMBlockLatencyReport(report)
 	}
 	report.Availability = VMBlockLatencyAvailability{Available: true, Status: "available"}
-	report.AttributionQuality = attributionQuality(report.Unattributed, report.HostSummary.TotalOps)
+	if stats.AttributionAvailable {
+		report.AttributionQuality = attributionQuality(report.Unattributed, report.HostSummary.TotalOps)
+	} else {
+		report.AttributionQuality = "unavailable"
+	}
 	return normalizeVMBlockLatencyReport(report)
 }
 
@@ -258,6 +267,13 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 }
 
 func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelStats) {
+	if stats.CollectionMode != "" {
+		aggregator.report.CollectionMode = stats.CollectionMode
+	}
+	if stats.AttributionMethod != "" {
+		aggregator.report.AttributionMethod = stats.AttributionMethod
+	}
+	aggregator.report.KernelCounters = stats.Counters
 	aggregator.report.Unattributed.DroppedEvents += stats.DroppedEvents
 	aggregator.report.Unattributed.RingBufferLost += stats.RingBufferLost
 	aggregator.report.Unattributed.MapFull += stats.MapFull
@@ -326,7 +342,8 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		Duration:           options.Duration.String(),
 		Interval:           options.Interval.String(),
 		Mode:               "experimental",
-		AttributionMethod:  "request_pointer_correlated+bio_blkcg+cgroup_inode_vm_map",
+		CollectionMode:     "typed_btf_count_only",
+		AttributionMethod:  "none_count_only",
 		AttributionQuality: "unavailable",
 		DeviceFilter:       strings.TrimSpace(options.DeviceFilter),
 		Availability:       VMBlockLatencyAvailability{Status: "pending"},
@@ -345,7 +362,9 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 			{Name: "virsh_domstats_validation", Status: "not_collected", Error: "runtime validation sampling is deferred with the typed BTF collector"},
 		},
 		Caveats: []string{
-			"experimental attribution; it does not prove exact VM latency or customer impact",
+			"experimental collection; it does not prove exact VM latency or customer impact",
+			"typed-BTF count-only mode records host-wide issue and completion hook counts without VM attribution or latency measurement",
+			"count-only programs do not dereference request, bio, blkcg, or cgroup fields and do not expose request pointers",
 			"request merging, requeues, flush requests, missing bio or blkcg ownership, and stacked devices can reduce attribution quality",
 			"kernel BTF layout and privileged eBPF tracepoint access are required",
 			"unattributed events must be considered before using per-VM comparisons",
@@ -385,20 +404,87 @@ func mappingAvailabilityStatus(quality string) string {
 func vmBlockCollectorError(err error) (string, string) {
 	var verifierError *VMBlockVerifierError
 	var capabilityError *VMBlockCapabilityError
+	message := boundVMBlockDiagnostic(err.Error(), maxVMBlockVerifierLogBytes)
+	stageError := primaryVMBlockStageError(err)
 	switch {
 	case errors.Is(err, ErrVMBlockLatencyNotImplemented):
-		return "experimental_not_implemented", ErrVMBlockLatencyNotImplemented.Error()
+		return "experimental_not_implemented", message
 	case errors.Is(err, ErrVMBlockLatencyPermission), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
-		return "permission_denied", ErrVMBlockLatencyPermission.Error()
+		if !strings.Contains(message, "try running with sudo") {
+			message = boundVMBlockDiagnostic(ErrVMBlockLatencyPermission.Error()+": "+message, maxVMBlockVerifierLogBytes)
+		}
+		return "permission_denied", message
+	case errors.Is(err, ErrVMBlockObjectUnavailable):
+		return "object_unavailable", message
+	case errors.Is(err, ErrVMBlockObjectInvalid):
+		return "object_invalid", message
+	case errors.Is(err, ErrVMBlockBTFMissing):
+		return VMBlockCapabilityBTFMissing, message
+	case errors.Is(err, ErrVMBlockUnsupportedEndianness):
+		return "unsupported_endianness", message
 	case errors.Is(err, ErrVMBlockUnsupportedKernel):
-		return "unsupported_kernel", err.Error()
+		return "unsupported_kernel", message
 	case errors.As(err, &verifierError):
-		return VMBlockCapabilityVerifierRejected, verifierError.Error()
+		return VMBlockCapabilityVerifierRejected, message
 	case errors.As(err, &capabilityError):
-		return firstNonEmpty(capabilityError.Status, VMBlockCapabilityResolutionError), capabilityError.Error()
+		return firstNonEmpty(capabilityError.Status, VMBlockCapabilityResolutionError), message
+	case stageError != nil:
+		return firstNonEmpty(stageError.Status, "error"), message
 	default:
-		return "error", fmt.Sprintf("per-VM eBPF block latency unavailable: %v", err)
+		return "error", boundVMBlockDiagnostic(fmt.Sprintf("per-VM eBPF block latency unavailable: %v", err), maxVMBlockVerifierLogBytes)
 	}
+}
+
+func primaryVMBlockStageError(err error) *VMBlockKernelStageError {
+	stages := vmBlockStageErrors(err)
+	for _, stage := range stages {
+		if stage.Status != "cleanup_failed" {
+			return stage
+		}
+	}
+	if len(stages) > 0 {
+		return stages[0]
+	}
+	return nil
+}
+
+func vmBlockStageErrors(err error) []*VMBlockKernelStageError {
+	var stages []*VMBlockKernelStageError
+	var visit func(error)
+	visit = func(current error) {
+		if current == nil {
+			return
+		}
+		if stage, ok := current.(*VMBlockKernelStageError); ok {
+			stages = append(stages, stage)
+			return
+		}
+		if joined, ok := current.(interface{ Unwrap() []error }); ok {
+			for _, child := range joined.Unwrap() {
+				visit(child)
+			}
+			return
+		}
+		if wrapped, ok := current.(interface{ Unwrap() error }); ok {
+			visit(wrapped.Unwrap())
+		}
+	}
+	visit(err)
+	return stages
+}
+
+func vmBlockCleanupWarning(err error) string {
+	values := make([]string, 0)
+	for _, stage := range vmBlockStageErrors(err) {
+		if stage.Status == "cleanup_failed" {
+			values = append(values, stage.Error())
+		}
+	}
+	values = sortedUniqueStrings(values)
+	if len(values) == 0 {
+		return ""
+	}
+	return boundVMBlockDiagnostic(strings.Join(values, "; "), maxVMBlockVerifierLogBytes)
 }
 
 func normalizeBlockOperation(operation string) string {

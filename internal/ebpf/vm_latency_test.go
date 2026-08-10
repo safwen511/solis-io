@@ -17,6 +17,18 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+func TestVMBlockEventJSONNeverExposesRequestPointer(t *testing.T) {
+	data, err := json.Marshal(VMBlockEvent{
+		Kind: "issue", RequestPointer: 0xfeedbeef, TimestampNS: 1, CgroupID: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "RequestPointer") || strings.Contains(string(data), "request_pointer") || strings.Contains(string(data), "4276993775") {
+		t.Fatalf("raw request pointer leaked into event JSON: %s", data)
+	}
+}
+
 type fakeVMBlockEventSource struct {
 	events []VMBlockEvent
 	err    error
@@ -152,8 +164,8 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 		t.Fatalf("unsupported report = %#v", unsupported.Availability)
 	}
 	deferred := CollectVMBlockLatencyReport(context.Background(), options, nil)
-	if deferred.Availability.Available || deferred.Availability.Status != "experimental_not_implemented" {
-		t.Fatalf("deferred report = %#v", deferred.Availability)
+	if deferred.Availability.Available || deferred.Availability.Status != "object_unavailable" {
+		t.Fatalf("missing-object report = %#v", deferred.Availability)
 	}
 	if deferred.HostSummary.TotalOps != 0 || len(deferred.UnavailableSections) == 0 || len(deferred.Caveats) == 0 || privacyCollected(deferred) {
 		t.Fatalf("deferred report falsely claims measurement or misses safeguards: %#v", deferred)
@@ -169,7 +181,7 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	if err := json.Unmarshal(rendered.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Availability.Available || decoded.Availability.Status != "experimental_not_implemented" || decoded.HostSummary.TotalOps != 0 || privacyCollected(decoded) {
+	if decoded.Availability.Available || decoded.Availability.Status != "object_unavailable" || decoded.HostSummary.TotalOps != 0 || privacyCollected(decoded) {
 		t.Fatalf("rendered deferred report = %#v", decoded)
 	}
 }

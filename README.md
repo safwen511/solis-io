@@ -227,7 +227,30 @@ The current milestone was validated with a controlled fio random-write workload 
 
 This validates the implementation path in the lab. It does not establish universal kernel compatibility, production overhead bounds, or causality for every workload.
 
-The repository includes lab-only demo scripts. They may generate temporary fio load inside a configured stress VM and are not part of the Solis product command path.
+The repeatable lab harness validates idle, suspect-only, victim-only, or mixed VM activity. It checks capture modes, JSON, manifest checksums, attribution expectations, stale evidence states, permissions, and privacy boundaries:
+
+```bash
+# Inspect the plan without sudo, SSH, or workload generation.
+./lab/scripts/validate-vm-attribution.sh --dry-run
+
+# Short targeted validation.
+./lab/scripts/validate-vm-attribution.sh --scenario suspect
+
+# Longer mixed-load window. The output directory must already exist,
+# must not be a symlink, and must have mode 0700.
+mkdir -m 0700 /tmp/solis-long-validation
+./lab/scripts/validate-vm-attribution.sh \
+  --scenario mixed \
+  --window-seconds 600 \
+  --interval-seconds 2 \
+  --warmup-seconds 10 \
+  --fio-seconds 1220 \
+  --output-dir /tmp/solis-long-validation
+```
+
+Without `--output-dir`, the harness creates a private directory under `/tmp`. It requires interactive sudo authentication and allowlisted SSH access to the included stress VMs. Non-idle scenarios create only the fixed `/home/flint/solis-noise.dat` fio test file on `a-stress` and/or `b-stress`; cleanup stops its fixed fio job and removes that file. The harness uses the fio helper's opt-in durable mode, which requests a data sync after every 1,024 writes so the evidence window observes provider-side block activity instead of only QEMU page-cache pressure. Normal uses of `run-fio-noise.sh` remain unchanged. To avoid disturbing work it does not own, preflight refuses to run if the fixed job or file already exists. Each scenario retains its private capture and checks, and the root ends with a compact `validation-report.json`. The harness does not alter VM configuration or services.
+
+The repository's lab-only workload and demo scripts are not part of the Solis product command path.
 
 ## Safety and privacy
 
@@ -260,7 +283,7 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 
 ## Roadmap
 
-- Add a long-duration validation harness across idle, victim-load, and noisy-neighbor scenarios.
+- Run and retain long-duration harness results across idle, victim-load, noisy-neighbor, and mixed-load scenarios.
 - Benchmark eBPF map pressure, event coverage, CPU overhead, and cleanup safety under sustained I/O.
 - Polish operator-facing demo and incident reports around attribution quality and caveats.
 - Add an install/package workflow with versioned embedded objects and compatibility checks.

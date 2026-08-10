@@ -2,16 +2,24 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 a-stress|b-stress seconds" >&2
+  echo "Usage: $0 a-stress|b-stress seconds [--durable]" >&2
 }
 
-if [[ $# -ne 2 ]]; then
+if [[ $# -lt 2 || $# -gt 3 ]]; then
   usage
   exit 2
 fi
 
 readonly vm_name=$1
 readonly seconds=$2
+durable=false
+if [[ $# -eq 3 ]]; then
+  [[ "$3" == "--durable" ]] || {
+    usage
+    exit 2
+  }
+  durable=true
+fi
 
 case "$vm_name" in
   a-stress)
@@ -33,8 +41,12 @@ fi
 
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
 readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
+fio_sync_options=()
+if [[ "$durable" == true ]]; then
+  fio_sync_options+=(--fdatasync=1024)
+fi
 
-echo "=== fio noise: ${vm_name} (${seconds} seconds) ==="
+echo "=== fio noise: ${vm_name} (${seconds} seconds, durable=${durable}) ==="
 ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
   fio --name=solis-noise --ioengine=libaio \
   --filename=/home/flint/solis-noise.dat \
@@ -46,4 +58,5 @@ ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
   --direct=1 \
   --time_based \
   "--runtime=${seconds}" \
+  "${fio_sync_options[@]}" \
   --group_reporting

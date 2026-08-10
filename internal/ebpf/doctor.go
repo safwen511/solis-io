@@ -30,6 +30,7 @@ type probeConfig struct {
 	GetMemlock                  func() (string, error)
 	ObjectProvider              func() ([]byte, error)
 	TypedTracepointInspect      func() ([]vmBlockTypedTracepointPrototype, error)
+	BTFCapabilityInspect        func() (VMBlockBTFCapabilityReport, error)
 }
 
 type mount struct {
@@ -52,6 +53,7 @@ func Inspect() Report {
 		GetMemlock:                  currentMemlockLimit,
 		ObjectProvider:              embeddedVMBlockObject,
 		TypedTracepointInspect:      inspectVMBlockTypedTracepoints,
+		BTFCapabilityInspect:        inspectKernelVMBlockBTFCapabilities,
 	})
 }
 
@@ -206,8 +208,56 @@ func runtimeReadinessChecks(config probeConfig) []Check {
 	} else {
 		checks = append(checks, Check{Status: OK, Name: "Typed-BTF block tracepoints", Detail: formatVMBlockTypedTracepointPrototypes(prototypes)})
 	}
+	checks = append(checks, vmBlockCapabilityDoctorChecks(config.BTFCapabilityInspect)...)
 	checks = append(checks, Check{Status: WARN, Name: "Typed-BTF load/attach", Detail: "not attempted by doctor; formatted tracepoint and BTF readiness do not prove program load or attach permission"})
 	return checks
+}
+
+func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, error)) []Check {
+	const unavailable = "BTF field capability probe unavailable"
+	if inspect == nil {
+		return []Check{
+			{Status: WARN, Name: "Request metadata support", Detail: unavailable},
+			{Status: WARN, Name: "Operation classification support", Detail: unavailable},
+			{Status: WARN, Name: "Device extraction support", Detail: unavailable},
+			{Status: WARN, Name: "blkcg ownership path support", Detail: unavailable},
+			{Status: WARN, Name: "cgroup identity extraction support", Detail: unavailable},
+			{Status: WARN, Name: "VM attribution readiness", Detail: "NOT ENABLED / PREFLIGHT ONLY"},
+		}
+	}
+	report, err := inspect()
+	if err != nil {
+		detail := boundVMBlockDiagnostic(err.Error(), maxVMBlockVerifierLogBytes)
+		return []Check{
+			{Status: WARN, Name: "Request metadata support", Detail: detail},
+			{Status: WARN, Name: "Operation classification support", Detail: detail},
+			{Status: WARN, Name: "Device extraction support", Detail: detail},
+			{Status: WARN, Name: "blkcg ownership path support", Detail: detail},
+			{Status: WARN, Name: "cgroup identity extraction support", Detail: detail},
+			{Status: WARN, Name: "VM attribution readiness", Detail: "NOT ENABLED / PREFLIGHT ONLY; capability inspection failed"},
+		}
+	}
+	metadata := vmBlockDoctorCapabilityCheck("Request metadata support", report, []string{"request.cmd_flags"})
+	operation := vmBlockDoctorCapabilityCheck("Operation classification support", report, []string{"request.cmd_flags", "req_op"})
+	device := vmBlockDoctorCapabilityCheck("Device extraction support", report, []string{"request.part", "block_device.bd_dev"})
+	ownership := vmBlockDoctorCapabilityCheck("blkcg ownership path support", report, []string{"request.bio", "bio.bi_blkg", "blkcg_gq.blkcg"})
+	identity := vmBlockDoctorCapabilityCheck("cgroup identity extraction support", report, []string{"blkcg.css.cgroup", "cgroup.kn", "kernfs_node.id"})
+	missing := missingVMBlockCapabilities(report, vmBlockOwnershipRequirements)
+	readinessDetail := "NOT ENABLED / PREFLIGHT ONLY"
+	if len(missing) > 0 {
+		readinessDetail += "; missing: " + strings.Join(missing, ", ")
+	} else {
+		readinessDetail += "; ownership fields available but runtime ownership validation is not implemented"
+	}
+	return []Check{metadata, operation, device, ownership, identity, {Status: WARN, Name: "VM attribution readiness", Detail: readinessDetail}}
+}
+
+func vmBlockDoctorCapabilityCheck(name string, report VMBlockBTFCapabilityReport, required []string) Check {
+	missing := missingVMBlockCapabilities(report, required)
+	if len(missing) > 0 {
+		return Check{Status: WARN, Name: name, Detail: "unavailable; missing: " + strings.Join(missing, ", ")}
+	}
+	return Check{Status: OK, Name: name, Detail: "available in kernel BTF"}
 }
 
 func formatVMBlockTypedTracepointPrototypes(prototypes []vmBlockTypedTracepointPrototype) string {

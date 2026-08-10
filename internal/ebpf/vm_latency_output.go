@@ -39,6 +39,9 @@ func normalizeVMBlockLatencyReport(report VMBlockLatencyReport) VMBlockLatencyRe
 	report.UnavailableSections = append([]VMBlockLatencyUnavailableSection(nil), report.UnavailableSections...)
 	report.Caveats = append([]string(nil), report.Caveats...)
 	report.HostSummary.Histogram = append([]VMBlockLatencyHistogramBucket(nil), report.HostSummary.Histogram...)
+	report.HostSummary.DeviceOperations = append([]VMBlockLatencyDeviceOperation(nil), report.HostSummary.DeviceOperations...)
+	report.VMAttributionPreflight.MissingFields = sortedUniqueStrings(report.VMAttributionPreflight.MissingFields)
+	report.VMAttributionPreflight.Caveats = sortedUniqueStrings(report.VMAttributionPreflight.Caveats)
 	if report.VMs == nil {
 		report.VMs = []VMBlockLatencyVM{}
 	}
@@ -63,6 +66,30 @@ func normalizeVMBlockLatencyReport(report VMBlockLatencyReport) VMBlockLatencyRe
 	if report.HostSummary.Histogram == nil {
 		report.HostSummary.Histogram = emptyVMBlockLatencyBuckets()
 	}
+	if report.HostSummary.DeviceOperations == nil {
+		report.HostSummary.DeviceOperations = []VMBlockLatencyDeviceOperation{}
+	}
+	if report.VMAttributionPreflight.MissingFields == nil {
+		report.VMAttributionPreflight.MissingFields = []string{}
+	}
+	if report.VMAttributionPreflight.Caveats == nil {
+		report.VMAttributionPreflight.Caveats = []string{}
+	}
+	for index := range report.HostSummary.DeviceOperations {
+		operation := &report.HostSummary.DeviceOperations[index]
+		operation.Histogram = append([]VMBlockLatencyHistogramBucket(nil), operation.Histogram...)
+		if operation.Histogram == nil {
+			operation.Histogram = emptyVMBlockLatencyBuckets()
+		}
+	}
+	sort.Slice(report.HostSummary.DeviceOperations, func(left, right int) bool {
+		leftOperation := report.HostSummary.DeviceOperations[left]
+		rightOperation := report.HostSummary.DeviceOperations[right]
+		if leftOperation.Device != rightOperation.Device {
+			return leftOperation.Device < rightOperation.Device
+		}
+		return blockOperationOrder(leftOperation.Operation) < blockOperationOrder(rightOperation.Operation)
+	})
 	for index := range report.VMs {
 		report.VMs[index].Devices = sortedUniqueStrings(report.VMs[index].Devices)
 		report.VMs[index].Histogram = append([]VMBlockLatencyHistogramBucket(nil), report.VMs[index].Histogram...)

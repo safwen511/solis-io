@@ -68,6 +68,7 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 		GetMemlock:                  func() (string, error) { return "soft=8388608 hard=8388608", nil },
 		ObjectProvider:              func() ([]byte, error) { return []byte("authentic-object-test-boundary"), nil },
 		TypedTracepointInspect:      func() ([]vmBlockTypedTracepointPrototype, error) { return testVMBlockTypedTracepointPrototypes(), nil },
+		BTFCapabilityInspect:        func() (VMBlockBTFCapabilityReport, error) { return availableVMBlockBTFCapabilityReport(), nil },
 	})
 	if !Ready(report) {
 		t.Fatalf("Ready() = false, checks = %#v", report.Checks)
@@ -127,6 +128,7 @@ func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
 		GetEUID:                     func() int { return 0 }, GetMemlock: func() (string, error) { return "soft=unlimited hard=unlimited", nil },
 		ObjectProvider:         func() ([]byte, error) { return []byte("authentic-object-test-boundary"), nil },
 		TypedTracepointInspect: func() ([]vmBlockTypedTracepointPrototype, error) { return testVMBlockTypedTracepointPrototypes(), nil },
+		BTFCapabilityInspect:   func() (VMBlockBTFCapabilityReport, error) { return availableVMBlockBTFCapabilityReport(), nil },
 	})
 	report := Report{Checks: checks}
 	if findDoctorCheck(report, "Kernel lockdown mode").Detail != "integrity" || findDoctorCheck(report, "CapEff").Detail != "000000c001200000" {
@@ -134,6 +136,14 @@ func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
 	}
 	if findDoctorCheck(report, "Typed-BTF generated object").Status != OK || !strings.Contains(findDoctorCheck(report, "Typed-BTF load/attach").Detail, "not attempted") {
 		t.Fatalf("checks = %#v", checks)
+	}
+	for _, name := range []string{"Request metadata support", "Operation classification support", "Device extraction support", "blkcg ownership path support", "cgroup identity extraction support"} {
+		if check := findDoctorCheck(report, name); check.Status != OK {
+			t.Fatalf("%s check = %#v", name, check)
+		}
+	}
+	if readiness := findDoctorCheck(report, "VM attribution readiness"); readiness.Status != WARN || !strings.Contains(readiness.Detail, "NOT ENABLED / PREFLIGHT ONLY") {
+		t.Fatalf("VM attribution readiness = %#v", readiness)
 	}
 	typedDetail := findDoctorCheck(report, "Typed-BTF block tracepoints").Detail
 	for _, want := range []string{

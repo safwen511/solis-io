@@ -18,12 +18,14 @@ libbpf_header_dir="/usr/include/bpf"
 helpers_header="${libbpf_header_dir}/bpf_helpers.h"
 helper_defs_header="${libbpf_header_dir}/bpf_helper_defs.h"
 tracing_header="${libbpf_header_dir}/bpf_tracing.h"
+core_read_header="${libbpf_header_dir}/bpf_core_read.h"
 
 required_headers=(
   "${project_header_dir}/vmlinux_min.h"
   "${helpers_header}"
   "${helper_defs_header}"
   "${tracing_header}"
+  "${core_read_header}"
 )
 
 missing_headers=()
@@ -44,6 +46,7 @@ if (( ${#missing_headers[@]} > 0 )); then
   echo "  required helpers header: ${helpers_header}" >&2
   echo "  required helper definitions: ${helper_defs_header}" >&2
   echo "  required tracing header: ${tracing_header}" >&2
+  echo "  required CO-RE read header: ${core_read_header}" >&2
   echo "  compiler: $(command -v "${compiler}")" >&2
   echo "use build/ebpf/Dockerfile, which installs the libbpf-dev package" >&2
   exit 1

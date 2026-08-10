@@ -49,14 +49,14 @@ func TestVMBlockLatencySeparatesVMDeviceAndOperation(t *testing.T) {
 		t.Fatalf("VMs = %#v", report.VMs)
 	}
 	aWeb := report.VMs[0]
-	if aWeb.Name != "a-web" || aWeb.ReadOps != 1 || aWeb.WriteOps != 1 || aWeb.FlushOps != 1 || aWeb.UnknownOps != 1 || aWeb.TotalOps != 4 {
+	if aWeb.Name != "a-web" || aWeb.ReadOps != 1 || aWeb.WriteOps != 1 || aWeb.FlushOps != 1 || aWeb.DiscardOps != 1 || aWeb.UnknownOps != 0 || aWeb.TotalOps != 4 {
 		t.Fatalf("a-web = %#v", aWeb)
 	}
 	if len(aWeb.DeviceOperations) != 4 {
 		t.Fatalf("device operations = %#v", aWeb.DeviceOperations)
 	}
 	want := []struct{ device, operation string }{
-		{"dm-0", "read"}, {"dm-0", "write"}, {"dm-0", "flush"}, {"nvme0n1", "unknown"},
+		{"dm-0", "read"}, {"dm-0", "write"}, {"dm-0", "flush"}, {"nvme0n1", "discard"},
 	}
 	for index, expected := range want {
 		got := aWeb.DeviceOperations[index]
@@ -68,7 +68,7 @@ func TestVMBlockLatencySeparatesVMDeviceAndOperation(t *testing.T) {
 	if bStress.Name != "b-stress" || bStress.WriteOps != 1 || bStress.TotalOps != 1 || bStress.LatencyAvgMS != 30 {
 		t.Fatalf("b-stress = %#v", bStress)
 	}
-	if report.HostSummary.ReadOps != 1 || report.HostSummary.WriteOps != 2 || report.HostSummary.FlushOps != 1 || report.HostSummary.UnknownOps != 1 || report.HostSummary.TotalOps != 5 {
+	if report.HostSummary.ReadOps != 1 || report.HostSummary.WriteOps != 2 || report.HostSummary.FlushOps != 1 || report.HostSummary.DiscardOps != 1 || report.HostSummary.UnknownOps != 0 || report.HostSummary.TotalOps != 5 {
 		t.Fatalf("host summary = %#v", report.HostSummary)
 	}
 }

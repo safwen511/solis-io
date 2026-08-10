@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ var (
 )
 
 const vmBlockHostLatencyCollectionMode = "typed_btf_request_correlation_host_only"
+const vmBlockHostAttributionMethod = "host_request_correlation_no_vm_attribution"
 
 // VMBlockKernelStageError gives stable status to loader/attach/cleanup errors.
 type VMBlockKernelStageError struct {
@@ -73,20 +75,22 @@ type vmBlockCountResources interface {
 }
 
 type ciliumVMBlockKernelSource struct {
-	platform       string
-	architecture   string
-	probeBTF       func() error
-	objectProvider func() ([]byte, error)
-	loader         vmBlockCountObjectLoader
+	platform        string
+	architecture    string
+	probeBTF        func() error
+	capabilityProbe func() (VMBlockBTFCapabilityReport, error)
+	objectProvider  func() ([]byte, error)
+	loader          vmBlockCountObjectLoader
 }
 
 func newCiliumVMBlockKernelSource() VMBlockKernelSource {
 	return &ciliumVMBlockKernelSource{
-		platform:       runtime.GOOS,
-		architecture:   runtime.GOARCH,
-		probeBTF:       probeVMBlockTypedTracepoints,
-		objectProvider: embeddedVMBlockObject,
-		loader:         ciliumVMBlockObjectLoader{},
+		platform:        runtime.GOOS,
+		architecture:    runtime.GOARCH,
+		probeBTF:        probeVMBlockTypedTracepoints,
+		capabilityProbe: inspectKernelVMBlockBTFCapabilities,
+		objectProvider:  embeddedVMBlockObject,
+		loader:          ciliumVMBlockObjectLoader{},
 	}
 }
 
@@ -115,14 +119,28 @@ func (source *ciliumVMBlockKernelSource) Preflight(context.Context) (VMBlockKern
 		}
 		return VMBlockKernelPreflight{Status: status, Error: err.Error()}, err
 	}
-	return VMBlockKernelPreflight{Available: true, Status: "available"}, nil
+	if source.capabilityProbe == nil {
+		err := errors.New("request metadata BTF capability probe is unavailable")
+		return VMBlockKernelPreflight{Status: VMBlockCapabilityResolutionError, Error: err.Error()}, err
+	}
+	capabilities, err := source.capabilityProbe()
+	if err != nil {
+		classified := &VMBlockKernelStageError{Status: VMBlockCapabilityResolutionError, Stage: "preflight", Operation: "inspect request metadata and VM ownership BTF fields", Err: err}
+		return VMBlockKernelPreflight{Status: VMBlockCapabilityResolutionError, Error: classified.Error(), Capabilities: capabilities}, classified
+	}
+	if missing := missingVMBlockCapabilities(capabilities, vmBlockMetadataRequirements); len(missing) > 0 {
+		err := fmt.Errorf("required request metadata BTF fields are unavailable: %s", strings.Join(missing, ", "))
+		classified := &VMBlockKernelStageError{Status: "request_metadata_unsupported", Stage: "preflight", Operation: "inspect request metadata BTF fields", Err: err}
+		return VMBlockKernelPreflight{Status: "request_metadata_unsupported", Error: classified.Error(), Capabilities: capabilities}, classified
+	}
+	return VMBlockKernelPreflight{Available: true, Status: "available", Capabilities: capabilities}, nil
 }
 
 func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, options VMBlockLatencyCollectOptions, _ []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	if strings.TrimSpace(options.DeviceFilter) != "" {
 		return nil, &VMBlockKernelStageError{
 			Status: "device_filter_unsupported", Stage: "preflight", Operation: "prepare typed-BTF host request-latency collector",
-			Err: errors.New("device filtering requires request field access and is not supported by the host-only request-correlation collector"),
+			Err: errors.New("device filtering is not enabled until major:minor selector resolution and filter semantics are validated; device metadata is report-only"),
 		}
 	}
 	if source == nil || source.objectProvider == nil {
@@ -392,7 +410,7 @@ func (session *ciliumVMBlockKernelSession) Collect(ctx context.Context, duration
 		return &VMBlockKernelStageError{Status: "map_read_failed", Stage: "map_read", Operation: "read typed-BTF request-latency maps", Err: err}
 	}
 	stats.CollectionMode = vmBlockHostLatencyCollectionMode
-	stats.AttributionMethod = "host_request_pointer_correlation_no_vm_attribution"
+	stats.AttributionMethod = vmBlockHostAttributionMethod
 	stats.AttributionAvailable = false
 	session.stats = stats
 	return nil
@@ -464,11 +482,12 @@ func classifyVMBlockLoadError(err error) error {
 type ciliumVMBlockObjectLoader struct{}
 
 type ciliumVMBlockObjects struct {
-	OnIssue       *ciliumebpf.Program `ebpf:"on_block_rq_issue"`
-	OnComplete    *ciliumebpf.Program `ebpf:"on_block_rq_complete"`
-	Counters      *ciliumebpf.Map     `ebpf:"counters"`
-	RequestStarts *ciliumebpf.Map     `ebpf:"request_starts"`
-	LatencyStats  *ciliumebpf.Map     `ebpf:"latency_stats"`
+	OnIssue              *ciliumebpf.Program `ebpf:"on_block_rq_issue"`
+	OnComplete           *ciliumebpf.Program `ebpf:"on_block_rq_complete"`
+	Counters             *ciliumebpf.Map     `ebpf:"counters"`
+	RequestStarts        *ciliumebpf.Map     `ebpf:"request_starts"`
+	LatencyStats         *ciliumebpf.Map     `ebpf:"latency_stats"`
+	DeviceOperationStats *ciliumebpf.Map     `ebpf:"device_operation_stats"`
 }
 
 func (ciliumVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, error) {
@@ -513,6 +532,9 @@ func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 		counters.LookupMiss = saturatingAdd(counters.LookupMiss, value.LookupMiss)
 		counters.MapFull = saturatingAdd(counters.MapFull, value.MapFull)
 		counters.CompletedLatencyEvents = saturatingAdd(counters.CompletedLatencyEvents, value.CompletedLatencyEvents)
+		counters.MetadataUnavailable = saturatingAdd(counters.MetadataUnavailable, value.MetadataUnavailable)
+		counters.DeviceUnavailable = saturatingAdd(counters.DeviceUnavailable, value.DeviceUnavailable)
+		counters.OperationUnknown = saturatingAdd(counters.OperationUnknown, value.OperationUnknown)
 	}
 
 	var perCPULatency []vmBlockLatencyValues
@@ -520,17 +542,48 @@ func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 		return VMBlockKernelStats{}, fmt.Errorf("read request-latency histogram: %w", err)
 	}
 	latency := mergeVMBlockPerCPULatency(perCPULatency)
+	deviceOperations, err := objects.readDeviceOperations()
+	if err != nil {
+		return VMBlockKernelStats{}, err
+	}
 
 	var requestKey uint64
-	var issuedAtNS uint64
+	var issueValue vmBlockIssueValue
 	iterator := objects.RequestStarts.Iterate()
-	for iterator.Next(&requestKey, &issuedAtNS) {
+	for iterator.Next(&requestKey, &issueValue) {
 		counters.IncompleteAtWindowEnd = saturatingAdd(counters.IncompleteAtWindowEnd, 1)
 	}
 	if err := iterator.Err(); err != nil {
 		return VMBlockKernelStats{}, fmt.Errorf("count incomplete request correlations: %w", err)
 	}
-	return VMBlockKernelStats{Counters: counters, HostLatency: latency}, nil
+	return VMBlockKernelStats{Counters: counters, HostLatency: latency, HostDeviceOperations: deviceOperations}, nil
+}
+
+func (objects *ciliumVMBlockObjects) readDeviceOperations() ([]VMBlockKernelDeviceOperation, error) {
+	result := make([]VMBlockKernelDeviceOperation, 0)
+	iterator := objects.DeviceOperationStats.Iterate()
+	var key vmBlockDeviceOperationKey
+	var perCPU []vmBlockLatencyValues
+	for iterator.Next(&key, &perCPU) {
+		result = append(result, VMBlockKernelDeviceOperation{
+			Major: key.Major, Minor: key.Minor, Operation: vmBlockOperationName(key.Operation),
+			Latency: mergeVMBlockPerCPULatency(perCPU),
+		})
+		perCPU = nil
+	}
+	if err := iterator.Err(); err != nil {
+		return nil, fmt.Errorf("read device-operation latency aggregates: %w", err)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].Major != result[right].Major {
+			return result[left].Major < result[right].Major
+		}
+		if result[left].Minor != result[right].Minor {
+			return result[left].Minor < result[right].Minor
+		}
+		return blockOperationOrder(result[left].Operation) < blockOperationOrder(result[right].Operation)
+	})
+	return result, nil
 }
 
 func (objects *ciliumVMBlockObjects) Close() error {
@@ -540,6 +593,7 @@ func (objects *ciliumVMBlockObjects) Close() error {
 		closeCiliumMap(objects.Counters),
 		closeCiliumMap(objects.RequestStarts),
 		closeCiliumMap(objects.LatencyStats),
+		closeCiliumMap(objects.DeviceOperationStats),
 	)
 }
 
@@ -551,14 +605,37 @@ type vmBlockCountValues struct {
 	LookupMiss             uint64
 	MapFull                uint64
 	CompletedLatencyEvents uint64
+	MetadataUnavailable    uint64
+	DeviceUnavailable      uint64
+	OperationUnknown       uint64
 }
 
 type vmBlockLatencyValues struct {
-	Count   uint64
-	TotalNS uint64
-	MinNS   uint64
-	MaxNS   uint64
-	Buckets [len(vmBlockLatencyBucketUpperNS)]uint64
+	Count      uint64
+	TotalNS    uint64
+	MinNS      uint64
+	MaxNS      uint64
+	Buckets    [len(vmBlockLatencyBucketUpperNS)]uint64
+	ReadOps    uint64
+	WriteOps   uint64
+	FlushOps   uint64
+	DiscardOps uint64
+	UnknownOps uint64
+}
+
+type vmBlockIssueValue struct {
+	TimestampNS     uint64
+	Major           uint32
+	Minor           uint32
+	Operation       uint8
+	DeviceAvailable uint8
+	Reserved        uint16
+}
+
+type vmBlockDeviceOperationKey struct {
+	Major     uint32
+	Minor     uint32
+	Operation uint32
 }
 
 func mergeVMBlockPerCPULatency(values []vmBlockLatencyValues) VMBlockKernelLatency {
@@ -575,8 +652,28 @@ func mergeVMBlockPerCPULatency(values []vmBlockLatencyValues) VMBlockKernelLaten
 		for index, count := range value.Buckets {
 			result.Buckets[index] = saturatingAdd(result.Buckets[index], count)
 		}
+		result.ReadOps = saturatingAdd(result.ReadOps, value.ReadOps)
+		result.WriteOps = saturatingAdd(result.WriteOps, value.WriteOps)
+		result.FlushOps = saturatingAdd(result.FlushOps, value.FlushOps)
+		result.DiscardOps = saturatingAdd(result.DiscardOps, value.DiscardOps)
+		result.UnknownOps = saturatingAdd(result.UnknownOps, value.UnknownOps)
 	}
 	return result
+}
+
+func vmBlockOperationName(operation uint32) string {
+	switch operation {
+	case 0:
+		return "read"
+	case 1:
+		return "write"
+	case 2:
+		return "flush"
+	case 3:
+		return "discard"
+	default:
+		return "unknown"
+	}
 }
 
 func closeCiliumProgram(program *ciliumebpf.Program) error {

@@ -1,5 +1,6 @@
 #include "vmlinux_min.h"
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 
 struct vmblock_count_values {
@@ -10,10 +11,38 @@ struct vmblock_count_values {
 	__u64 lookup_miss;
 	__u64 map_full;
 	__u64 completed_latency_events;
+	__u64 metadata_unavailable;
+	__u64 device_unavailable;
+	__u64 operation_unknown;
 };
 
 #define VM_BLOCK_LATENCY_BUCKETS 14
 #define VM_BLOCK_REQUEST_MAX_ENTRIES 65536
+#define VM_BLOCK_DEVICE_MAX_ENTRIES 4096
+#define VM_BLOCK_REQ_OP_MASK 0xffU
+
+enum vmblock_operation {
+	VM_BLOCK_OP_READ = 0,
+	VM_BLOCK_OP_WRITE = 1,
+	VM_BLOCK_OP_FLUSH = 2,
+	VM_BLOCK_OP_DISCARD = 3,
+	VM_BLOCK_OP_UNKNOWN = 4,
+};
+
+struct vmblock_issue_value {
+	__u64 timestamp_ns;
+	__u32 major;
+	__u32 minor;
+	__u8 operation;
+	__u8 device_available;
+	__u16 reserved;
+};
+
+struct vmblock_device_operation_key {
+	__u32 major;
+	__u32 minor;
+	__u32 operation;
+};
 
 struct vmblock_latency_values {
 	__u64 count;
@@ -21,6 +50,11 @@ struct vmblock_latency_values {
 	__u64 min_ns;
 	__u64 max_ns;
 	__u64 buckets[VM_BLOCK_LATENCY_BUCKETS];
+	__u64 read_ops;
+	__u64 write_ops;
+	__u64 flush_ops;
+	__u64 discard_ops;
+	__u64 unknown_ops;
 };
 
 struct {
@@ -34,7 +68,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, VM_BLOCK_REQUEST_MAX_ENTRIES);
 	__type(key, __u64);
-	__type(value, __u64);
+	__type(value, struct vmblock_issue_value);
 } request_starts SEC(".maps");
 
 struct {
@@ -43,6 +77,13 @@ struct {
 	__type(key, __u32);
 	__type(value, struct vmblock_latency_values);
 } latency_stats SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+	__uint(max_entries, VM_BLOCK_DEVICE_MAX_ENTRIES);
+	__type(key, struct vmblock_device_operation_key);
+	__type(value, struct vmblock_latency_values);
+} device_operation_stats SEC(".maps");
 
 static __always_inline struct vmblock_count_values *get_counts(void)
 {
@@ -89,13 +130,68 @@ static __always_inline __u32 latency_bucket(__u64 latency_ns)
 	return 13;
 }
 
+static __always_inline __u8 classify_operation(blk_opf_t cmd_flags)
+{
+	switch (cmd_flags & VM_BLOCK_REQ_OP_MASK) {
+	case REQ_OP_READ:
+		return VM_BLOCK_OP_READ;
+	case REQ_OP_WRITE:
+		return VM_BLOCK_OP_WRITE;
+	case REQ_OP_FLUSH:
+		return VM_BLOCK_OP_FLUSH;
+	case REQ_OP_DISCARD:
+		return VM_BLOCK_OP_DISCARD;
+	default:
+		return VM_BLOCK_OP_UNKNOWN;
+	}
+}
+
+static __always_inline void observe_latency(struct vmblock_latency_values *values,
+					     __u64 latency_ns, __u8 operation)
+{
+	__u32 bucket;
+
+	if (!values)
+		return;
+	if (!values->count || latency_ns < values->min_ns)
+		values->min_ns = latency_ns;
+	if (latency_ns > values->max_ns)
+		values->max_ns = latency_ns;
+	values->count++;
+	values->total_ns += latency_ns;
+	bucket = latency_bucket(latency_ns);
+	values->buckets[bucket]++;
+	switch (operation) {
+	case VM_BLOCK_OP_READ:
+		values->read_ops++;
+		break;
+	case VM_BLOCK_OP_WRITE:
+		values->write_ops++;
+		break;
+	case VM_BLOCK_OP_FLUSH:
+		values->flush_ops++;
+		break;
+	case VM_BLOCK_OP_DISCARD:
+		values->discard_ops++;
+		break;
+	default:
+		values->unknown_ops++;
+		break;
+	}
+}
+
 SEC("tp_btf/block_rq_issue")
 int BPF_PROG(on_block_rq_issue, struct request *rq)
 {
 	struct vmblock_count_values *values = get_counts();
 	__u64 request_key;
-	__u64 timestamp_ns;
-	__u64 *existing;
+	struct vmblock_issue_value issue = {};
+	struct vmblock_issue_value *existing;
+	struct block_device *part = 0;
+	blk_opf_t cmd_flags = 0;
+	dev_t dev = 0;
+	int operation_result;
+	int device_result;
 
 	if (!values)
 		return 0;
@@ -109,8 +205,29 @@ int BPF_PROG(on_block_rq_issue, struct request *rq)
 	existing = bpf_map_lookup_elem(&request_starts, &request_key);
 	if (existing)
 		values->duplicate_issue++;
-	timestamp_ns = bpf_ktime_get_ns();
-	if (bpf_map_update_elem(&request_starts, &request_key, &timestamp_ns,
+	issue.timestamp_ns = bpf_ktime_get_ns();
+	operation_result = BPF_CORE_READ_INTO(&cmd_flags, rq, cmd_flags);
+	if (operation_result < 0) {
+		issue.operation = VM_BLOCK_OP_UNKNOWN;
+		values->operation_unknown++;
+	} else {
+		issue.operation = classify_operation(cmd_flags);
+		if (issue.operation == VM_BLOCK_OP_UNKNOWN)
+			values->operation_unknown++;
+	}
+	device_result = BPF_CORE_READ_INTO(&part, rq, part);
+	if (!device_result && part)
+		device_result = BPF_CORE_READ_INTO(&dev, part, bd_dev);
+	if (device_result < 0 || !part || !dev) {
+		values->device_unavailable++;
+	} else {
+		issue.major = dev >> 20;
+		issue.minor = dev & ((1U << 20) - 1);
+		issue.device_available = 1;
+	}
+	if (operation_result < 0 || device_result < 0 || !issue.device_available)
+		values->metadata_unavailable++;
+	if (bpf_map_update_elem(&request_starts, &request_key, &issue,
 				BPF_ANY) < 0)
 		values->map_full++;
 	return 0;
@@ -122,11 +239,15 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 {
 	struct vmblock_count_values *values = get_counts();
 	struct vmblock_latency_values *latency_values;
+	struct vmblock_latency_values zero_latency = {};
+	struct vmblock_latency_values *device_latency;
+	struct vmblock_device_operation_key device_key = {};
 	__u64 request_key;
-	__u64 *issued_at_ns;
+	struct vmblock_issue_value *issue;
 	__u64 now_ns;
 	__u64 latency_ns;
-	__u32 bucket;
+	__u8 operation;
+	__u8 device_available;
 
 	if (!values)
 		return 0;
@@ -137,26 +258,38 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 	}
 
 	request_key = (__u64)rq;
-	issued_at_ns = bpf_map_lookup_elem(&request_starts, &request_key);
-	if (!issued_at_ns) {
+	issue = bpf_map_lookup_elem(&request_starts, &request_key);
+	if (!issue) {
 		values->lookup_miss++;
 		return 0;
 	}
 	now_ns = bpf_ktime_get_ns();
-	latency_ns = now_ns - *issued_at_ns;
+	latency_ns = now_ns - issue->timestamp_ns;
+	device_key.major = issue->major;
+	device_key.minor = issue->minor;
+	device_key.operation = issue->operation;
+	operation = issue->operation;
+	device_available = issue->device_available;
 	bpf_map_delete_elem(&request_starts, &request_key);
 
 	latency_values = get_latency_stats();
 	if (!latency_values)
 		return 0;
-	if (!latency_values->count || latency_ns < latency_values->min_ns)
-		latency_values->min_ns = latency_ns;
-	if (latency_ns > latency_values->max_ns)
-		latency_values->max_ns = latency_ns;
-	latency_values->count++;
-	latency_values->total_ns += latency_ns;
-	bucket = latency_bucket(latency_ns);
-	latency_values->buckets[bucket]++;
+	observe_latency(latency_values, latency_ns, operation);
+	if (device_available) {
+		device_latency = bpf_map_lookup_elem(&device_operation_stats,
+						     &device_key);
+		if (!device_latency) {
+			bpf_map_update_elem(&device_operation_stats, &device_key,
+					    &zero_latency, BPF_NOEXIST);
+			device_latency = bpf_map_lookup_elem(&device_operation_stats,
+							     &device_key);
+		}
+		if (device_latency)
+			observe_latency(device_latency, latency_ns, operation);
+		else
+			values->metadata_unavailable++;
+	}
 	values->completed_latency_events++;
 	return 0;
 }

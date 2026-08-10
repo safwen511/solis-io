@@ -1259,7 +1259,7 @@ func TestWriteVMBlockLatencyOutputIsPrivateAndDeterministic(t *testing.T) {
 	report := ebpf.VMBlockLatencyReport{
 		SchemaVersion: "1", ObservedAtUTC: "2026-08-10T00:00:00Z",
 		Mode: "experimental", CollectionMode: "typed_btf_request_correlation_host_only",
-		AttributionMethod: "host_request_pointer_correlation_no_vm_attribution", AttributionQuality: "unavailable",
+		AttributionMethod: "host_request_correlation_no_vm_attribution", AttributionQuality: "unavailable",
 		Availability: ebpf.VMBlockLatencyAvailability{Status: "object_unavailable"},
 		VMs:          []ebpf.VMBlockLatencyVM{},
 	}
@@ -1319,7 +1319,7 @@ func TestRunEBPFVMBlockLatencyWithoutOutputKeepsJSONOnStdout(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
 	}
-	if decoded.CollectionMode != "typed_btf_request_correlation_host_only" || decoded.AttributionMethod != "host_request_pointer_correlation_no_vm_attribution" {
+	if decoded.CollectionMode != "typed_btf_request_correlation_host_only" || decoded.AttributionMethod != "host_request_correlation_no_vm_attribution" {
 		t.Fatalf("stdout report = %#v", decoded)
 	}
 }

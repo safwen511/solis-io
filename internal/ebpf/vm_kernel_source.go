@@ -26,25 +26,40 @@ type VMBlockKernelPreflight struct {
 // VMBlockKernelStats contains bounded loss counters reported by a kernel
 // source. These are instrumentation-quality signals, not fabricated I/O ops.
 type VMBlockKernelStats struct {
-	CollectionMode       string                `json:"collection_mode"`
-	AttributionMethod    string                `json:"attribution_method"`
-	AttributionAvailable bool                  `json:"attribution_available"`
-	Counters             VMBlockKernelCounters `json:"counters"`
-	HostLatency          VMBlockKernelLatency  `json:"host_latency"`
-	DroppedEvents        uint64                `json:"dropped_events"`
-	RingBufferLost       uint64                `json:"ring_buffer_lost"`
-	MapFull              uint64                `json:"map_full"`
+	CollectionMode       string                         `json:"collection_mode"`
+	AttributionMethod    string                         `json:"attribution_method"`
+	AttributionAvailable bool                           `json:"attribution_available"`
+	Counters             VMBlockKernelCounters          `json:"counters"`
+	HostLatency          VMBlockKernelLatency           `json:"host_latency"`
+	HostDeviceOperations []VMBlockKernelDeviceOperation `json:"host_device_operations"`
+	DroppedEvents        uint64                         `json:"dropped_events"`
+	RingBufferLost       uint64                         `json:"ring_buffer_lost"`
+	MapFull              uint64                         `json:"map_full"`
 }
 
 // VMBlockKernelLatency is a bounded host-level aggregate read from kernel
 // maps. It contains exact count/total/min/max values and fixed histogram
 // buckets, but no request keys or per-VM ownership.
 type VMBlockKernelLatency struct {
-	Count   uint64                                   `json:"count"`
-	TotalNS uint64                                   `json:"total_ns"`
-	MinNS   uint64                                   `json:"min_ns"`
-	MaxNS   uint64                                   `json:"max_ns"`
-	Buckets [len(vmBlockLatencyBucketUpperNS)]uint64 `json:"buckets"`
+	Count      uint64                                   `json:"count"`
+	TotalNS    uint64                                   `json:"total_ns"`
+	MinNS      uint64                                   `json:"min_ns"`
+	MaxNS      uint64                                   `json:"max_ns"`
+	Buckets    [len(vmBlockLatencyBucketUpperNS)]uint64 `json:"buckets"`
+	ReadOps    uint64                                   `json:"read_ops"`
+	WriteOps   uint64                                   `json:"write_ops"`
+	FlushOps   uint64                                   `json:"flush_ops"`
+	DiscardOps uint64                                   `json:"discard_ops"`
+	UnknownOps uint64                                   `json:"unknown_ops"`
+}
+
+// VMBlockKernelDeviceOperation is one sanitized kernel-map aggregate. Device
+// identity is major:minor; it contains no request or kernel addresses.
+type VMBlockKernelDeviceOperation struct {
+	Major     uint32               `json:"major"`
+	Minor     uint32               `json:"minor"`
+	Operation string               `json:"operation"`
+	Latency   VMBlockKernelLatency `json:"latency"`
 }
 
 // VMBlockKernelSource is the lifecycle boundary for the future privileged
@@ -181,7 +196,7 @@ func (session *eventSourceKernelSession) Collect(ctx context.Context, duration t
 func (*eventSourceKernelSession) Stats() VMBlockKernelStats {
 	return VMBlockKernelStats{
 		CollectionMode:       "test_event_stream",
-		AttributionMethod:    "request_pointer_correlated+bio_blkcg+cgroup_inode_vm_map",
+		AttributionMethod:    "request_correlated+bio_blkcg+cgroup_inode_vm_map",
 		AttributionAvailable: true,
 	}
 }
@@ -194,25 +209,25 @@ func runVMBlockKernelSource(
 	options VMBlockLatencyCollectOptions,
 	mappings []VMBlockCgroupMapping,
 	consume func(VMBlockEvent) error,
-) (stats VMBlockKernelStats, err error) {
+) (stats VMBlockKernelStats, preflight VMBlockKernelPreflight, err error) {
 	if source == nil {
 		source = experimentalVMBlockKernelSource{}
 	}
-	preflight, err := source.Preflight(ctx)
+	preflight, err = source.Preflight(ctx)
 	if err != nil {
-		return VMBlockKernelStats{}, err
+		return VMBlockKernelStats{}, preflight, err
 	}
 	if !preflight.Available {
 		status := firstNonEmpty(preflight.Status, "unavailable")
 		message := firstNonEmpty(preflight.Error, "typed-BTF per-VM block latency preflight is unavailable")
-		return VMBlockKernelStats{}, &VMBlockCapabilityError{Status: status, Name: message}
+		return VMBlockKernelStats{}, preflight, &VMBlockCapabilityError{Status: status, Name: message}
 	}
 	session, err := source.Prepare(ctx, options, mappings)
 	if err != nil {
-		return VMBlockKernelStats{}, err
+		return VMBlockKernelStats{}, preflight, err
 	}
 	if session == nil {
-		return VMBlockKernelStats{}, errors.New("per-VM eBPF kernel source returned a nil session")
+		return VMBlockKernelStats{}, preflight, errors.New("per-VM eBPF kernel source returned a nil session")
 	}
 	defer func() {
 		closeErr := classifyVMBlockCleanupError("close per-VM eBPF collection", session.Close())
@@ -221,12 +236,12 @@ func runVMBlockKernelSource(
 		}
 	}()
 	if err = session.Start(ctx); err != nil {
-		return VMBlockKernelStats{}, classifyVMBlockLifecycleError("start_failed", "start per-VM eBPF collection", err)
+		return VMBlockKernelStats{}, preflight, classifyVMBlockLifecycleError("start_failed", "start per-VM eBPF collection", err)
 	}
 	collectErr := classifyVMBlockLifecycleError("collection_failed", "collect per-VM eBPF events", session.Collect(ctx, options.Duration, consume))
 	stopErr := classifyVMBlockCleanupError("stop per-VM eBPF collection", session.Stop())
 	stats = session.Stats()
-	return stats, errors.Join(collectErr, stopErr)
+	return stats, preflight, errors.Join(collectErr, stopErr)
 }
 
 func classifyVMBlockLifecycleError(status, operation string, err error) error {

@@ -8,25 +8,26 @@ const vmBlockLatencySchemaVersion = "1"
 // attribution report. It deliberately separates measured latency from the
 // validation counters used to assess whether attribution is plausible.
 type VMBlockLatencyReport struct {
-	SchemaVersion       string                             `json:"schema_version"`
-	ObservedAtUTC       string                             `json:"observed_at_utc"`
-	Duration            string                             `json:"duration"`
-	Interval            string                             `json:"interval"`
-	Mode                string                             `json:"mode"`
-	CollectionMode      string                             `json:"collection_mode"`
-	AttributionMethod   string                             `json:"attribution_method"`
-	AttributionQuality  string                             `json:"attribution_quality"`
-	DeviceFilter        string                             `json:"device_filter"`
-	Availability        VMBlockLatencyAvailability         `json:"availability"`
-	Diagnostics         VMBlockRuntimeDiagnostics          `json:"diagnostics"`
-	VMs                 []VMBlockLatencyVM                 `json:"vms"`
-	HostSummary         VMBlockLatencySummary              `json:"host_summary"`
-	KernelCounters      VMBlockKernelCounters              `json:"kernel_counters"`
-	Validation          VMBlockLatencyValidation           `json:"validation"`
-	Unattributed        VMBlockLatencyUnattributed         `json:"unattributed"`
-	UnavailableSections []VMBlockLatencyUnavailableSection `json:"unavailable_sections"`
-	Caveats             []string                           `json:"caveats"`
-	Privacy             observability.PrivacyFlags         `json:"privacy"`
+	SchemaVersion          string                             `json:"schema_version"`
+	ObservedAtUTC          string                             `json:"observed_at_utc"`
+	Duration               string                             `json:"duration"`
+	Interval               string                             `json:"interval"`
+	Mode                   string                             `json:"mode"`
+	CollectionMode         string                             `json:"collection_mode"`
+	AttributionMethod      string                             `json:"attribution_method"`
+	AttributionQuality     string                             `json:"attribution_quality"`
+	DeviceFilter           string                             `json:"device_filter"`
+	Availability           VMBlockLatencyAvailability         `json:"availability"`
+	Diagnostics            VMBlockRuntimeDiagnostics          `json:"diagnostics"`
+	VMs                    []VMBlockLatencyVM                 `json:"vms"`
+	HostSummary            VMBlockLatencySummary              `json:"host_summary"`
+	KernelCounters         VMBlockKernelCounters              `json:"kernel_counters"`
+	VMAttributionPreflight VMBlockAttributionPreflight        `json:"vm_attribution_preflight"`
+	Validation             VMBlockLatencyValidation           `json:"validation"`
+	Unattributed           VMBlockLatencyUnattributed         `json:"unattributed"`
+	UnavailableSections    []VMBlockLatencyUnavailableSection `json:"unavailable_sections"`
+	Caveats                []string                           `json:"caveats"`
+	Privacy                observability.PrivacyFlags         `json:"privacy"`
 }
 
 // VMBlockKernelCounters are host-wide typed-BTF request-correlation counters.
@@ -40,6 +41,18 @@ type VMBlockKernelCounters struct {
 	IncompleteAtWindowEnd  uint64 `json:"incomplete_at_window_end"`
 	MapFull                uint64 `json:"map_full"`
 	CompletedLatencyEvents uint64 `json:"completed_latency_events"`
+	MetadataUnavailable    uint64 `json:"metadata_unavailable"`
+	DeviceUnavailable      uint64 `json:"device_unavailable"`
+	OperationUnknown       uint64 `json:"operation_unknown"`
+}
+
+// VMBlockAttributionPreflight reports whether the kernel BTF ownership path
+// exists. It never implies that runtime VM ownership collection is enabled.
+type VMBlockAttributionPreflight struct {
+	Available     bool     `json:"available"`
+	Status        string   `json:"status"`
+	MissingFields []string `json:"missing_fields"`
+	Caveats       []string `json:"caveats"`
 }
 
 // VMBlockLatencyAvailability describes the runtime collector state.
@@ -88,6 +101,7 @@ type VMBlockLatencyVM struct {
 	ReadOps                uint64                          `json:"read_ops"`
 	WriteOps               uint64                          `json:"write_ops"`
 	FlushOps               uint64                          `json:"flush_ops"`
+	DiscardOps             uint64                          `json:"discard_ops"`
 	UnknownOps             uint64                          `json:"unknown_ops"`
 	TotalOps               uint64                          `json:"total_ops"`
 	LatencyMinMS           float64                         `json:"latency_min_ms"`
@@ -110,6 +124,7 @@ type VMBlockLatencySummary struct {
 	ReadOps                uint64                          `json:"read_ops"`
 	WriteOps               uint64                          `json:"write_ops"`
 	FlushOps               uint64                          `json:"flush_ops"`
+	DiscardOps             uint64                          `json:"discard_ops"`
 	UnknownOps             uint64                          `json:"unknown_ops"`
 	TotalOps               uint64                          `json:"total_ops"`
 	LatencyMinMS           float64                         `json:"latency_min_ms"`
@@ -120,6 +135,7 @@ type VMBlockLatencySummary struct {
 	LatencyMaxMS           float64                         `json:"latency_max_ms"`
 	PercentilesApproximate bool                            `json:"percentiles_approximate"`
 	Histogram              []VMBlockLatencyHistogramBucket `json:"histogram"`
+	DeviceOperations       []VMBlockLatencyDeviceOperation `json:"device_operations"`
 }
 
 // VMBlockLatencyHistogramBucket is one fixed, bounded latency bucket.
@@ -165,6 +181,9 @@ type VMBlockLatencyUnattributed struct {
 	DroppedEvents          uint64  `json:"dropped_events"`
 	RingBufferLost         uint64  `json:"ring_buffer_lost"`
 	MapFull                uint64  `json:"map_full"`
+	MetadataUnavailable    uint64  `json:"metadata_unavailable"`
+	DeviceUnavailable      uint64  `json:"device_unavailable"`
+	OperationUnknown       uint64  `json:"operation_unknown"`
 	TotalUnattributedOps   uint64  `json:"total_unattributed_ops"`
 	UnattributedPercent    float64 `json:"unattributed_percent"`
 }

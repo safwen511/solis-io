@@ -65,7 +65,7 @@ func (session *fakeVMBlockKernelSession) Close() error {
 func availableFakeKernelSource(session *fakeVMBlockKernelSession) *fakeVMBlockKernelSource {
 	if session.stats.CollectionMode == "" {
 		session.stats.CollectionMode = "test_event_stream"
-		session.stats.AttributionMethod = "request_pointer_correlated+bio_blkcg+cgroup_inode_vm_map"
+		session.stats.AttributionMethod = "request_correlated+bio_blkcg+cgroup_inode_vm_map"
 		session.stats.AttributionAvailable = true
 	}
 	return &fakeVMBlockKernelSource{

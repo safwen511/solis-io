@@ -3,8 +3,8 @@
 
 /*
  * Minimal kernel-style scalar declarations required before including the
- * packaged libbpf headers. This is deliberately not a helper header and does
- * not declare payload structures or fields.
+ * packaged libbpf headers. This is deliberately not a helper header; the only
+ * structure fields below are the whitelisted CO-RE metadata fields.
  */
 typedef unsigned char __u8;
 typedef unsigned short __u16;
@@ -21,17 +21,38 @@ typedef __u32 __be32;
 typedef __u32 __wsum;
 
 typedef __u8 blk_status_t;
+typedef __u32 blk_opf_t;
+typedef __u32 dev_t;
 
 enum bpf_map_type {
 	BPF_MAP_TYPE_HASH = 1,
+	BPF_MAP_TYPE_PERCPU_HASH = 5,
 	BPF_MAP_TYPE_PERCPU_ARRAY = 6,
 };
 
 enum bpf_map_update_elem_flags {
 	BPF_ANY = 0,
+	BPF_NOEXIST = 1,
 };
 
-/* No request member is dereferenced by the count-only Task 3A programs. */
-struct request;
+enum req_op {
+	REQ_OP_READ = 0,
+	REQ_OP_WRITE = 1,
+	REQ_OP_FLUSH = 2,
+	REQ_OP_DISCARD = 3,
+};
+
+/*
+ * Minimal CO-RE views. Only these named metadata fields are read by Task 5;
+ * no payload or ownership field is accessed by the BPF programs.
+ */
+struct block_device {
+	dev_t bd_dev;
+} __attribute__((preserve_access_index));
+
+struct request {
+	blk_opf_t cmd_flags;
+	struct block_device *part;
+} __attribute__((preserve_access_index));
 
 #endif

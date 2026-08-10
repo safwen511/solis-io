@@ -51,6 +51,7 @@ type vmLatencyAccumulator struct {
 	readOps          uint64
 	writeOps         uint64
 	flushOps         uint64
+	discardOps       uint64
 	unknownOps       uint64
 }
 
@@ -108,7 +109,14 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 		})
 		return normalizeVMBlockLatencyReport(report)
 	}
-	stats, err := runVMBlockKernelSource(ctx, source, options, mappings, aggregator.consume)
+	stats, preflight, err := runVMBlockKernelSource(ctx, source, options, mappings, aggregator.consume)
+	report.VMAttributionPreflight = vmBlockAttributionPreflight(preflight.Capabilities)
+	if report.VMAttributionPreflight.Status == "missing_fields" {
+		report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{
+			Name: "vm_attribution_preflight", Status: "missing_fields",
+			Error: "kernel BTF ownership fields unavailable: " + strings.Join(report.VMAttributionPreflight.MissingFields, ", "),
+		})
+	}
 	aggregator.recordKernelStats(stats)
 	aggregator.finish(err == nil && stats.AttributionAvailable)
 	if err != nil {
@@ -137,13 +145,15 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 }
 
 type vmBlockEventAggregator struct {
-	report      *VMBlockLatencyReport
-	mappings    []VMBlockCgroupMapping
-	cgroupIndex map[uint64]int
-	issues      map[uint64]pendingVMBlockIssue
-	byVM        map[int]*vmLatencyAccumulator
-	hostLatency boundedVMBlockLatencyHistogram
-	filter      string
+	report               *VMBlockLatencyReport
+	mappings             []VMBlockCgroupMapping
+	cgroupIndex          map[uint64]int
+	issues               map[uint64]pendingVMBlockIssue
+	byVM                 map[int]*vmLatencyAccumulator
+	hostLatency          boundedVMBlockLatencyHistogram
+	kernelHostOperations VMBlockKernelLatency
+	hostDeviceOperations map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram
+	filter               string
 }
 
 func newVMBlockEventAggregator(report *VMBlockLatencyReport, mappings []VMBlockCgroupMapping, deviceFilter string) (*vmBlockEventAggregator, error) {
@@ -152,12 +162,13 @@ func newVMBlockEventAggregator(report *VMBlockLatencyReport, mappings []VMBlockC
 		return nil, err
 	}
 	return &vmBlockEventAggregator{
-		report:      report,
-		mappings:    mappings,
-		cgroupIndex: index,
-		issues:      make(map[uint64]pendingVMBlockIssue),
-		byVM:        make(map[int]*vmLatencyAccumulator),
-		filter:      strings.TrimSpace(deviceFilter),
+		report:               report,
+		mappings:             mappings,
+		cgroupIndex:          index,
+		issues:               make(map[uint64]pendingVMBlockIssue),
+		byVM:                 make(map[int]*vmLatencyAccumulator),
+		hostDeviceOperations: make(map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram),
+		filter:               strings.TrimSpace(deviceFilter),
 	}, nil
 }
 
@@ -264,6 +275,8 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 		accumulator.writeOps++
 	case "flush":
 		accumulator.flushOps++
+	case "discard":
+		accumulator.discardOps++
 	default:
 		accumulator.unknownOps++
 	}
@@ -278,11 +291,27 @@ func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelS
 	}
 	aggregator.report.KernelCounters = stats.Counters
 	aggregator.hostLatency.mergeKernel(stats.HostLatency)
+	aggregator.kernelHostOperations = stats.HostLatency
+	for _, operation := range stats.HostDeviceOperations {
+		key := vmDeviceOperationKey{
+			device:    fmt.Sprintf("%d:%d", operation.Major, operation.Minor),
+			operation: normalizeBlockOperation(operation.Operation),
+		}
+		histogram := aggregator.hostDeviceOperations[key]
+		if histogram == nil {
+			histogram = &boundedVMBlockLatencyHistogram{}
+			aggregator.hostDeviceOperations[key] = histogram
+		}
+		histogram.mergeKernel(operation.Latency)
+	}
 	aggregator.report.Unattributed.DroppedEvents += stats.DroppedEvents
 	aggregator.report.Unattributed.RingBufferLost += stats.RingBufferLost
 	aggregator.report.Unattributed.LookupMiss = saturatingAdd(aggregator.report.Unattributed.LookupMiss, stats.Counters.LookupMiss)
 	aggregator.report.Unattributed.DuplicateIssue = saturatingAdd(aggregator.report.Unattributed.DuplicateIssue, stats.Counters.DuplicateIssue)
 	aggregator.report.Unattributed.IncompleteAtWindowEnd = saturatingAdd(aggregator.report.Unattributed.IncompleteAtWindowEnd, stats.Counters.IncompleteAtWindowEnd)
+	aggregator.report.Unattributed.MetadataUnavailable = saturatingAdd(aggregator.report.Unattributed.MetadataUnavailable, stats.Counters.MetadataUnavailable)
+	aggregator.report.Unattributed.DeviceUnavailable = saturatingAdd(aggregator.report.Unattributed.DeviceUnavailable, stats.Counters.DeviceUnavailable)
+	aggregator.report.Unattributed.OperationUnknown = saturatingAdd(aggregator.report.Unattributed.OperationUnknown, stats.Counters.OperationUnknown)
 	kernelMapFull := stats.Counters.MapFull
 	if stats.MapFull > kernelMapFull {
 		kernelMapFull = stats.MapFull
@@ -310,6 +339,7 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 		vm.ReadOps = accumulator.readOps
 		vm.WriteOps = accumulator.writeOps
 		vm.FlushOps = accumulator.flushOps
+		vm.DiscardOps = accumulator.discardOps
 		vm.UnknownOps = accumulator.unknownOps
 		vm.TotalOps = accumulator.latency.count
 		vm.Devices = mapKeys(accumulator.devices)
@@ -329,16 +359,28 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 		host.ReadOps += vm.ReadOps
 		host.WriteOps += vm.WriteOps
 		host.FlushOps += vm.FlushOps
+		host.DiscardOps += vm.DiscardOps
 		host.UnknownOps += vm.UnknownOps
 		attributedOperations = saturatingAdd(attributedOperations, vm.TotalOps)
 	}
+	kernelOperationTotal := aggregator.kernelHostOperations.ReadOps + aggregator.kernelHostOperations.WriteOps + aggregator.kernelHostOperations.FlushOps + aggregator.kernelHostOperations.DiscardOps + aggregator.kernelHostOperations.UnknownOps
+	if kernelOperationTotal > 0 {
+		host.ReadOps = aggregator.kernelHostOperations.ReadOps
+		host.WriteOps = aggregator.kernelHostOperations.WriteOps
+		host.FlushOps = aggregator.kernelHostOperations.FlushOps
+		host.DiscardOps = aggregator.kernelHostOperations.DiscardOps
+		host.UnknownOps = aggregator.kernelHostOperations.UnknownOps
+	}
 	if aggregator.hostLatency.count > attributedOperations {
-		host.UnknownOps = saturatingAdd(host.UnknownOps, aggregator.hostLatency.count-attributedOperations)
+		if kernelOperationTotal == 0 {
+			host.UnknownOps = saturatingAdd(host.UnknownOps, aggregator.hostLatency.count-attributedOperations)
+		}
 	}
 	host.TotalOps = aggregator.hostLatency.count
 	host.LatencyMinMS, host.LatencyAvgMS, host.LatencyP50MS, host.LatencyP95MS, host.LatencyP99MS, host.LatencyMaxMS = aggregator.hostLatency.summary()
 	host.PercentilesApproximate = aggregator.hostLatency.count > 0
 	host.Histogram = aggregator.hostLatency.publicBuckets()
+	host.DeviceOperations = deviceOperationSummaries(aggregator.hostDeviceOperations)
 	unattributed := &aggregator.report.Unattributed
 	unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd + unattributed.MapFull
 	denominator := host.TotalOps + unattributed.TotalUnattributedOps
@@ -353,17 +395,18 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		observedAt = time.Now().UTC()
 	}
 	report := VMBlockLatencyReport{
-		SchemaVersion:      vmBlockLatencySchemaVersion,
-		ObservedAtUTC:      observedAt.Format(time.RFC3339Nano),
-		Duration:           options.Duration.String(),
-		Interval:           options.Interval.String(),
-		Mode:               "experimental",
-		CollectionMode:     vmBlockHostLatencyCollectionMode,
-		AttributionMethod:  "host_request_pointer_correlation_no_vm_attribution",
-		AttributionQuality: "unavailable",
-		DeviceFilter:       strings.TrimSpace(options.DeviceFilter),
-		Availability:       VMBlockLatencyAvailability{Status: "pending"},
-		VMs:                make([]VMBlockLatencyVM, 0, len(mappings)),
+		SchemaVersion:          vmBlockLatencySchemaVersion,
+		ObservedAtUTC:          observedAt.Format(time.RFC3339Nano),
+		Duration:               options.Duration.String(),
+		Interval:               options.Interval.String(),
+		Mode:                   "experimental",
+		CollectionMode:         vmBlockHostLatencyCollectionMode,
+		AttributionMethod:      vmBlockHostAttributionMethod,
+		AttributionQuality:     "unavailable",
+		DeviceFilter:           strings.TrimSpace(options.DeviceFilter),
+		Availability:           VMBlockLatencyAvailability{Status: "pending"},
+		VMAttributionPreflight: vmBlockAttributionPreflight(VMBlockBTFCapabilityReport{}),
+		VMs:                    make([]VMBlockLatencyVM, 0, len(mappings)),
 		Validation: VMBlockLatencyValidation{
 			CgroupIOStat: []CgroupIOStatDelta{}, VirshDomstats: []VirshBlockDelta{}, QEMUPressure: []QEMUPressureSignal{},
 			Caveats: []string{
@@ -381,7 +424,7 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 			"experimental collection; it does not prove exact VM latency or customer impact",
 			"typed-BTF request correlation measures host-wide request issue-to-complete latency without VM attribution",
 			"request pointers are used only as bounded in-kernel correlation keys and are never emitted in report output",
-			"host request-correlation programs do not dereference request, bio, blkcg, or cgroup fields",
+			"host request-correlation programs use CO-RE to read only request operation flags and block-device identity; bio, blkcg, and cgroup ownership are not read",
 			"request merging, requeues, flush requests, missing bio or blkcg ownership, and stacked devices can reduce attribution quality",
 			"kernel BTF layout and privileged eBPF tracepoint access are required",
 			"unattributed events must be considered before using per-VM comparisons",
@@ -548,6 +591,8 @@ func normalizeBlockOperation(operation string) string {
 		return "write"
 	case "flush", "f":
 		return "flush"
+	case "discard", "d":
+		return "discard"
 	default:
 		return "unknown"
 	}
@@ -579,8 +624,10 @@ func blockOperationOrder(operation string) int {
 		return 1
 	case "flush":
 		return 2
-	default:
+	case "discard":
 		return 3
+	default:
+		return 4
 	}
 }
 

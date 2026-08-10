@@ -1,6 +1,6 @@
-#include <common.h>
-#include <bpf_tracing.h>
 #include "vmlinux_min.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
 
 struct vmblock_count_values {
 	__u64 issue_seen;

@@ -178,9 +178,26 @@ func probeVMBlockTypedTracepoints() error {
 	if err != nil {
 		return fmt.Errorf("load kernel BTF: %w", err)
 	}
+	return resolveVMBlockTypedTracepoints(spec)
+}
+
+type vmBlockBTFTypeFinder interface {
+	TypeByName(string, any) error
+}
+
+func resolveVMBlockTypedTracepoints(spec vmBlockBTFTypeFinder) error {
+	if spec == nil {
+		return &VMBlockKernelStageError{
+			Status: VMBlockCapabilityResolutionError, Operation: "resolve typed block tracepoints", Err: errors.New("kernel BTF type finder is unavailable"),
+		}
+	}
+
+	// Cilium resolves tp_btf AttachTraceRawTp targets by prefixing AttachTo
+	// with btf_trace_. Kernel BTF publishes these targets as typedefs of
+	// function pointers, not as BTF functions.
 	for _, name := range []string{"btf_trace_block_rq_issue", "btf_trace_block_rq_complete"} {
-		var function *btf.Func
-		if err := spec.TypeByName(name, &function); err != nil {
+		var tracepoint *btf.Typedef
+		if err := spec.TypeByName(name, &tracepoint); err != nil {
 			return &VMBlockKernelStageError{
 				Status: "typed_tracepoint_missing", Operation: "resolve typed tracepoint " + strings.TrimPrefix(name, "btf_trace_"), Err: err,
 			}

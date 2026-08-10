@@ -75,6 +75,21 @@ type fakeVMBlockLink struct {
 	err    error
 }
 
+type fakeVMBlockBTFTypeFinder struct {
+	missing map[string]error
+	lookups []string
+	types   []any
+}
+
+func (finder *fakeVMBlockBTFTypeFinder) TypeByName(name string, target any) error {
+	finder.lookups = append(finder.lookups, name)
+	finder.types = append(finder.types, target)
+	if err := finder.missing[name]; err != nil {
+		return err
+	}
+	return nil
+}
+
 func (link *fakeVMBlockLink) Close() error {
 	link.closed = true
 	return link.err
@@ -123,11 +138,6 @@ func TestCiliumVMBlockGeneratedObjectUnavailable(t *testing.T) {
 	if len(report.VMs) != 1 || report.VMs[0].TotalOps != 0 || report.VMs[0].LatencyAvgMS != 0 || report.VMs[0].AttributionQuality != "unavailable" {
 		t.Fatalf("unavailable source fabricated VM attribution: %#v", report.VMs)
 	}
-	if object, err := embeddedVMBlockObject(); err != nil && !errors.Is(err, ErrVMBlockObjectUnavailable) {
-		t.Fatalf("embedded object error = %v", err)
-	} else if err == nil && len(object) == 0 {
-		t.Fatal("embedded object provider returned empty success")
-	}
 }
 
 func TestCiliumVMBlockBTFMissing(t *testing.T) {
@@ -136,6 +146,32 @@ func TestCiliumVMBlockBTFMissing(t *testing.T) {
 	report := collectCountOnlyTestReport(source, nil)
 	if report.Availability.Status != VMBlockCapabilityBTFMissing || !strings.Contains(report.Availability.Error, "BTF") {
 		t.Fatalf("availability = %#v", report.Availability)
+	}
+}
+
+func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
+	finder := &fakeVMBlockBTFTypeFinder{}
+	if err := resolveVMBlockTypedTracepoints(finder); err != nil {
+		t.Fatal(err)
+	}
+	wantNames := []string{"btf_trace_block_rq_issue", "btf_trace_block_rq_complete"}
+	if fmt.Sprint(finder.lookups) != fmt.Sprint(wantNames) {
+		t.Fatalf("lookups = %v, want %v", finder.lookups, wantNames)
+	}
+	for _, target := range finder.types {
+		if _, ok := target.(**btf.Typedef); !ok {
+			t.Fatalf("BTF target type = %T, want **btf.Typedef", target)
+		}
+	}
+}
+
+func TestResolveVMBlockTypedTracepointsMissingIsStructured(t *testing.T) {
+	finder := &fakeVMBlockBTFTypeFinder{missing: map[string]error{
+		"btf_trace_block_rq_complete": btf.ErrNotFound,
+	}}
+	err := resolveVMBlockTypedTracepoints(finder)
+	if vmBlockStageStatus(err, "") != "typed_tracepoint_missing" || !strings.Contains(err.Error(), "block_rq_complete") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

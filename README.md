@@ -157,7 +157,7 @@ The loader uses `github.com/cilium/ebpf` v0.22.0. Regenerate the little-endian o
 go generate ./internal/ebpf
 ```
 
-The generation script pins `bpf2go` v0.22.0, compiles [vm_block_latency.bpf.c](internal/ebpf/bpf/vm_block_latency.bpf.c), and installs only the authentic ELF at `internal/ebpf/bpf/generated/vm_block_latency_bpfel.o`. [build/ebpf/Dockerfile](build/ebpf/Dockerfile) supplies a controlled convenience environment when the development host lacks Clang/LLVM:
+The generation script pins `bpf2go` v0.22.0, compiles [vm_block_latency.bpf.c](internal/ebpf/bpf/vm_block_latency.bpf.c), and installs only the authentic ELF at `internal/ebpf/bpf/generated/vm_block_latency_bpfel.o`. Project-owned `vmlinux_min.h` supplies only the minimal kernel-style scalar types, the count-only map type, and an opaque `struct request` declaration. Helper functions, map declaration macros, section macros, and typed tracing macros come exclusively from the packaged libbpf headers `/usr/include/bpf/bpf_helpers.h` and `/usr/include/bpf/bpf_tracing.h`. The script validates those exact paths and their helper-definition dependency before compilation. It does not depend on Cilium's example-header layout, an undeclared `common.h`, or hidden system-global search paths. [build/ebpf/Dockerfile](build/ebpf/Dockerfile) installs `libbpf-dev` and supplies a controlled convenience environment when the development host lacks Clang/LLVM:
 
 ```bash
 docker build -t solis-ebpf-gen -f build/ebpf/Dockerfile .
@@ -173,7 +173,7 @@ docker run --rm \
   ./internal/ebpf/bpf/generate.sh
 ```
 
-This generator image is not yet bit-for-bit reproducible: its base image is not digest-pinned and Debian LLVM/Clang package versions are not locked. Those pins must be added before treating generated objects as reproducible release artifacts. Do not invent pins; record verified image digests and package versions when the release build environment is established. The current object plan targets little-endian Linux first and reports `unsupported_endianness` elsewhere. Target hosts do not need Clang, LLVM, or `bpf2go` for normal builds after the generated object is committed.
+This generator image is not yet bit-for-bit reproducible: its base image is not digest-pinned and Debian LLVM/Clang/libbpf package versions are not locked. Those pins must be added before treating generated objects as reproducible release artifacts. Do not invent pins; record verified image digests and package versions when the release build environment is established. The current object plan targets little-endian Linux first and reports `unsupported_endianness` elsewhere. Target hosts do not need Clang, LLVM, libbpf development headers, or `bpf2go` for normal builds after the generated object is committed.
 
 Manual privileged smoke test after generation:
 

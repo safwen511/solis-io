@@ -163,7 +163,7 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	if unsupported.Availability.Status != "unsupported" || !strings.Contains(unsupported.Availability.Error, "requires Linux") {
 		t.Fatalf("unsupported report = %#v", unsupported.Availability)
 	}
-	deferred := CollectVMBlockLatencyReport(context.Background(), options, nil)
+	deferred := CollectVMBlockLatencyReportWithKernelSource(context.Background(), options, nil, missingObjectVMBlockKernelSource())
 	if deferred.Availability.Available || deferred.Availability.Status != "object_unavailable" {
 		t.Fatalf("missing-object report = %#v", deferred.Availability)
 	}
@@ -199,7 +199,12 @@ func TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable(t *test
 		{Name: "a-web", MappingQuality: "cgroup_v2_inode_tree", PrimaryID: 11, CgroupIDs: []uint64{11}},
 		{Name: "b-web", MappingQuality: "cgroup_v2_inode_partial", PrimaryID: 21, CgroupIDs: []uint64{21}},
 	}
-	report := CollectVMBlockLatencyReport(context.Background(), VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second}, mappings)
+	report := CollectVMBlockLatencyReportWithKernelSource(
+		context.Background(),
+		VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second},
+		mappings,
+		missingObjectVMBlockKernelSource(),
+	)
 	if report.VMs[0].MappingQuality != "cgroup_v2_inode_tree" || report.VMs[0].AttributionQuality != "unavailable" {
 		t.Fatalf("complete mapping quality = %#v", report.VMs[0])
 	}
@@ -208,6 +213,15 @@ func TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable(t *test
 	}
 	if !hasUnavailableSection(report.UnavailableSections, "cgroup_mapping:b-web", "partial") {
 		t.Fatalf("partial mapping section missing: %#v", report.UnavailableSections)
+	}
+}
+
+func missingObjectVMBlockKernelSource() VMBlockKernelSource {
+	return &ciliumVMBlockKernelSource{
+		platform:       "linux",
+		architecture:   "amd64",
+		probeBTF:       func() error { return nil },
+		objectProvider: func() ([]byte, error) { return nil, ErrVMBlockObjectUnavailable },
 	}
 }
 

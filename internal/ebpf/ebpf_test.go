@@ -142,8 +142,11 @@ func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
 			t.Fatalf("%s check = %#v", name, check)
 		}
 	}
-	if readiness := findDoctorCheck(report, "VM attribution readiness"); readiness.Status != WARN || !strings.Contains(readiness.Detail, "NOT ENABLED / PREFLIGHT ONLY") {
-		t.Fatalf("VM attribution readiness = %#v", readiness)
+	if preflight := findDoctorCheck(report, "VM attribution preflight"); preflight.Status != OK || !strings.Contains(preflight.Detail, "ownership fields available") {
+		t.Fatalf("VM attribution preflight = %#v", preflight)
+	}
+	if readiness := findDoctorCheck(report, "VM attribution runtime readiness"); readiness.Status != WARN || !strings.Contains(readiness.Detail, "not attempted") {
+		t.Fatalf("VM attribution runtime readiness = %#v", readiness)
 	}
 	typedDetail := findDoctorCheck(report, "Typed-BTF block tracepoints").Detail
 	for _, want := range []string{

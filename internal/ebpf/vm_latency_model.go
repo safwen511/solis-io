@@ -23,6 +23,7 @@ type VMBlockLatencyReport struct {
 	HostSummary            VMBlockLatencySummary              `json:"host_summary"`
 	KernelCounters         VMBlockKernelCounters              `json:"kernel_counters"`
 	VMAttributionPreflight VMBlockAttributionPreflight        `json:"vm_attribution_preflight"`
+	AttributionSummary     VMBlockAttributionSummary          `json:"attribution_summary"`
 	Validation             VMBlockLatencyValidation           `json:"validation"`
 	Unattributed           VMBlockLatencyUnattributed         `json:"unattributed"`
 	UnavailableSections    []VMBlockLatencyUnavailableSection `json:"unavailable_sections"`
@@ -44,10 +45,21 @@ type VMBlockKernelCounters struct {
 	MetadataUnavailable    uint64 `json:"metadata_unavailable"`
 	DeviceUnavailable      uint64 `json:"device_unavailable"`
 	OperationUnknown       uint64 `json:"operation_unknown"`
+	MissingBio             uint64 `json:"missing_bio"`
+	MissingBlkcg           uint64 `json:"missing_blkcg"`
+}
+
+// VMBlockAttributionSummary reports exact-match attribution coverage for the
+// observation window. It never contains cgroup or kernel pointers.
+type VMBlockAttributionSummary struct {
+	AttributedOps     uint64  `json:"attributed_ops"`
+	UnattributedOps   uint64  `json:"unattributed_ops"`
+	AttributedPercent float64 `json:"attributed_percent"`
+	MatchedVMCount    int     `json:"matched_vm_count"`
 }
 
 // VMBlockAttributionPreflight reports whether the kernel BTF ownership path
-// exists. It never implies that runtime VM ownership collection is enabled.
+// exists and whether the runtime collector enabled that path for this window.
 type VMBlockAttributionPreflight struct {
 	Available     bool     `json:"available"`
 	Status        string   `json:"status"`
@@ -69,6 +81,9 @@ type VMBlockRuntimeDiagnostics struct {
 	Stage                   string                   `json:"stage"`
 	EUID                    int                      `json:"euid"`
 	RawError                string                   `json:"raw_error"`
+	MapName                 string                   `json:"map"`
+	KeySizeFromObject       uint32                   `json:"key_size_from_object"`
+	GoKeySize               int                      `json:"go_key_size"`
 	CapabilitySummary       VMBlockCapabilitySummary `json:"capability_summary"`
 	LockdownMode            string                   `json:"lockdown_mode"`
 	MemlockLimit            string                   `json:"memlock_limit"`
@@ -119,7 +134,6 @@ type VMBlockLatencyVM struct {
 }
 
 // VMBlockLatencySummary is the host-wide request issue-to-complete aggregate.
-// In the current mode it is deliberately not attributed to individual VMs.
 type VMBlockLatencySummary struct {
 	ReadOps                uint64                          `json:"read_ops"`
 	WriteOps               uint64                          `json:"write_ops"`

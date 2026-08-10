@@ -108,7 +108,7 @@ func TestVMBlockKernelSourceLifecycleAndLossCounters(t *testing.T) {
 	if report.HostSummary.TotalOps != 1 || report.Unattributed.DroppedEvents != 3 || report.Unattributed.RingBufferLost != 2 || report.Unattributed.MapFull != 1 {
 		t.Fatalf("report = %#v", report)
 	}
-	if report.AttributionQuality != "experimental_partial" {
+	if report.AttributionQuality != "unavailable" {
 		t.Fatalf("quality = %q", report.AttributionQuality)
 	}
 }

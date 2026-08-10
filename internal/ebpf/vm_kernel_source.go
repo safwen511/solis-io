@@ -26,15 +26,16 @@ type VMBlockKernelPreflight struct {
 // VMBlockKernelStats contains bounded loss counters reported by a kernel
 // source. These are instrumentation-quality signals, not fabricated I/O ops.
 type VMBlockKernelStats struct {
-	CollectionMode       string                         `json:"collection_mode"`
-	AttributionMethod    string                         `json:"attribution_method"`
-	AttributionAvailable bool                           `json:"attribution_available"`
-	Counters             VMBlockKernelCounters          `json:"counters"`
-	HostLatency          VMBlockKernelLatency           `json:"host_latency"`
-	HostDeviceOperations []VMBlockKernelDeviceOperation `json:"host_device_operations"`
-	DroppedEvents        uint64                         `json:"dropped_events"`
-	RingBufferLost       uint64                         `json:"ring_buffer_lost"`
-	MapFull              uint64                         `json:"map_full"`
+	CollectionMode         string                               `json:"collection_mode"`
+	AttributionMethod      string                               `json:"attribution_method"`
+	AttributionAvailable   bool                                 `json:"attribution_available"`
+	Counters               VMBlockKernelCounters                `json:"counters"`
+	HostLatency            VMBlockKernelLatency                 `json:"host_latency"`
+	HostDeviceOperations   []VMBlockKernelDeviceOperation       `json:"host_device_operations"`
+	CgroupDeviceOperations []VMBlockKernelCgroupDeviceOperation `json:"cgroup_device_operations"`
+	DroppedEvents          uint64                               `json:"dropped_events"`
+	RingBufferLost         uint64                               `json:"ring_buffer_lost"`
+	MapFull                uint64                               `json:"map_full"`
 }
 
 // VMBlockKernelLatency is a bounded host-level aggregate read from kernel
@@ -62,7 +63,17 @@ type VMBlockKernelDeviceOperation struct {
 	Latency   VMBlockKernelLatency `json:"latency"`
 }
 
-// VMBlockKernelSource is the lifecycle boundary for the future privileged
+// VMBlockKernelCgroupDeviceOperation is a sanitized blkcg-derived aggregate.
+// CgroupID is a stable kernfs identity, not a kernel address.
+type VMBlockKernelCgroupDeviceOperation struct {
+	CgroupID  uint64               `json:"cgroup_id"`
+	Major     uint32               `json:"major"`
+	Minor     uint32               `json:"minor"`
+	Operation string               `json:"operation"`
+	Latency   VMBlockKernelLatency `json:"latency"`
+}
+
+// VMBlockKernelSource is the lifecycle boundary for the privileged typed-BTF
 // loader. Prepare must not attach; Start performs attachment on a prepared
 // session so callers can always Close a partially started session.
 type VMBlockKernelSource interface {

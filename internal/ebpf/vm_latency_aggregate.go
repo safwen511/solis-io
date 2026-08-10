@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	// ErrVMBlockLatencyNotImplemented is retained for the still-deferred
-	// request -> bio -> blkcg -> VM ownership attribution stage.
-	ErrVMBlockLatencyNotImplemented = errors.New("experimental_not_implemented: typed BTF bio/blkcg VM attribution is not implemented")
+	// ErrVMBlockLatencyNotImplemented is retained for an explicitly selected
+	// deferred kernel-source implementation. The normal Linux runtime uses the
+	// Cilium typed-BTF source and never falls back to fabricated evidence.
+	ErrVMBlockLatencyNotImplemented = errors.New("experimental_not_implemented: typed BTF kernel source is unavailable")
 	// ErrVMBlockLatencyPermission is the stable operator-facing permission
 	// guidance for this experimental collector.
 	ErrVMBlockLatencyPermission = errors.New("permission denied loading or attaching per-VM eBPF block latency programs")
@@ -137,7 +138,20 @@ func CollectVMBlockLatencyReportWithKernelSource(ctx context.Context, options VM
 	}
 	report.Availability = VMBlockLatencyAvailability{Available: true, Status: "available"}
 	if stats.AttributionAvailable {
-		report.AttributionQuality = attributionQuality(report.Unattributed, report.HostSummary.TotalOps)
+		report.AttributionQuality = runtimeVMBlockAttributionQuality(report.AttributionSummary)
+		for index := range report.VMs {
+			if report.VMs[index].TotalOps > 0 {
+				report.VMs[index].AttributionQuality = report.AttributionQuality
+			} else {
+				report.VMs[index].AttributionQuality = "no_attributed_events"
+			}
+		}
+		if stats.CollectionMode == vmBlockVMAttributionCollectionMode {
+			report.VMAttributionPreflight.Available = true
+			report.VMAttributionPreflight.Status = "enabled"
+			report.VMAttributionPreflight.MissingFields = []string{}
+			report.VMAttributionPreflight.Caveats = vmBlockAttributionEnabledCaveats()
+		}
 	} else {
 		report.AttributionQuality = "unavailable"
 	}
@@ -241,6 +255,8 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 		unattributed.UnsupportedRequest++
 		return
 	}
+	latencyNS := event.TimestampNS - issue.timestampNS
+	aggregator.hostLatency.observe(latencyNS)
 	mappingIndex, ok := aggregator.cgroupIndex[issue.cgroupID]
 	if !ok {
 		unattributed.UnmappedCgroup++
@@ -254,9 +270,7 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 		}
 		aggregator.byVM[mappingIndex] = accumulator
 	}
-	latencyNS := event.TimestampNS - issue.timestampNS
 	accumulator.latency.observe(latencyNS)
-	aggregator.hostLatency.observe(latencyNS)
 	if issue.device != "" {
 		accumulator.devices[issue.device] = true
 	}
@@ -304,6 +318,9 @@ func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelS
 		}
 		histogram.mergeKernel(operation.Latency)
 	}
+	for _, operation := range stats.CgroupDeviceOperations {
+		aggregator.recordKernelCgroupOperation(operation)
+	}
 	aggregator.report.Unattributed.DroppedEvents += stats.DroppedEvents
 	aggregator.report.Unattributed.RingBufferLost += stats.RingBufferLost
 	aggregator.report.Unattributed.LookupMiss = saturatingAdd(aggregator.report.Unattributed.LookupMiss, stats.Counters.LookupMiss)
@@ -312,11 +329,56 @@ func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelS
 	aggregator.report.Unattributed.MetadataUnavailable = saturatingAdd(aggregator.report.Unattributed.MetadataUnavailable, stats.Counters.MetadataUnavailable)
 	aggregator.report.Unattributed.DeviceUnavailable = saturatingAdd(aggregator.report.Unattributed.DeviceUnavailable, stats.Counters.DeviceUnavailable)
 	aggregator.report.Unattributed.OperationUnknown = saturatingAdd(aggregator.report.Unattributed.OperationUnknown, stats.Counters.OperationUnknown)
+	aggregator.report.Unattributed.MissingBio = saturatingAdd(aggregator.report.Unattributed.MissingBio, stats.Counters.MissingBio)
+	aggregator.report.Unattributed.MissingBlkcg = saturatingAdd(aggregator.report.Unattributed.MissingBlkcg, stats.Counters.MissingBlkcg)
 	kernelMapFull := stats.Counters.MapFull
 	if stats.MapFull > kernelMapFull {
 		kernelMapFull = stats.MapFull
 	}
 	aggregator.report.Unattributed.MapFull = saturatingAdd(aggregator.report.Unattributed.MapFull, kernelMapFull)
+}
+
+func (aggregator *vmBlockEventAggregator) recordKernelCgroupOperation(operation VMBlockKernelCgroupDeviceOperation) {
+	count := operation.Latency.Count
+	if count == 0 {
+		return
+	}
+	mappingIndex, ok := aggregator.cgroupIndex[operation.CgroupID]
+	if !ok {
+		aggregator.report.Unattributed.UnmappedCgroup = saturatingAdd(aggregator.report.Unattributed.UnmappedCgroup, count)
+		return
+	}
+	accumulator := aggregator.byVM[mappingIndex]
+	if accumulator == nil {
+		accumulator = &vmLatencyAccumulator{
+			mappingIndex: mappingIndex, devices: make(map[string]bool),
+			deviceOperations: make(map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram),
+		}
+		aggregator.byVM[mappingIndex] = accumulator
+	}
+	device := fmt.Sprintf("%d:%d", operation.Major, operation.Minor)
+	operationName := normalizeBlockOperation(operation.Operation)
+	accumulator.latency.mergeKernel(operation.Latency)
+	accumulator.devices[device] = true
+	key := vmDeviceOperationKey{device: device, operation: operationName}
+	histogram := accumulator.deviceOperations[key]
+	if histogram == nil {
+		histogram = &boundedVMBlockLatencyHistogram{}
+		accumulator.deviceOperations[key] = histogram
+	}
+	histogram.mergeKernel(operation.Latency)
+	switch operationName {
+	case "read":
+		accumulator.readOps = saturatingAdd(accumulator.readOps, count)
+	case "write":
+		accumulator.writeOps = saturatingAdd(accumulator.writeOps, count)
+	case "flush":
+		accumulator.flushOps = saturatingAdd(accumulator.flushOps, count)
+	case "discard":
+		accumulator.discardOps = saturatingAdd(accumulator.discardOps, count)
+	default:
+		accumulator.unknownOps = saturatingAdd(accumulator.unknownOps, count)
+	}
 }
 
 func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
@@ -347,9 +409,7 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 		vm.PercentilesApproximate = accumulator.latency.count > 0
 		vm.Histogram = accumulator.latency.publicBuckets()
 		vm.DeviceOperations = deviceOperationSummaries(accumulator.deviceOperations)
-		if collectionAvailable {
-			vm.AttributionQuality = "experimental_blkcg_correlated"
-		} else {
+		if !collectionAvailable {
 			vm.AttributionQuality = "unavailable_partial_collection"
 		}
 	}
@@ -382,10 +442,31 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 	host.Histogram = aggregator.hostLatency.publicBuckets()
 	host.DeviceOperations = deviceOperationSummaries(aggregator.hostDeviceOperations)
 	unattributed := &aggregator.report.Unattributed
-	unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd + unattributed.MapFull
-	denominator := host.TotalOps + unattributed.TotalUnattributedOps
+	if aggregator.report.CollectionMode == vmBlockVMAttributionCollectionMode {
+		measuredUnattributed := uint64(0)
+		if host.TotalOps > attributedOperations {
+			measuredUnattributed = host.TotalOps - attributedOperations
+		}
+		unattributed.TotalUnattributedOps = saturatingAdd(measuredUnattributed, saturatingAdd(unattributed.LookupMiss, unattributed.IncompleteAtWindowEnd))
+	} else {
+		unattributed.TotalUnattributedOps = unattributed.MissingBio + unattributed.MissingBlkcg + unattributed.UnmappedCgroup + unattributed.LookupMiss + unattributed.UnsupportedRequest + unattributed.StackedDeviceAmbiguous + unattributed.IncompleteAtWindowEnd + unattributed.MapFull
+	}
+	denominator := attributedOperations + unattributed.TotalUnattributedOps
 	if denominator > 0 {
 		unattributed.UnattributedPercent = float64(unattributed.TotalUnattributedOps) / float64(denominator) * 100
+	}
+	matchedVMs := 0
+	for _, vm := range aggregator.report.VMs {
+		if vm.TotalOps > 0 {
+			matchedVMs++
+		}
+	}
+	aggregator.report.AttributionSummary = VMBlockAttributionSummary{
+		AttributedOps: attributedOperations, UnattributedOps: unattributed.TotalUnattributedOps,
+		MatchedVMCount: matchedVMs,
+	}
+	if denominator > 0 {
+		aggregator.report.AttributionSummary.AttributedPercent = float64(attributedOperations) / float64(denominator) * 100
 	}
 }
 
@@ -422,9 +503,9 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		},
 		Caveats: []string{
 			"experimental collection; it does not prove exact VM latency or customer impact",
-			"typed-BTF request correlation measures host-wide request issue-to-complete latency without VM attribution",
-			"request pointers are used only as bounded in-kernel correlation keys and are never emitted in report output",
-			"host request-correlation programs use CO-RE to read only request operation flags and block-device identity; bio, blkcg, and cgroup ownership are not read",
+			"typed-BTF request correlation attributes only complete blkcg cgroup IDs that exactly match validated libvirt VM cgroup IDs",
+			"opaque request identities are used only as bounded in-kernel correlation keys and are never emitted in report output",
+			"host request-correlation programs use CO-RE to read request operation flags, block-device identity, and the bio/blkcg/cgroup ownership identity path",
 			"request merging, requeues, flush requests, missing bio or blkcg ownership, and stacked devices can reduce attribution quality",
 			"kernel BTF layout and privileged eBPF tracepoint access are required",
 			"unattributed events must be considered before using per-VM comparisons",
@@ -434,7 +515,7 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 		},
 	}
 	for _, mapping := range mappings {
-		mappingCaveats := []string{"libvirt cgroup mapping is context only; host request latency is not attributed to this VM"}
+		mappingCaveats := []string{"latency is attributed only when the blkcg kernfs cgroup ID exactly matches this validated libvirt cgroup mapping"}
 		if mapping.MappingQuality != "cgroup_v2_inode_tree" {
 			mappingCaveats = append(mappingCaveats, "cgroup mapping is unavailable or partial: "+mapping.MappingQuality)
 			report.UnavailableSections = append(report.UnavailableSections, VMBlockLatencyUnavailableSection{
@@ -505,6 +586,7 @@ func vmBlockDiagnostics(options VMBlockLatencyCollectOptions, stage string, euid
 		diagnostics.Stage = firstNonEmpty(strings.TrimSpace(diagnostics.Stage), firstNonEmpty(stage, "unknown"))
 		diagnostics.EUID = euid
 		diagnostics.RawError = boundedError(err)
+		applyVMBlockMapLayoutDiagnostics(&diagnostics, err)
 		return diagnostics
 	}
 	config := defaultVMBlockDiagnosticConfig()
@@ -644,12 +726,20 @@ func mapKeys(values map[string]bool) []string {
 	return result
 }
 
-func attributionQuality(unattributed VMBlockLatencyUnattributed, attributed uint64) string {
-	if attributed == 0 {
-		return "no_attributed_events"
+func runtimeVMBlockAttributionQuality(summary VMBlockAttributionSummary) string {
+	if summary.AttributedOps == 0 || summary.MatchedVMCount == 0 {
+		return "unavailable"
 	}
-	if unattributed.TotalUnattributedOps > 0 || unattributed.DroppedEvents > 0 || unattributed.RingBufferLost > 0 || unattributed.MapFull > 0 {
-		return "experimental_partial"
+	denominator := summary.AttributedOps + summary.UnattributedOps
+	if denominator == 0 {
+		return "unavailable"
 	}
-	return "experimental_blkcg_correlated"
+	unattributedPercent := float64(summary.UnattributedOps) / float64(denominator) * 100
+	if unattributedPercent <= 5 {
+		return "available"
+	}
+	if unattributedPercent <= 25 {
+		return "degraded"
+	}
+	return "unavailable"
 }

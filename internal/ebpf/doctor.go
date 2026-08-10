@@ -222,7 +222,8 @@ func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, e
 			{Status: WARN, Name: "Device extraction support", Detail: unavailable},
 			{Status: WARN, Name: "blkcg ownership path support", Detail: unavailable},
 			{Status: WARN, Name: "cgroup identity extraction support", Detail: unavailable},
-			{Status: WARN, Name: "VM attribution readiness", Detail: "NOT ENABLED / PREFLIGHT ONLY"},
+			{Status: WARN, Name: "VM attribution preflight", Detail: unavailable},
+			{Status: WARN, Name: "VM attribution runtime readiness", Detail: "not attempted; doctor does not load or attach eBPF programs"},
 		}
 	}
 	report, err := inspect()
@@ -234,7 +235,8 @@ func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, e
 			{Status: WARN, Name: "Device extraction support", Detail: detail},
 			{Status: WARN, Name: "blkcg ownership path support", Detail: detail},
 			{Status: WARN, Name: "cgroup identity extraction support", Detail: detail},
-			{Status: WARN, Name: "VM attribution readiness", Detail: "NOT ENABLED / PREFLIGHT ONLY; capability inspection failed"},
+			{Status: WARN, Name: "VM attribution preflight", Detail: "unavailable; capability inspection failed"},
+			{Status: WARN, Name: "VM attribution runtime readiness", Detail: "not attempted; doctor does not load or attach eBPF programs"},
 		}
 	}
 	metadata := vmBlockDoctorCapabilityCheck("Request metadata support", report, []string{"request.cmd_flags"})
@@ -243,13 +245,16 @@ func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, e
 	ownership := vmBlockDoctorCapabilityCheck("blkcg ownership path support", report, []string{"request.bio", "bio.bi_blkg", "blkcg_gq.blkcg"})
 	identity := vmBlockDoctorCapabilityCheck("cgroup identity extraction support", report, []string{"blkcg.css.cgroup", "cgroup.kn", "kernfs_node.id"})
 	missing := missingVMBlockCapabilities(report, vmBlockOwnershipRequirements)
-	readinessDetail := "NOT ENABLED / PREFLIGHT ONLY"
+	preflight := Check{Status: OK, Name: "VM attribution preflight", Detail: "ownership fields available"}
 	if len(missing) > 0 {
-		readinessDetail += "; missing: " + strings.Join(missing, ", ")
-	} else {
-		readinessDetail += "; ownership fields available but runtime ownership validation is not implemented"
+		preflight.Status = WARN
+		preflight.Detail = "unavailable; missing: " + strings.Join(missing, ", ")
 	}
-	return []Check{metadata, operation, device, ownership, identity, {Status: WARN, Name: "VM attribution readiness", Detail: readinessDetail}}
+	runtimeReadiness := Check{
+		Status: WARN, Name: "VM attribution runtime readiness",
+		Detail: "not attempted; run experimental vm-block-latency to validate privileged load, attach, ownership extraction, and exact VM matches",
+	}
+	return []Check{metadata, operation, device, ownership, identity, preflight, runtimeReadiness}
 }
 
 func vmBlockDoctorCapabilityCheck(name string, report VMBlockBTFCapabilityReport, required []string) Check {

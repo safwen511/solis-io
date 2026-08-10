@@ -52,6 +52,7 @@ func collectVMBlockRuntimeDiagnostics(config vmBlockDiagnosticConfig, stage stri
 		UnprivilegedBPFDisabled: readDiagnosticValue(config.UnprivilegedBPFDisabledPath, strings.TrimSpace),
 		MemlockLimit:            "-",
 	}
+	applyVMBlockMapLayoutDiagnostics(&diagnostics, err)
 	if config.GetMemlock != nil {
 		if value, readErr := config.GetMemlock(); readErr == nil {
 			diagnostics.MemlockLimit = firstNonEmpty(strings.TrimSpace(value), "-")
@@ -60,6 +61,19 @@ func collectVMBlockRuntimeDiagnostics(config vmBlockDiagnosticConfig, stage stri
 		}
 	}
 	return diagnostics
+}
+
+func applyVMBlockMapLayoutDiagnostics(diagnostics *VMBlockRuntimeDiagnostics, err error) {
+	if diagnostics == nil || err == nil {
+		return
+	}
+	var layoutError *VMBlockMapLayoutError
+	if !errors.As(err, &layoutError) {
+		return
+	}
+	diagnostics.MapName = layoutError.MapName
+	diagnostics.KeySizeFromObject = layoutError.KeySizeFromObject
+	diagnostics.GoKeySize = layoutError.GoKeySize
 }
 
 func boundedError(err error) string {

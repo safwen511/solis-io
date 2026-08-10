@@ -59,7 +59,7 @@ func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	report := CollectVMBlockLatencyReportWithSource(context.Background(), VMBlockLatencyCollectOptions{
 		Duration: 5 * time.Second, Interval: time.Second, ObservedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 	}, mappings, fakeVMBlockEventSource{events: events})
-	if !report.Availability.Available || report.AttributionQuality != "experimental_blkcg_correlated" {
+	if !report.Availability.Available || report.AttributionQuality != "available" {
 		t.Fatalf("availability = %#v, quality = %q", report.Availability, report.AttributionQuality)
 	}
 	if len(report.VMs) != 2 {
@@ -68,7 +68,7 @@ func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	if report.VMs[0].Name != "a-web" || report.VMs[0].ReadOps != 1 || report.VMs[0].LatencyAvgMS != 1 {
 		t.Fatalf("a-web = %#v", report.VMs[0])
 	}
-	if report.VMs[0].MappingQuality != "cgroup_v2_inode_tree" || report.VMs[0].AttributionQuality != "experimental_blkcg_correlated" {
+	if report.VMs[0].MappingQuality != "cgroup_v2_inode_tree" || report.VMs[0].AttributionQuality != "available" {
 		t.Fatalf("separate mapping/attribution quality not preserved: %#v", report.VMs[0])
 	}
 	if report.VMs[1].Name != "b-stress" || report.VMs[1].WriteOps != 2 || report.VMs[1].LatencyAvgMS != 3 || report.VMs[1].LatencyP95MS != 5 || !report.VMs[1].PercentilesApproximate {

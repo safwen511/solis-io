@@ -3,6 +3,7 @@ package ebpf
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	ciliumebpf "github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 )
 
@@ -34,6 +36,7 @@ type fakeVMBlockCountResources struct {
 	counters         VMBlockKernelCounters
 	latency          VMBlockKernelLatency
 	deviceOperations []VMBlockKernelDeviceOperation
+	cgroupOperations []VMBlockKernelCgroupDeviceOperation
 	counterErr       error
 	closeErr         error
 	closed           bool
@@ -66,7 +69,8 @@ func (resources *fakeVMBlockCountResources) AttachComplete() (io.Closer, error) 
 func (resources *fakeVMBlockCountResources) ReadStats() (VMBlockKernelStats, error) {
 	return VMBlockKernelStats{
 		Counters: resources.counters, HostLatency: resources.latency,
-		HostDeviceOperations: append([]VMBlockKernelDeviceOperation(nil), resources.deviceOperations...),
+		HostDeviceOperations:   append([]VMBlockKernelDeviceOperation(nil), resources.deviceOperations...),
+		CgroupDeviceOperations: append([]VMBlockKernelCgroupDeviceOperation(nil), resources.cgroupOperations...),
 	}, resources.counterErr
 }
 
@@ -246,7 +250,7 @@ func TestResolveVMBlockTypedTracepointsRejectsCallbackDataAsProgramArgument(t *t
 	}
 }
 
-func TestVMBlockCUsesOnlyWhitelistedRequestMetadataFields(t *testing.T) {
+func TestVMBlockCUsesOnlyWhitelistedRequestMetadataAndOwnershipFields(t *testing.T) {
 	source, err := os.ReadFile("bpf/vm_block_latency.bpf.c")
 	if err != nil {
 		t.Fatal(err)
@@ -258,15 +262,15 @@ func TestVMBlockCUsesOnlyWhitelistedRequestMetadataFields(t *testing.T) {
 		"blk_status_t error, unsigned int nr_bytes)",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("count-only source missing effective tp_btf signature %q", want)
+			t.Fatalf("typed-BTF source missing effective tp_btf signature %q", want)
 		}
 	}
 	if strings.Contains(text, "void *unused") {
 		t.Fatal("host request-latency source exposes kernel callback data as a BPF program argument")
 	}
-	for _, forbidden := range []string{"rq->", "BPF_CORE_READ(rq", "bpf_probe_read_kernel", "bi_blkg", "blkcg", "cgroup"} {
+	for _, forbidden := range []string{"rq->", "BPF_CORE_READ(rq", "bpf_probe_read_kernel", "bpf_get_current_pid_tgid", "bpf_get_current_cgroup_id"} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("host request-latency source uses forbidden ownership or direct-read token %q", forbidden)
+			t.Fatalf("VM request-latency source uses forbidden direct-read or task-identity token %q", forbidden)
 		}
 	}
 	for _, want := range []string{
@@ -280,6 +284,14 @@ func TestVMBlockCUsesOnlyWhitelistedRequestMetadataFields(t *testing.T) {
 		"BPF_CORE_READ_INTO(&cmd_flags, rq, cmd_flags)",
 		"BPF_CORE_READ_INTO(&part, rq, part)",
 		"BPF_CORE_READ_INTO(&dev, part, bd_dev)",
+		"BPF_CORE_READ_INTO(&bio, rq, bio)",
+		"BPF_CORE_READ_INTO(&blkg, bio, bi_blkg)",
+		"BPF_CORE_READ_INTO(&blkcg, blkg, blkcg)",
+		"BPF_CORE_READ_INTO(&cgroup, blkcg, css.cgroup)",
+		"BPF_CORE_READ_INTO(&kn, cgroup, kn)",
+		"BPF_CORE_READ_INTO(&cgroup_id, kn, id)",
+		"VM_BLOCK_CGROUP_DEVICE_MAX_ENTRIES 4096",
+		"cgroup_device_operation_stats SEC(\".maps\")",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("host request-latency source missing bounded correlation element %q", want)
@@ -373,6 +385,99 @@ func TestCiliumVMBlockInvalidObjectBytes(t *testing.T) {
 	}
 	if !strings.Contains(report.Availability.Error, "parse embedded eBPF ELF") || report.HostSummary.TotalOps != 0 {
 		t.Fatalf("invalid object report = %#v", report)
+	}
+}
+
+func TestValidateVMBlockCollectionSpecRejectsStaleObject(t *testing.T) {
+	spec := &ciliumebpf.CollectionSpec{
+		Programs: map[string]*ciliumebpf.ProgramSpec{
+			"on_block_rq_issue":    {},
+			"on_block_rq_complete": {},
+		},
+		Maps: map[string]*ciliumebpf.MapSpec{
+			"counters":               {},
+			"request_starts":         {},
+			"latency_stats":          {},
+			"device_operation_stats": {KeySize: 12},
+		},
+	}
+	err := validateVMBlockCollectionSpec(spec)
+	if !errors.Is(err, ErrVMBlockObjectInvalid) || !strings.Contains(err.Error(), "missing map cgroup_device_operation_stats") {
+		t.Fatalf("stale object error = %v", err)
+	}
+	spec.Maps["cgroup_device_operation_stats"] = &ciliumebpf.MapSpec{KeySize: 24}
+	if err := validateVMBlockCollectionSpec(spec); err != nil {
+		t.Fatalf("complete collection spec rejected: %v", err)
+	}
+	spec.Maps["cgroup_device_operation_stats"].KeySize = 20
+	err = validateVMBlockCollectionSpec(spec)
+	var layoutError *VMBlockMapLayoutError
+	if !errors.Is(err, ErrVMBlockObjectInvalid) || !errors.As(err, &layoutError) || layoutError.MapName != vmBlockCgroupDeviceOperationMapName {
+		t.Fatalf("spec layout mismatch was not classified as object_invalid: %v", err)
+	}
+}
+
+func TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes(t *testing.T) {
+	object, err := embeddedVMBlockObject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := ciliumebpf.LoadCollectionSpecFromReader(bytes.NewReader(object))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := binary.Size(vmBlockDeviceOperationKey{}), int(spec.Maps[vmBlockDeviceOperationMapName].KeySize); got != want || got != 12 {
+		t.Fatalf("device-operation key size = Go %d, object %d, want 12", got, want)
+	}
+	if got, want := binary.Size(vmBlockCgroupDeviceOperationKey{}), int(spec.Maps[vmBlockCgroupDeviceOperationMapName].KeySize); got != want || got != 24 {
+		t.Fatalf("cgroup-device-operation key size = Go %d, object %d, want 24", got, want)
+	}
+	if err := validateVMBlockCollectionSpec(spec); err != nil {
+		t.Fatalf("generated object layout rejected: %v", err)
+	}
+}
+
+func TestVMBlockCgroupDeviceOperationKeyBinaryRoundTrip(t *testing.T) {
+	want := vmBlockCgroupDeviceOperationKey{CgroupID: 42, Major: 253, Minor: 7, Operation: 1}
+	var encoded bytes.Buffer
+	if err := binary.Write(&encoded, binary.LittleEndian, want); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Len() != 24 {
+		t.Fatalf("encoded key size = %d, want 24", encoded.Len())
+	}
+	var got vmBlockCgroupDeviceOperationKey
+	if err := binary.Read(&encoded, binary.LittleEndian, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("decoded key = %#v, want %#v", got, want)
+	}
+}
+
+func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T) {
+	latency := VMBlockKernelLatency{Count: 1, TotalNS: 2_000, MinNS: 2_000, MaxNS: 2_000, WriteOps: 1}
+	latency.Buckets[0] = 1
+	resources := &fakeVMBlockCountResources{
+		counters: VMBlockKernelCounters{IssueSeen: 1, CompleteSeen: 1, CompletedLatencyEvents: 1},
+		latency:  latency,
+		counterErr: &VMBlockMapLayoutError{
+			MapName: vmBlockCgroupDeviceOperationMapName, KeySizeFromObject: 24, GoKeySize: 20,
+		},
+	}
+	source, _ := fakeCiliumVMBlockSource(resources)
+	report := collectCountOnlyTestReport(source, []VMBlockCgroupMapping{{Name: "a-web", CgroupIDs: []uint64{11}, MappingQuality: "cgroup_v2_inode_tree"}})
+	if report.Availability.Available || report.Availability.Status != "map_layout_mismatch" || report.Diagnostics.Stage != "map_read" {
+		t.Fatalf("layout failure = availability:%#v diagnostics:%#v", report.Availability, report.Diagnostics)
+	}
+	if report.Diagnostics.MapName != vmBlockCgroupDeviceOperationMapName || report.Diagnostics.KeySizeFromObject != 24 || report.Diagnostics.GoKeySize != 20 {
+		t.Fatalf("layout diagnostics = %#v", report.Diagnostics)
+	}
+	if report.HostSummary.TotalOps != 1 || report.VMs[0].TotalOps != 0 {
+		t.Fatalf("partial host evidence was lost or VM evidence fabricated: host:%#v VMs:%#v", report.HostSummary, report.VMs)
+	}
+	if privacyCollected(report) {
+		t.Fatalf("privacy flags = %#v", report.Privacy)
 	}
 }
 
@@ -484,7 +589,7 @@ func TestCiliumVMBlockCleanupDiagnosticsAreBounded(t *testing.T) {
 	}
 }
 
-func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
+func TestCiliumVMBlockSuccessfulAttributedLatencyCollection(t *testing.T) {
 	latency := VMBlockKernelLatency{
 		Count: 3, TotalNS: uint64(6 * time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(3 * time.Millisecond),
 		ReadOps: 1, WriteOps: 1, FlushOps: 1,
@@ -493,13 +598,16 @@ func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
 	latency.Buckets[5] = 2 // 2 ms and 3 ms belong to <5 ms.
 	resources := &fakeVMBlockCountResources{
 		counters: VMBlockKernelCounters{
-			IssueSeen: 41, CompleteSeen: 39, DuplicateIssue: 1, LookupMiss: 2,
-			IncompleteAtWindowEnd: 1, MapFull: 1, CompletedLatencyEvents: 3,
-			MetadataUnavailable: 2, DeviceUnavailable: 1, OperationUnknown: 1,
+			IssueSeen: 3, CompleteSeen: 3, CompletedLatencyEvents: 3,
 		},
 		latency: latency,
 		deviceOperations: []VMBlockKernelDeviceOperation{
 			{Major: 253, Minor: 0, Operation: "write", Latency: VMBlockKernelLatency{Count: 1, TotalNS: uint64(2 * time.Millisecond), MinNS: uint64(2 * time.Millisecond), MaxNS: uint64(2 * time.Millisecond), WriteOps: 1, Buckets: [14]uint64{0, 0, 0, 0, 0, 1}}},
+		},
+		cgroupOperations: []VMBlockKernelCgroupDeviceOperation{
+			{CgroupID: 11, Major: 253, Minor: 0, Operation: "read", Latency: VMBlockKernelLatency{Count: 1, TotalNS: uint64(time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(time.Millisecond), ReadOps: 1, Buckets: [14]uint64{0, 0, 0, 0, 1}}},
+			{CgroupID: 11, Major: 253, Minor: 0, Operation: "write", Latency: VMBlockKernelLatency{Count: 1, TotalNS: uint64(2 * time.Millisecond), MinNS: uint64(2 * time.Millisecond), MaxNS: uint64(2 * time.Millisecond), WriteOps: 1, Buckets: [14]uint64{0, 0, 0, 0, 0, 1}}},
+			{CgroupID: 11, Major: 253, Minor: 0, Operation: "flush", Latency: VMBlockKernelLatency{Count: 1, TotalNS: uint64(3 * time.Millisecond), MinNS: uint64(3 * time.Millisecond), MaxNS: uint64(3 * time.Millisecond), FlushOps: 1, Buckets: [14]uint64{0, 0, 0, 0, 0, 1}}},
 		},
 	}
 	source, loader := fakeCiliumVMBlockSource(resources)
@@ -508,7 +616,7 @@ func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
 	if !loader.loaded || !resources.closed || resources.issueLink == nil || !resources.issueLink.closed || resources.completeLink == nil || !resources.completeLink.closed {
 		t.Fatalf("loader/resources lifecycle incomplete: loader=%#v resources=%#v", loader, resources)
 	}
-	if !report.Availability.Available || report.CollectionMode != vmBlockHostLatencyCollectionMode || report.AttributionMethod != vmBlockHostAttributionMethod || report.AttributionQuality != "unavailable" {
+	if !report.Availability.Available || report.CollectionMode != vmBlockVMAttributionCollectionMode || report.AttributionMethod != vmBlockVMAttributionMethod || report.AttributionQuality != "available" {
 		t.Fatalf("report mode = %#v", report)
 	}
 	if report.KernelCounters != resources.counters || report.HostSummary.TotalOps != 3 || report.HostSummary.ReadOps != 1 || report.HostSummary.WriteOps != 1 || report.HostSummary.FlushOps != 1 || report.HostSummary.UnknownOps != 0 || report.HostSummary.LatencyMinMS != 1 || report.HostSummary.LatencyAvgMS != 2 || report.HostSummary.LatencyP50MS != 5 || report.HostSummary.LatencyMaxMS != 3 {
@@ -517,17 +625,20 @@ func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
 	if len(report.HostSummary.DeviceOperations) != 1 || report.HostSummary.DeviceOperations[0].Device != "253:0" || report.HostSummary.DeviceOperations[0].Operation != "write" {
 		t.Fatalf("device operations = %#v", report.HostSummary.DeviceOperations)
 	}
-	if !report.VMAttributionPreflight.Available || report.VMAttributionPreflight.Status != "preflight_only" {
+	if !report.VMAttributionPreflight.Available || report.VMAttributionPreflight.Status != "enabled" || strings.Contains(strings.Join(report.VMAttributionPreflight.Caveats, " "), "not enabled") {
 		t.Fatalf("VM attribution preflight = %#v", report.VMAttributionPreflight)
 	}
-	if len(report.VMs) != 1 || report.VMs[0].TotalOps != 0 || report.VMs[0].LatencyAvgMS != 0 || report.VMs[0].AttributionQuality != "unavailable" {
-		t.Fatalf("host-only report fabricated VM attribution: %#v", report.VMs)
+	if len(report.VMs) != 1 || report.VMs[0].TotalOps != 3 || report.VMs[0].ReadOps != 1 || report.VMs[0].WriteOps != 1 || report.VMs[0].FlushOps != 1 || report.VMs[0].LatencyAvgMS != 2 || report.VMs[0].AttributionQuality != "available" {
+		t.Fatalf("attributed VM report = %#v", report.VMs)
 	}
-	if report.Unattributed.LookupMiss != 2 || report.Unattributed.DuplicateIssue != 1 || report.Unattributed.IncompleteAtWindowEnd != 1 || report.Unattributed.MapFull != 1 || report.Unattributed.TotalUnattributedOps != 4 {
+	if len(report.VMs[0].DeviceOperations) != 3 || report.VMs[0].DeviceOperations[0].Operation != "read" || report.VMs[0].DeviceOperations[1].Operation != "write" || report.VMs[0].DeviceOperations[2].Operation != "flush" {
+		t.Fatalf("VM device operations = %#v", report.VMs[0].DeviceOperations)
+	}
+	if report.Unattributed.TotalUnattributedOps != 0 || report.Unattributed.UnattributedPercent != 0 {
 		t.Fatalf("unattributed counters = %#v", report.Unattributed)
 	}
-	if report.Unattributed.MetadataUnavailable != 2 || report.Unattributed.DeviceUnavailable != 1 || report.Unattributed.OperationUnknown != 1 {
-		t.Fatalf("metadata counters = %#v", report.Unattributed)
+	if report.AttributionSummary.AttributedOps != 3 || report.AttributionSummary.UnattributedOps != 0 || report.AttributionSummary.AttributedPercent != 100 || report.AttributionSummary.MatchedVMCount != 1 {
+		t.Fatalf("attribution summary = %#v", report.AttributionSummary)
 	}
 	if privacyCollected(report) {
 		t.Fatalf("privacy flags = %#v", report.Privacy)
@@ -543,15 +654,111 @@ func TestCiliumVMBlockSuccessfulHostRequestLatencyCollection(t *testing.T) {
 	if first.String() != second.String() {
 		t.Fatal("host request-latency JSON is not deterministic")
 	}
-	if strings.Contains(first.String(), "request_pointer") || strings.Contains(first.String(), "4276993775") {
-		t.Fatalf("raw request pointer field leaked into JSON: %s", first.String())
+	for _, forbidden := range []string{"cmdline", "/proc/", "0xffff", "request_pointer", "RequestPointer", "request pointer", "bio_pointer", "blkcg_pointer", "cgroup_pointer", "4276993775"} {
+		if strings.Contains(first.String(), forbidden) {
+			t.Fatalf("kernel pointer token %q leaked into JSON: %s", forbidden, first.String())
+		}
 	}
 	var decoded VMBlockLatencyReport
 	if err := json.Unmarshal(first.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.KernelCounters.IssueSeen != 41 || decoded.KernelCounters.CompleteSeen != 39 || decoded.HostSummary.TotalOps != 3 || decoded.VMs[0].TotalOps != 0 {
+	if decoded.KernelCounters.IssueSeen != 3 || decoded.KernelCounters.CompleteSeen != 3 || decoded.HostSummary.TotalOps != 3 || decoded.VMs[0].TotalOps != 3 {
 		t.Fatalf("decoded = %#v", decoded)
+	}
+}
+
+func TestCiliumVMBlockExactAndUnmappedCgroupAttribution(t *testing.T) {
+	hostLatency := VMBlockKernelLatency{
+		Count: 4, TotalNS: uint64(10 * time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(4 * time.Millisecond),
+		ReadOps: 1, WriteOps: 3,
+	}
+	hostLatency.Buckets[4] = 1
+	hostLatency.Buckets[5] = 3
+	knownRead := VMBlockKernelLatency{
+		Count: 1, TotalNS: uint64(time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(time.Millisecond), ReadOps: 1,
+	}
+	knownRead.Buckets[4] = 1
+	knownWrite := VMBlockKernelLatency{
+		Count: 2, TotalNS: uint64(5 * time.Millisecond), MinNS: uint64(2 * time.Millisecond), MaxNS: uint64(3 * time.Millisecond), WriteOps: 2,
+	}
+	knownWrite.Buckets[5] = 2
+	unknown := VMBlockKernelLatency{
+		Count: 1, TotalNS: uint64(4 * time.Millisecond), MinNS: uint64(4 * time.Millisecond), MaxNS: uint64(4 * time.Millisecond), WriteOps: 1,
+	}
+	unknown.Buckets[5] = 1
+	resources := &fakeVMBlockCountResources{
+		counters: VMBlockKernelCounters{IssueSeen: 4, CompleteSeen: 4, CompletedLatencyEvents: 4},
+		latency:  hostLatency,
+		cgroupOperations: []VMBlockKernelCgroupDeviceOperation{
+			{CgroupID: 11, Major: 253, Minor: 0, Operation: "read", Latency: knownRead},
+			{CgroupID: 11, Major: 253, Minor: 0, Operation: "write", Latency: knownWrite},
+			{CgroupID: 99, Major: 253, Minor: 0, Operation: "write", Latency: unknown},
+		},
+	}
+	source, _ := fakeCiliumVMBlockSource(resources)
+	report := collectCountOnlyTestReport(source, []VMBlockCgroupMapping{{
+		Name: "a-web", Tenant: "tenant-a", Role: "web", MappingQuality: "cgroup_v2_inode_tree", CgroupIDs: []uint64{10, 11},
+	}})
+	if report.HostSummary.TotalOps != 4 || report.VMs[0].TotalOps != 3 {
+		t.Fatalf("host/VM totals = host:%#v vm:%#v", report.HostSummary, report.VMs[0])
+	}
+	if report.Unattributed.UnmappedCgroup != 1 || report.Unattributed.TotalUnattributedOps != 1 || report.Unattributed.UnattributedPercent != 25 {
+		t.Fatalf("unmapped accounting = %#v", report.Unattributed)
+	}
+	if report.AttributionQuality != "degraded" || report.VMs[0].AttributionQuality != "degraded" {
+		t.Fatalf("quality = report:%q VM:%q", report.AttributionQuality, report.VMs[0].AttributionQuality)
+	}
+	if report.AttributionSummary.AttributedOps != 3 || report.AttributionSummary.UnattributedOps != 1 || report.AttributionSummary.AttributedPercent != 75 || report.AttributionSummary.MatchedVMCount != 1 {
+		t.Fatalf("summary = %#v", report.AttributionSummary)
+	}
+	if report.VMs[0].ReadOps != 1 || report.VMs[0].WriteOps != 2 || len(report.VMs[0].DeviceOperations) != 2 || report.VMs[0].DeviceOperations[0].Device != "253:0" || report.VMs[0].DeviceOperations[0].Operation != "read" || report.VMs[0].DeviceOperations[1].Operation != "write" {
+		t.Fatalf("VM device operations = %#v", report.VMs[0].DeviceOperations)
+	}
+}
+
+func TestCiliumVMBlockMissingOwnershipCountersRemainUnattributed(t *testing.T) {
+	latency := VMBlockKernelLatency{Count: 2, TotalNS: 2_000, MinNS: 1_000, MaxNS: 1_000, UnknownOps: 2}
+	latency.Buckets[0] = 2
+	resources := &fakeVMBlockCountResources{
+		counters: VMBlockKernelCounters{
+			IssueSeen: 2, CompleteSeen: 2, CompletedLatencyEvents: 2, MissingBio: 1, MissingBlkcg: 1,
+		},
+		latency: latency,
+	}
+	source, _ := fakeCiliumVMBlockSource(resources)
+	report := collectCountOnlyTestReport(source, []VMBlockCgroupMapping{{Name: "a-web", MappingQuality: "cgroup_v2_inode_tree", CgroupIDs: []uint64{11}}})
+	if report.KernelCounters.MissingBio != 1 || report.KernelCounters.MissingBlkcg != 1 || report.Unattributed.MissingBio != 1 || report.Unattributed.MissingBlkcg != 1 {
+		t.Fatalf("ownership counters = kernel:%#v unattributed:%#v", report.KernelCounters, report.Unattributed)
+	}
+	if report.HostSummary.TotalOps != 2 || report.VMs[0].TotalOps != 0 || report.Unattributed.TotalUnattributedOps != 2 || report.AttributionQuality != "unavailable" {
+		t.Fatalf("missing-ownership report = %#v", report)
+	}
+}
+
+func TestRuntimeVMBlockAttributionQualityThresholds(t *testing.T) {
+	tests := []struct {
+		name         string
+		attributed   uint64
+		unattributed uint64
+		matched      int
+		want         string
+	}{
+		{name: "five percent available", attributed: 95, unattributed: 5, matched: 1, want: "available"},
+		{name: "over five percent degraded", attributed: 94, unattributed: 6, matched: 1, want: "degraded"},
+		{name: "twenty five percent degraded", attributed: 75, unattributed: 25, matched: 1, want: "degraded"},
+		{name: "over twenty five unavailable", attributed: 74, unattributed: 26, matched: 1, want: "unavailable"},
+		{name: "no attributed operations", unattributed: 5, matched: 0, want: "unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := runtimeVMBlockAttributionQuality(VMBlockAttributionSummary{
+				AttributedOps: test.attributed, UnattributedOps: test.unattributed, MatchedVMCount: test.matched,
+			})
+			if got != test.want {
+				t.Fatalf("quality = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

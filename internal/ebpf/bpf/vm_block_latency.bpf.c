@@ -14,11 +14,14 @@ struct vmblock_count_values {
 	__u64 metadata_unavailable;
 	__u64 device_unavailable;
 	__u64 operation_unknown;
+	__u64 missing_bio;
+	__u64 missing_blkcg;
 };
 
 #define VM_BLOCK_LATENCY_BUCKETS 14
 #define VM_BLOCK_REQUEST_MAX_ENTRIES 65536
 #define VM_BLOCK_DEVICE_MAX_ENTRIES 4096
+#define VM_BLOCK_CGROUP_DEVICE_MAX_ENTRIES 4096
 #define VM_BLOCK_REQ_OP_MASK 0xffU
 
 enum vmblock_operation {
@@ -31,14 +34,23 @@ enum vmblock_operation {
 
 struct vmblock_issue_value {
 	__u64 timestamp_ns;
+	__u64 cgroup_id;
 	__u32 major;
 	__u32 minor;
 	__u8 operation;
 	__u8 device_available;
-	__u16 reserved;
+	__u8 ownership_available;
+	__u8 reserved;
 };
 
 struct vmblock_device_operation_key {
+	__u32 major;
+	__u32 minor;
+	__u32 operation;
+};
+
+struct vmblock_cgroup_device_operation_key {
+	__u64 cgroup_id;
 	__u32 major;
 	__u32 minor;
 	__u32 operation;
@@ -84,6 +96,13 @@ struct {
 	__type(key, struct vmblock_device_operation_key);
 	__type(value, struct vmblock_latency_values);
 } device_operation_stats SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+	__uint(max_entries, VM_BLOCK_CGROUP_DEVICE_MAX_ENTRIES);
+	__type(key, struct vmblock_cgroup_device_operation_key);
+	__type(value, struct vmblock_latency_values);
+} cgroup_device_operation_stats SEC(".maps");
 
 static __always_inline struct vmblock_count_values *get_counts(void)
 {
@@ -144,6 +163,33 @@ static __always_inline __u8 classify_operation(blk_opf_t cmd_flags)
 	default:
 		return VM_BLOCK_OP_UNKNOWN;
 	}
+}
+
+static __always_inline void extract_cgroup_identity(
+	struct request *rq, struct vmblock_issue_value *issue,
+	struct vmblock_count_values *values)
+{
+	struct bio *bio = 0;
+	struct blkcg_gq *blkg = 0;
+	struct blkcg *blkcg = 0;
+	struct cgroup *cgroup = 0;
+	struct kernfs_node *kn = 0;
+	__u64 cgroup_id = 0;
+
+	if (BPF_CORE_READ_INTO(&bio, rq, bio) < 0 || !bio) {
+		values->missing_bio++;
+		return;
+	}
+	if (BPF_CORE_READ_INTO(&blkg, bio, bi_blkg) < 0 || !blkg ||
+	    BPF_CORE_READ_INTO(&blkcg, blkg, blkcg) < 0 || !blkcg ||
+	    BPF_CORE_READ_INTO(&cgroup, blkcg, css.cgroup) < 0 || !cgroup ||
+	    BPF_CORE_READ_INTO(&kn, cgroup, kn) < 0 || !kn ||
+	    BPF_CORE_READ_INTO(&cgroup_id, kn, id) < 0 || !cgroup_id) {
+		values->missing_blkcg++;
+		return;
+	}
+	issue->cgroup_id = cgroup_id;
+	issue->ownership_available = 1;
 }
 
 static __always_inline void observe_latency(struct vmblock_latency_values *values,
@@ -227,6 +273,7 @@ int BPF_PROG(on_block_rq_issue, struct request *rq)
 	}
 	if (operation_result < 0 || device_result < 0 || !issue.device_available)
 		values->metadata_unavailable++;
+	extract_cgroup_identity(rq, &issue, values);
 	if (bpf_map_update_elem(&request_starts, &request_key, &issue,
 				BPF_ANY) < 0)
 		values->map_full++;
@@ -242,12 +289,15 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 	struct vmblock_latency_values zero_latency = {};
 	struct vmblock_latency_values *device_latency;
 	struct vmblock_device_operation_key device_key = {};
+	struct vmblock_cgroup_device_operation_key cgroup_device_key = {};
 	__u64 request_key;
 	struct vmblock_issue_value *issue;
 	__u64 now_ns;
 	__u64 latency_ns;
 	__u8 operation;
 	__u8 device_available;
+	__u8 ownership_available;
+	__u64 cgroup_id;
 
 	if (!values)
 		return 0;
@@ -270,6 +320,8 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 	device_key.operation = issue->operation;
 	operation = issue->operation;
 	device_available = issue->device_available;
+	ownership_available = issue->ownership_available;
+	cgroup_id = issue->cgroup_id;
 	bpf_map_delete_elem(&request_starts, &request_key);
 
 	latency_values = get_latency_stats();
@@ -289,6 +341,24 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 			observe_latency(device_latency, latency_ns, operation);
 		else
 			values->metadata_unavailable++;
+		if (ownership_available) {
+			cgroup_device_key.cgroup_id = cgroup_id;
+			cgroup_device_key.major = device_key.major;
+			cgroup_device_key.minor = device_key.minor;
+			cgroup_device_key.operation = device_key.operation;
+			device_latency = bpf_map_lookup_elem(
+				&cgroup_device_operation_stats, &cgroup_device_key);
+			if (!device_latency) {
+				bpf_map_update_elem(&cgroup_device_operation_stats,
+					&cgroup_device_key, &zero_latency, BPF_NOEXIST);
+				device_latency = bpf_map_lookup_elem(
+					&cgroup_device_operation_stats, &cgroup_device_key);
+			}
+			if (device_latency)
+				observe_latency(device_latency, latency_ns, operation);
+			else
+				values->map_full++;
+		}
 	}
 	values->completed_latency_events++;
 	return 0;

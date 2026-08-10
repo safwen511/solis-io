@@ -43,15 +43,40 @@ enum req_op {
 };
 
 /*
- * Minimal CO-RE views. Only these named metadata fields are read by Task 5;
- * no payload or ownership field is accessed by the BPF programs.
+ * Minimal CO-RE views. Only these named request metadata and blkcg ownership
+ * fields are read by the experimental collector; no payload field is present.
  */
 struct block_device {
 	dev_t bd_dev;
 } __attribute__((preserve_access_index));
 
+struct kernfs_node {
+	__u64 id;
+} __attribute__((preserve_access_index));
+
+struct cgroup {
+	struct kernfs_node *kn;
+} __attribute__((preserve_access_index));
+
+struct cgroup_subsys_state {
+	struct cgroup *cgroup;
+} __attribute__((preserve_access_index));
+
+struct blkcg {
+	struct cgroup_subsys_state css;
+} __attribute__((preserve_access_index));
+
+struct blkcg_gq {
+	struct blkcg *blkcg;
+} __attribute__((preserve_access_index));
+
+struct bio {
+	struct blkcg_gq *bi_blkg;
+} __attribute__((preserve_access_index));
+
 struct request {
 	blk_opf_t cmd_flags;
+	struct bio *bio;
 	struct block_device *part;
 } __attribute__((preserve_access_index));
 

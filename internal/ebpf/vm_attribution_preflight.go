@@ -200,3 +200,13 @@ func vmBlockAttributionPreflightCaveats() []string {
 		"a runtime cgroup identity must match a validated libvirt VM mapping before attribution is trusted",
 	}
 }
+
+func vmBlockAttributionEnabledCaveats() []string {
+	return []string{
+		"experimental runtime ownership extraction is enabled for this collection window",
+		"request merging and requeues can affect ownership attribution",
+		"missing bio or blkcg ownership remains explicitly unattributed",
+		"stacked block devices can make physical-layer ownership ambiguous",
+		"only an exact cgroup identity match to a validated libvirt VM mapping is attributed",
+	}
+}

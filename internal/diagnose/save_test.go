@@ -3,6 +3,7 @@ package diagnose
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/hoststorage"
 	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/output"
 	"github.com/safwen511/solis-io/internal/qemuio"
 	"github.com/safwen511/solis-io/internal/storage"
 )
@@ -49,6 +51,7 @@ func TestWriteOutputExactPath(t *testing.T) {
 		t.Fatalf("WriteOutput() path = %q, want %q", writtenPath, path)
 	}
 	assertDiagnosisFile(t, path, report)
+	assertPrivateDiagnosisMode(t, path)
 	if got := stdout.String(); got != "diagnosis written to "+path+"\n" {
 		t.Fatalf("stdout = %q, want confirmation", got)
 	}
@@ -91,6 +94,7 @@ func TestWriteOutputJSONExactPath(t *testing.T) {
 	if got := stdout.String(); got != "diagnosis written to "+path+"\n" {
 		t.Fatalf("stdout = %q, want confirmation outside JSON", got)
 	}
+	assertPrivateDiagnosisMode(t, path)
 }
 
 func TestWriteJSONExcludesSensitiveInternalFields(t *testing.T) {
@@ -136,16 +140,70 @@ func TestWriteOutputDirectoryUsesUTCTimestamp(t *testing.T) {
 	assertDiagnosisFile(t, wantPath, report)
 }
 
-func TestWriteOutputCreatesParentDirectories(t *testing.T) {
+func TestWriteOutputRejectsMissingParentDirectory(t *testing.T) {
 	report := outputTestReport()
-	path := filepath.Join(t.TempDir(), "nested", "reports", "diagnosis.txt")
-	if _, err := WriteOutput(&bytes.Buffer{}, report, OutputOptions{Path: path}, time.Time{}); err != nil {
+	root := t.TempDir()
+	missingParent := filepath.Join(root, "nested", "reports")
+	path := filepath.Join(missingParent, "diagnosis.txt")
+	_, err := WriteOutput(&bytes.Buffer{}, report, OutputOptions{Path: path}, time.Time{})
+	if !errors.Is(err, output.ErrParentDirectoryMissing) {
+		t.Fatalf("WriteOutput() error = %v, want parent_directory_missing", err)
+	}
+	if _, statErr := os.Lstat(missingParent); !os.IsNotExist(statErr) {
+		t.Fatalf("missing parent was created: %v", statErr)
+	}
+}
+
+func TestWriteOutputRejectsSymlinkTarget(t *testing.T) {
+	root := t.TempDir()
+	realTarget := filepath.Join(root, "real.txt")
+	link := filepath.Join(root, "diagnosis.txt")
+	if err := os.WriteFile(realTarget, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realTarget, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WriteOutput(&bytes.Buffer{}, outputTestReport(), OutputOptions{Path: link}, time.Time{})
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("WriteOutput() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Dir(path)); err != nil {
-		t.Fatalf("parent directory was not created: %v", err)
+	data, readErr := os.ReadFile(realTarget)
+	if readErr != nil || string(data) != "unchanged" {
+		t.Fatalf("symlink destination changed: %q, error = %v", data, readErr)
 	}
-	assertDiagnosisFile(t, path, report)
+}
+
+func TestWriteOutputRejectsSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	realParent := filepath.Join(root, "real")
+	if err := os.Mkdir(realParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(root, "linked")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WriteOutput(
+		&bytes.Buffer{}, outputTestReport(), OutputOptions{Path: filepath.Join(linkedParent, "diagnosis.txt")}, time.Time{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("WriteOutput() error = %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(realParent, "diagnosis.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("diagnosis created through parent symlink: %v", statErr)
+	}
+}
+
+func TestWriteOutputRejectsNonRegularTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnosis.txt")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WriteOutput(&bytes.Buffer{}, outputTestReport(), OutputOptions{Path: path}, time.Time{})
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("WriteOutput() error = %v", err)
+	}
 }
 
 func TestWriteOutputRejectsConflictingDestinations(t *testing.T) {
@@ -232,5 +290,16 @@ func assertDiagnosisFile(t *testing.T, path string, report Report) {
 	}
 	if string(data) != want.String() {
 		t.Fatalf("saved diagnosis differs:\n%s", data)
+	}
+}
+
+func assertPrivateDiagnosisMode(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("diagnosis mode = %04o, want 0600", got)
 	}
 }

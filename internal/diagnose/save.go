@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/safwen511/solis-io/internal/output"
 )
 
 const diagnosisTimestampFormat = "20060102T150405Z"
@@ -42,7 +43,6 @@ func WriteOutput(stdout io.Writer, report Report, options OutputOptions, now tim
 	}
 
 	path := options.Path
-	exclusive := false
 	if options.Directory != "" {
 		extension := ".txt"
 		if options.JSON {
@@ -56,40 +56,18 @@ func WriteOutput(stdout io.Writer, report Report, options OutputOptions, now tim
 			extension,
 		)
 		path = filepath.Join(options.Directory, filename)
-		exclusive = true
 	}
 
-	if err := writeDiagnosisFile(path, rendered.Bytes(), exclusive); err != nil {
+	if err := output.WritePrivateAtomicFile(path, func(dst io.Writer) error {
+		_, err := dst.Write(rendered.Bytes())
+		return err
+	}); err != nil {
 		return "", err
 	}
 	if _, err := fmt.Fprintf(stdout, "diagnosis written to %s\n", path); err != nil {
 		return path, err
 	}
 	return path, nil
-}
-
-func writeDiagnosisFile(path string, data []byte, exclusive bool) error {
-	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("create diagnosis output directory %q: %w", parent, err)
-	}
-
-	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if exclusive {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	}
-	file, err := os.OpenFile(path, flags, 0o644)
-	if err != nil {
-		return fmt.Errorf("create diagnosis output %q: %w", path, err)
-	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return fmt.Errorf("write diagnosis output %q: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close diagnosis output %q: %w", path, err)
-	}
-	return nil
 }
 
 // FormatUTCTimestamp formats artifact timestamps in compact UTC form.

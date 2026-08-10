@@ -163,7 +163,7 @@ sudo ./solis diagnose noisy-neighbor \
   --output ./diagnosis.json
 ```
 
-The output file contains JSON only. The confirmation message is written separately to stdout. The equivalent leading global form is also accepted:
+The output file contains JSON only. The confirmation message is written separately to stdout. Diagnosis output uses a private mode-`0600` same-directory temporary file and atomic rename; its parent directory must already exist, and symbolic-link or non-regular targets are rejected. The equivalent leading global form is also accepted:
 
 ```bash
 sudo ./solis --json diagnose noisy-neighbor \

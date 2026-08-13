@@ -16,20 +16,8 @@ type Source interface {
 // Run refreshes the read-only dashboard until the requested iteration count or
 // context cancellation. It never places the terminal into raw mode.
 func Run(ctx context.Context, dst io.Writer, source Source, options Options) error {
-	if source == nil {
-		return errors.New("top source is required")
-	}
-	if options.Duration <= 0 || options.Interval <= 0 || options.Interval > options.Duration {
-		return errors.New("top duration and interval must be positive, and interval must not exceed duration")
-	}
-	if options.Every <= 0 {
-		return errors.New("top refresh interval must be positive")
-	}
-	if options.Iterations < 0 {
-		return errors.New("top iterations must not be negative")
-	}
-	if !ValidSortField(options.Sort) {
-		return fmt.Errorf("invalid top sort field %q", options.Sort)
+	if err := validateOptions(source, options); err != nil {
+		return err
 	}
 
 	iteration := 0
@@ -64,7 +52,7 @@ func Run(ctx context.Context, dst io.Writer, source Source, options Options) err
 				return err
 			}
 		}
-		if err := WriteFrame(dst, view, Frame{Iteration: iteration, Every: options.Every}); err != nil {
+		if err := WriteFrame(dst, view, Frame{Iteration: iteration, Every: options.Every, Sort: options.Sort}); err != nil {
 			return err
 		}
 		if options.Iterations > 0 && iteration >= options.Iterations {
@@ -83,4 +71,23 @@ func Run(ctx context.Context, dst io.Writer, source Source, options Options) err
 		case <-timer.C:
 		}
 	}
+}
+
+func validateOptions(source Source, options Options) error {
+	if source == nil {
+		return errors.New("top source is required")
+	}
+	if options.Duration <= 0 || options.Interval <= 0 || options.Interval > options.Duration {
+		return errors.New("top duration and interval must be positive, and interval must not exceed duration")
+	}
+	if options.Every <= 0 {
+		return errors.New("top refresh interval must be positive")
+	}
+	if options.Iterations < 0 {
+		return errors.New("top iterations must not be negative")
+	}
+	if !ValidSortField(options.Sort) {
+		return fmt.Errorf("invalid top sort field %q", options.Sort)
+	}
+	return nil
 }

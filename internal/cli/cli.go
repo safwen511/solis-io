@@ -2517,6 +2517,9 @@ func (source liveTopSource) Collect(ctx context.Context, request topview.Collect
 	for !statusDone || !hostDone || !latencyDone {
 		select {
 		case <-ctx.Done():
+			if latencyResults != nil {
+				<-latencyResults
+			}
 			return topview.Snapshot{}, ctx.Err()
 		case statusResult := <-statusResults:
 			statusDone = true
@@ -2546,7 +2549,7 @@ func (source liveTopSource) Collect(ctx context.Context, request topview.Collect
 func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := topview.Run(ctx, w, liveTopSource{runtimeConfig: runtimeConfig}, topview.Options{
+	topOptions := topview.Options{
 		Duration:           options.Duration,
 		Interval:           options.Interval,
 		Every:              options.Every,
@@ -2554,7 +2557,22 @@ func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) 
 		Clear:              options.Clear,
 		Sort:               options.Sort,
 		IncludeEBPFLatency: options.IncludeEBPFLatency,
-	})
+	}
+	source := liveTopSource{runtimeConfig: runtimeConfig}
+	var err error
+	outputFile, outputIsFile := w.(*os.File)
+	interactive := options.Iterations == 0 && options.Clear && outputIsFile &&
+		topview.IsTerminal(os.Stdin) && topview.IsTerminal(outputFile)
+	if interactive {
+		restore, rawErr := topview.EnterRawMode(os.Stdin)
+		if rawErr != nil {
+			return fmt.Errorf("top error: %w", rawErr)
+		}
+		err = topview.RunInteractive(ctx, os.Stdin, w, source, topOptions)
+		err = errors.Join(err, restore())
+	} else {
+		err = topview.Run(ctx, w, source, topOptions)
+	}
 	if err != nil {
 		return fmt.Errorf("top error: %w", err)
 	}

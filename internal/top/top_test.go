@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +162,85 @@ func TestWriteFramePrivacySafeProjection(t *testing.T) {
 	}
 }
 
+func TestInteractiveFrameShowsSelectedVMDetailsAndLossCounters(t *testing.T) {
+	report := attributedReport()
+	source := &fakeSource{snapshot: Snapshot{
+		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
+		Host: hostReport(), EBPFLatencyRequested: true, EBPFLatency: &report,
+	}}
+	var output bytes.Buffer
+	if err := RunInteractive(context.Background(), bytes.NewReader(nil), &output, source, Options{
+		Duration: time.Millisecond, Interval: time.Millisecond, Every: time.Second,
+		Iterations: 1, Clear: false, Sort: "ops", IncludeEBPFLatency: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Sort: ops",
+		">  b-stress",
+		"Selected VM: b-stress",
+		"Attributed operations: total=100 read=5 write=90 flush=3 discard=1 unknown=1",
+		"Latency ms~: p50=0.500 p95=2.000 p99=5.000 max=7.000",
+		"259:3 write: ops=90 p95_ms~=2.000",
+		"Attribution loss: missing_bio=2 missing_blkcg=1 unmapped_cgroup=3 lookup_miss=4",
+		"Keys: j/k or arrows select",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("interactive output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestKeyActionsAndSelection(t *testing.T) {
+	actions := readKeyActions(strings.NewReader("j\x1b[Akpnworl?"))
+	var got []keyAction
+	for action := range actions {
+		got = append(got, action)
+	}
+	want := []keyAction{keyDown, keyUp, keyUp, keySortPressure, keySortName, keySortWrite, keySortOps, keyRefresh, keySortLatency, keyHelp}
+	if len(got) != len(want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("actions[%d] = %v, want %v", index, got[index], want[index])
+		}
+	}
+
+	view := View{Rows: []VMRow{{Name: "a"}, {Name: "b"}, {Name: "c"}}}
+	state := interactiveState{selectedVM: "a", sort: "name"}
+	applyInteractiveAction(&view, &state, keyUp)
+	if state.selectedVM != "c" {
+		t.Fatalf("wrapped up selection = %q", state.selectedVM)
+	}
+	applyInteractiveAction(&view, &state, keyDown)
+	if state.selectedVM != "a" {
+		t.Fatalf("wrapped down selection = %q", state.selectedVM)
+	}
+}
+
+func TestInteractiveQuitWaitsForCollectionCleanup(t *testing.T) {
+	source := &cleanupSource{started: make(chan struct{}), cleaned: make(chan struct{})}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		<-source.started
+		_, _ = writer.Write([]byte("q"))
+		_ = writer.Close()
+	}()
+	var output bytes.Buffer
+	if err := RunInteractive(context.Background(), reader, &output, source, Options{
+		Duration: time.Second, Interval: time.Second, Every: time.Second, Clear: false, Sort: "name",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-source.cleaned:
+	default:
+		t.Fatal("interactive quit returned before source cleanup")
+	}
+}
+
 func TestRunUsesBoundedRefreshesWithoutClearSequences(t *testing.T) {
 	source := &fakeSource{snapshot: Snapshot{
 		ObservedAtUTC:   time.Now(),
@@ -214,14 +294,26 @@ func (cancelSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, er
 	return Snapshot{}, errors.New("wrapped: " + ctx.Err().Error())
 }
 
+type cleanupSource struct {
+	started chan struct{}
+	cleaned chan struct{}
+}
+
+func (source *cleanupSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, error) {
+	close(source.started)
+	<-ctx.Done()
+	close(source.cleaned)
+	return Snapshot{}, ctx.Err()
+}
+
 func statusReport() statusview.Report {
 	return statusview.Report{
 		SchemaVersion: statusview.SchemaVersion,
 		Duration:      "3s",
 		Interval:      "1s",
 		VMs: []statusview.VMStatus{
-			{Name: "a-web", Tenant: "tenant-a", Role: "web", PhysicalDisk: "/dev/nvme0n1", Pressure: "idle", IOAvailable: true},
-			{Name: "b-stress", Tenant: "tenant-b", Role: "stress", PhysicalDisk: "/dev/nvme0n1", AverageWriteMiBPerSecond: 50, Pressure: "high", IOAvailable: true},
+			{Name: "a-web", Tenant: "tenant-a", Role: "web", PhysicalDisk: "/dev/nvme0n1", Pressure: "idle", Reason: "idle", IOAvailable: true},
+			{Name: "b-stress", Tenant: "tenant-b", Role: "stress", PhysicalDisk: "/dev/nvme0n1", AverageWriteMiBPerSecond: 50, MaxWriteMiBPerSecond: 60, AverageSyscwPerSecond: 1000, Pressure: "high", Reason: "dominant byte write rate", IOAvailable: true},
 		},
 	}
 }
@@ -236,11 +328,21 @@ func attributedReport() ebpf.VMBlockLatencyReport {
 		AttributionSummary: ebpf.VMBlockAttributionSummary{
 			AttributedOps: 100, UnattributedOps: 1, AttributedPercent: 99, MatchedVMCount: 1,
 		},
-		Unattributed:           ebpf.VMBlockLatencyUnattributed{TotalUnattributedOps: 1, UnattributedPercent: 1},
+		Unattributed: ebpf.VMBlockLatencyUnattributed{
+			MissingBio: 2, MissingBlkcg: 1, UnmappedCgroup: 3, LookupMiss: 4,
+			IncompleteAtWindowEnd: 5, MapFull: 0, DroppedEvents: 0, RingBufferLost: 0,
+			TotalUnattributedOps: 1, UnattributedPercent: 1,
+		},
 		VMAttributionPreflight: ebpf.VMBlockAttributionPreflight{Available: true, Status: "enabled"},
 		VMs: []ebpf.VMBlockLatencyVM{
 			{Name: "a-web", Tenant: "tenant-a", Role: "web", TotalOps: 0, AttributionQuality: "no_attributed_events"},
-			{Name: "b-stress", Tenant: "tenant-b", Role: "stress", TotalOps: 100, LatencyP95MS: 2, AttributionQuality: "available"},
+			{
+				Name: "b-stress", Tenant: "tenant-b", Role: "stress",
+				ReadOps: 5, WriteOps: 90, FlushOps: 3, DiscardOps: 1, UnknownOps: 1, TotalOps: 100,
+				LatencyP50MS: 0.5, LatencyP95MS: 2, LatencyP99MS: 5, LatencyMaxMS: 7,
+				AttributionQuality: "available", MappingQuality: "cgroup_v2_inode_tree", Devices: []string{"259:3"},
+				DeviceOperations: []ebpf.VMBlockLatencyDeviceOperation{{Device: "259:3", Operation: "write", Count: 90, LatencyP95MS: 2}},
+			},
 		},
 	}
 }

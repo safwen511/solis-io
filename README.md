@@ -33,7 +33,9 @@ Solis combines libvirt inventory, storage topology, QEMU process accounting, cgr
 - A bounded `a-client -> a-web -> a-db` workload and a live-impact harness align application baseline, pressure, and recovery phases with Solis evidence.
 - A paired eBPF overhead/safety harness separates collector safety from inconclusive or review-only performance results.
 - A deterministic Linux/amd64 archive workflow embeds the authentic eBPF ELF and records release identity and checksums.
-- The current source includes a read-only `solis top` dashboard that refreshes bounded QEMU pressure and optional VM-attributed eBPF latency windows.
+- The current source includes a read-only, keyboard-navigable `solis top`
+  dashboard that refreshes bounded QEMU pressure and optional VM-attributed
+  eBPF latency windows.
 
 The tagged `v0.2.0-experimental` archive predates `solis top`; build the current source to exercise the dashboard until a newer experimental release is tagged. The following remain deliberately out of scope: a daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, operator-driven observability and attribution tool.
 
@@ -191,8 +193,15 @@ sudo ./solis top \
 ```
 
 Each refresh starts bounded status and eBPF samples in the same local
-observation window. The dashboard never enters terminal raw mode; Ctrl-C stops
-it through normal signal handling. It is read-only and has no VM actions,
+observation window. On a real terminal, the dashboard temporarily enables
+character-at-a-time input while preserving normal Ctrl-C signal handling, and
+restores the original terminal settings only after active collector cleanup.
+Use `j`/`k` or the arrow keys to select a VM; `n`, `p`, `w`, `o`, and `l` sort
+by name, pressure, write rate, attributed operations, and p95 latency; `r`
+refreshes, `?` shows help, and `q` exits. The selected-VM panel shows operation
+classes, p50/p95/p99, mapping quality, and bounded device/operation aggregates.
+Redirected output, `--iterations`, and `--no-clear` retain the deterministic
+non-interactive renderer. The dashboard is read-only and has no VM actions,
 arbitrary command execution, capture trigger, daemon, or new verdict logic.
 When the eBPF collector is not requested, denied, degraded, or unavailable,
 that state remains visible and missing per-VM latency is rendered as `-` rather
@@ -495,10 +504,10 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
   but are not signed and do not yet include an SBOM or provenance attestation.
   Byte-identical rebuilding depends on matching toolchain and module inputs.
 - **Operator interface:** the current source includes a compact read-only
-  refresh dashboard plus CLI/JSON/report workflows. It is not a terminal raw-
-  mode application and does not yet provide interactive navigation. There is
-  no API server, automatic remediation, VM control, authentication layer,
-  retention manager, or package-manager lifecycle.
+  keyboard-navigable dashboard plus CLI/JSON/report workflows. It has no mouse
+  interface, terminal-resize layout engine, API server, automatic remediation,
+  VM control, authentication layer, retention manager, or package-manager
+  lifecycle.
 - **Lab tooling:** workload and validation scripts use the included fixed VM
   names, addresses, and files. They are controlled lab fixtures, not a generic
   production workload framework.
@@ -518,7 +527,7 @@ With the first read-only terminal dashboard in place, the priorities are:
    and avoid publishing an overhead bound until variance supports one.
 4. **Release provenance:** automate clean-tag artifact verification, add
    signatures, SBOM/provenance metadata, and fresh-host install smoke tests.
-5. **Operator polish:** add optional dashboard navigation and report/capture
+5. **Operator polish:** add terminal-resize handling and optional report/capture
    context while keeping the interface read-only and raw counters, caveats,
    privacy flags, and unavailable sections visible.
 

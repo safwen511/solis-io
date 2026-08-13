@@ -105,21 +105,58 @@ type AttributionView struct {
 	UnattributedPercent    float64
 	MatchedVMCount         int
 	PercentilesApproximate bool
+	Loss                   AttributionLossView
+}
+
+// AttributionLossView keeps the most actionable bounded attribution-loss and
+// lifecycle counters visible without exposing internal identities.
+type AttributionLossView struct {
+	MissingBio            uint64
+	MissingBlkcg          uint64
+	UnmappedCgroup        uint64
+	LookupMiss            uint64
+	IncompleteAtWindowEnd uint64
+	MapFull               uint64
+	DroppedEvents         uint64
+	RingBufferLost        uint64
 }
 
 // VMRow is one compact dashboard row. Availability booleans distinguish a
 // measured zero from missing evidence.
 type VMRow struct {
-	Name                 string
-	Tenant               string
-	Role                 string
-	Pressure             string
-	WriteMiBPerSecond    float64
-	WriteAvailable       bool
-	AttributedOps        uint64
-	LatencyP95MS         float64
-	AttributionAvailable bool
-	AttributionState     string
+	Name                   string
+	Tenant                 string
+	Role                   string
+	Pressure               string
+	PressureReason         string
+	WriteMiBPerSecond      float64
+	MaxWriteMiBPerSecond   float64
+	WriteSyscallsPerSecond float64
+	WriteAvailable         bool
+	ReadOps                uint64
+	WriteOps               uint64
+	FlushOps               uint64
+	DiscardOps             uint64
+	UnknownOps             uint64
+	AttributedOps          uint64
+	LatencyP50MS           float64
+	LatencyP95MS           float64
+	LatencyP99MS           float64
+	LatencyMaxMS           float64
+	AttributionAvailable   bool
+	AttributionState       string
+	MappingQuality         string
+	Devices                []string
+	DeviceOperations       []DeviceOperationView
+}
+
+// DeviceOperationView is a bounded, pointer-free detail row for one selected
+// VM, block device, and operation.
+type DeviceOperationView struct {
+	Device       string
+	Operation    string
+	Count        uint64
+	LatencyP95MS float64
 }
 
 // ValidSortField reports whether a dashboard sort key is supported.
@@ -164,13 +201,16 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 			pressure = AttributionUnavailable
 		}
 		rows[name] = VMRow{
-			Name:              name,
-			Tenant:            displayText(vm.Tenant),
-			Role:              displayText(vm.Role),
-			Pressure:          displayText(pressure),
-			WriteMiBPerSecond: vm.AverageWriteMiBPerSecond,
-			WriteAvailable:    vm.IOAvailable,
-			AttributionState:  AttributionNotRequested,
+			Name:                   name,
+			Tenant:                 displayText(vm.Tenant),
+			Role:                   displayText(vm.Role),
+			Pressure:               displayText(pressure),
+			PressureReason:         safePressureReason(vm.Reason, vm.IOAvailable),
+			WriteMiBPerSecond:      vm.AverageWriteMiBPerSecond,
+			MaxWriteMiBPerSecond:   vm.MaxWriteMiBPerSecond,
+			WriteSyscallsPerSecond: vm.AverageSyscwPerSecond,
+			WriteAvailable:         vm.IOAvailable,
+			AttributionState:       AttributionNotRequested,
 		}
 		device := strings.TrimSpace(vm.PhysicalDisk)
 		if device != "" && device != "-" {
@@ -229,14 +269,36 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 				}
 			}
 			if view.Attribution.AttributionAvailable {
+				row.ReadOps = vm.ReadOps
+				row.WriteOps = vm.WriteOps
+				row.FlushOps = vm.FlushOps
+				row.DiscardOps = vm.DiscardOps
+				row.UnknownOps = vm.UnknownOps
 				row.AttributedOps = vm.TotalOps
+				row.LatencyP50MS = vm.LatencyP50MS
 				row.LatencyP95MS = vm.LatencyP95MS
+				row.LatencyP99MS = vm.LatencyP99MS
+				row.LatencyMaxMS = vm.LatencyMaxMS
 				row.AttributionAvailable = true
 				row.AttributionState = firstNonEmpty(vm.AttributionQuality, report.AttributionQuality)
+				row.MappingQuality = displayText(vm.MappingQuality)
+				row.Devices = append([]string(nil), vm.Devices...)
+				sort.Strings(row.Devices)
+				row.DeviceOperations = projectDeviceOperations(vm.DeviceOperations)
 			} else {
 				row.AttributionState = firstNonEmpty(report.AttributionQuality, report.Availability.Status, AttributionUnavailable)
 			}
 			rows[name] = row
+		}
+		view.Attribution.Loss = AttributionLossView{
+			MissingBio:            report.Unattributed.MissingBio,
+			MissingBlkcg:          report.Unattributed.MissingBlkcg,
+			UnmappedCgroup:        report.Unattributed.UnmappedCgroup,
+			LookupMiss:            report.Unattributed.LookupMiss,
+			IncompleteAtWindowEnd: report.Unattributed.IncompleteAtWindowEnd,
+			MapFull:               report.Unattributed.MapFull,
+			DroppedEvents:         report.Unattributed.DroppedEvents,
+			RingBufferLost:        report.Unattributed.RingBufferLost,
 		}
 	}
 
@@ -248,6 +310,37 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 	}
 	sortRows(view.Rows, sortField)
 	return view, nil
+}
+
+func projectDeviceOperations(operations []ebpf.VMBlockLatencyDeviceOperation) []DeviceOperationView {
+	projected := make([]DeviceOperationView, 0, len(operations))
+	for _, operation := range operations {
+		projected = append(projected, DeviceOperationView{
+			Device:       displayText(operation.Device),
+			Operation:    displayText(operation.Operation),
+			Count:        operation.Count,
+			LatencyP95MS: operation.LatencyP95MS,
+		})
+	}
+	sort.Slice(projected, func(i, j int) bool {
+		if projected[i].Device != projected[j].Device {
+			return projected[i].Device < projected[j].Device
+		}
+		return projected[i].Operation < projected[j].Operation
+	})
+	return projected
+}
+
+func safePressureReason(reason string, available bool) string {
+	if !available {
+		return AttributionUnavailable
+	}
+	switch strings.TrimSpace(reason) {
+	case "dominant byte write rate", "high syscall pressure", "low write activity", "idle":
+		return strings.TrimSpace(reason)
+	default:
+		return "available"
+	}
 }
 
 func statusEvidenceState(snapshot Snapshot) string {

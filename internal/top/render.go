@@ -10,21 +10,26 @@ import (
 
 // Frame identifies one refresh of the terminal dashboard.
 type Frame struct {
-	Iteration int
-	Every     time.Duration
+	Iteration   int
+	Every       time.Duration
+	SelectedVM  string
+	Sort        string
+	Interactive bool
+	ShowHelp    bool
 }
 
 // WriteFrame renders one bounded dashboard frame.
 func WriteFrame(dst io.Writer, view View, frame Frame) error {
 	if _, err := fmt.Fprintf(dst,
 		"Solis I/O Top (read-only)\n"+
-			"Observed: %s  Window: %s  Interval: %s  Refresh: %s  Iteration: %d\n"+
+			"Observed: %s  Window: %s  Interval: %s  Refresh: %s  Iteration: %d  Sort: %s\n"+
 			"VM status: %s  Pressure: high=%d low=%d idle=%d\n",
 		view.ObservedAtUTC.UTC().Format(time.RFC3339),
 		displayText(view.Duration),
 		displayText(view.Interval),
 		frame.Every,
 		frame.Iteration,
+		displayText(frame.Sort),
 		strings.ToUpper(displayText(view.StatusState)),
 		view.Pressures.High,
 		view.Pressures.Low,
@@ -41,16 +46,24 @@ func WriteFrame(dst io.Writer, view View, frame Frame) error {
 	if err := writeAttributionSummary(dst, view.Attribution); err != nil {
 		return err
 	}
+	if err := writeAttributionLoss(dst, view.Attribution); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintln(dst); err != nil {
 		return err
 	}
 
 	table := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "VM\tTENANT\tROLE\tPRESSURE\tWRITE_MIB/S\tATTR_OPS\tP95_MS~\tATTR_STATE"); err != nil {
+	if _, err := fmt.Fprintln(table, "\tVM\tTENANT\tROLE\tPRESSURE\tWRITE_MIB/S\tATTR_OPS\tP95_MS~\tATTR_STATE"); err != nil {
 		return err
 	}
 	for _, row := range view.Rows {
-		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		marker := " "
+		if row.Name == frame.SelectedVM {
+			marker = ">"
+		}
+		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			marker,
 			row.Name,
 			row.Tenant,
 			row.Role,
@@ -71,7 +84,21 @@ func WriteFrame(dst io.Writer, view View, frame Frame) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(dst, "\nCtrl-C quits. P95 values marked ~ are fixed-bucket estimates; evidence does not prove customer impact or root cause.")
+	if frame.SelectedVM != "" {
+		if err := writeSelectedVM(dst, view, frame.SelectedVM); err != nil {
+			return err
+		}
+	}
+	if frame.ShowHelp {
+		if err := writeHelp(dst); err != nil {
+			return err
+		}
+	}
+	footer := "Ctrl-C quits."
+	if frame.Interactive {
+		footer = "Keys: j/k or arrows select, n/p/w/o/l sort, r refresh, ? help, q quit."
+	}
+	_, err := fmt.Fprintf(dst, "\n%s P95 values marked ~ are fixed-bucket estimates; evidence does not prove customer impact or root cause.\n", footer)
 	return err
 }
 
@@ -131,6 +158,123 @@ func writeAttributionSummary(dst io.Writer, view AttributionView) error {
 		)
 		return err
 	}
+}
+
+func writeAttributionLoss(dst io.Writer, view AttributionView) error {
+	if !view.Requested || !view.CollectorAvailable {
+		return nil
+	}
+	loss := view.Loss
+	_, err := fmt.Fprintf(dst,
+		"Attribution loss: missing_bio=%d missing_blkcg=%d unmapped_cgroup=%d lookup_miss=%d incomplete=%d map_full=%d dropped=%d ring_lost=%d\n",
+		loss.MissingBio,
+		loss.MissingBlkcg,
+		loss.UnmappedCgroup,
+		loss.LookupMiss,
+		loss.IncompleteAtWindowEnd,
+		loss.MapFull,
+		loss.DroppedEvents,
+		loss.RingBufferLost,
+	)
+	return err
+}
+
+func writeSelectedVM(dst io.Writer, view View, name string) error {
+	row, ok := findVMRow(view.Rows, name)
+	if !ok {
+		return nil
+	}
+	if _, err := fmt.Fprintf(dst,
+		"\nSelected VM: %s  tenant=%s role=%s  pressure=%s (%s)\n",
+		row.Name,
+		row.Tenant,
+		row.Role,
+		strings.ToUpper(row.Pressure),
+		row.PressureReason,
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(dst,
+		"QEMU writes: avg=%s MiB/s max=%s MiB/s syscw=%s/s\n",
+		optionalFloat(row.WriteMiBPerSecond, row.WriteAvailable, 2),
+		optionalFloat(row.MaxWriteMiBPerSecond, row.WriteAvailable, 2),
+		optionalFloat(row.WriteSyscallsPerSecond, row.WriteAvailable, 2),
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(dst,
+		"Attributed operations: total=%s read=%s write=%s flush=%s discard=%s unknown=%s\n",
+		optionalUint(row.AttributedOps, row.AttributionAvailable),
+		optionalUint(row.ReadOps, row.AttributionAvailable),
+		optionalUint(row.WriteOps, row.AttributionAvailable),
+		optionalUint(row.FlushOps, row.AttributionAvailable),
+		optionalUint(row.DiscardOps, row.AttributionAvailable),
+		optionalUint(row.UnknownOps, row.AttributionAvailable),
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(dst,
+		"Latency ms~: p50=%s p95=%s p99=%s max=%s  attribution=%s mapping=%s\n",
+		optionalFloat(row.LatencyP50MS, row.AttributionAvailable, 3),
+		optionalFloat(row.LatencyP95MS, row.AttributionAvailable, 3),
+		optionalFloat(row.LatencyP99MS, row.AttributionAvailable, 3),
+		optionalFloat(row.LatencyMaxMS, row.AttributionAvailable, 3),
+		row.AttributionState,
+		detailText(row.MappingQuality, row.AttributionAvailable),
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(dst, "Devices: %s\n", detailList(row.Devices, row.AttributionAvailable)); err != nil {
+		return err
+	}
+	if !row.AttributionAvailable || len(row.DeviceOperations) == 0 {
+		_, err := fmt.Fprintln(dst, "Device operations: -")
+		return err
+	}
+	if _, err := fmt.Fprintln(dst, "Device operations:"); err != nil {
+		return err
+	}
+	const maxDeviceOperations = 8
+	for index, operation := range row.DeviceOperations {
+		if index >= maxDeviceOperations {
+			if _, err := fmt.Fprintf(dst, "- ... %d additional bounded aggregate(s)\n", len(row.DeviceOperations)-maxDeviceOperations); err != nil {
+				return err
+			}
+			break
+		}
+		if _, err := fmt.Fprintf(dst, "- %s %s: ops=%d p95_ms~=%.3f\n", operation.Device, operation.Operation, operation.Count, operation.LatencyP95MS); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeHelp(dst io.Writer) error {
+	_, err := fmt.Fprintln(dst, "\nHelp:\n- j/down and k/up move the selected VM\n- n=name p=pressure w=write o=attributed operations l=latency\n- r starts the next bounded refresh; q or Ctrl-C exits\n- selection and sorting are display-only and never modify a VM")
+	return err
+}
+
+func findVMRow(rows []VMRow, name string) (VMRow, bool) {
+	for _, row := range rows {
+		if row.Name == name {
+			return row, true
+		}
+	}
+	return VMRow{}, false
+}
+
+func detailText(value string, available bool) string {
+	if !available {
+		return "-"
+	}
+	return displayText(value)
+}
+
+func detailList(values []string, available bool) string {
+	if !available || len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
 }
 
 func optionalFloat(value float64, available bool, precision int) string {

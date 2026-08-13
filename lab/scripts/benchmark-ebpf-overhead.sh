@@ -4,6 +4,7 @@ set -euo pipefail
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 readonly fio_script="${script_dir}/run-fio-noise.sh"
+readonly report_filter="${script_dir}/benchmark-report.jq"
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
 readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
 readonly fio_guest_file="/home/flint/solis-noise.dat"
@@ -17,6 +18,7 @@ warmup_seconds=10
 settle_seconds=20
 rate_mib=50
 iterations=1
+control_pairs=0
 output_root=""
 config_path=""
 dry_run=false
@@ -37,14 +39,16 @@ Options:
   --settle-seconds N      Idle time between phases (default: 20)
   --rate-mib N            Approximate total fio rate limit in MiB/s (default: 50)
   --iterations N          Paired baseline/eBPF runs (default: 1)
+  --control-pairs N       Baseline/baseline variance pairs (default: 0)
   --output-dir DIR        Existing writable non-symlink directory with mode 0700
   --config FILE           Optional Solis JSON configuration
   --dry-run               Print the plan without build, sudo, SSH, or workload
   --help
 
-The benchmark alternates phase order between iterations, uses the fixed lab fio
-file, and removes it after every phase. Performance deltas are observations, not
-production guarantees or automatic pass/fail thresholds.
+The benchmark alternates baseline/eBPF phase order, can measure baseline versus
+baseline variance, uses the fixed lab fio file, and removes it after every
+phase. A review-ready design needs at least six balanced eBPF pairs and two
+control pairs. Performance deltas never receive an automatic pass/fail result.
 EOF
 }
 
@@ -98,6 +102,11 @@ while (($# > 0)); do
       iterations=$2
       shift 2
       ;;
+    --control-pairs)
+      (($# >= 2)) || fail "--control-pairs requires a value"
+      control_pairs=$2
+      shift 2
+      ;;
     --output-dir)
       (($# >= 2)) || fail "--output-dir requires a value"
       output_root=$2
@@ -132,6 +141,9 @@ nonnegative_integer "$warmup_seconds" || fail "--warmup-seconds must be a non-ne
 nonnegative_integer "$settle_seconds" || fail "--settle-seconds must be a non-negative integer"
 positive_integer "$rate_mib" || fail "--rate-mib must be a positive integer"
 positive_integer "$iterations" || fail "--iterations must be a positive integer"
+nonnegative_integer "$control_pairs" || fail "--control-pairs must be a non-negative integer"
+((iterations <= 20)) || fail "--iterations must not exceed 20"
+((control_pairs <= 10)) || fail "--control-pairs must not exceed 10"
 ((interval_seconds <= duration_seconds)) || fail "interval cannot exceed duration"
 
 # Four 4 KiB jobs: total MiB/s = per-job IOPS * 4 KiB * 4 / 1024.
@@ -171,11 +183,21 @@ print_plan() {
   echo "Rate limit: approximately ${rate_mib} MiB/s total (${rate_iops_per_job} IOPS per fio job)"
   echo "Durability: fdatasync every 1,024 writes"
   echo "Iterations: ${iterations}"
+  echo "Control/control pairs: ${control_pairs}"
   echo "Config: ${config_path:-built-in defaults}"
   local iteration
   for ((iteration = 1; iteration <= iterations; iteration++)); do
     echo "- iteration ${iteration}: $(phase_order "$iteration")"
   done
+  local control_pair
+  for ((control_pair = 1; control_pair <= control_pairs; control_pair++)); do
+    echo "- control pair ${control_pair}: baseline baseline"
+  done
+  if ((iterations < 6 || iterations % 2 != 0 || control_pairs < 2)); then
+    echo "Performance assessment: insufficient evidence (need >=6 balanced iterations and >=2 control pairs)"
+  else
+    echo "Performance assessment: statistics will be emitted for manual review; no automatic performance PASS"
+  fi
 }
 
 if [[ "$dry_run" == true ]]; then
@@ -187,11 +209,12 @@ cd "$repo_root"
 umask 077
 export LC_ALL=C
 
-for command in awk date find go grep jq ssh stat sudo uname; do
+for command in awk date find go grep jq mktemp sleep ssh stat sudo uname; do
   command -v "$command" >/dev/null 2>&1 || fail "required command is missing: ${command}"
 done
 [[ -x /usr/bin/time ]] || fail "required command is missing: /usr/bin/time"
 [[ -x "$fio_script" ]] || fail "fio helper is not executable: ${fio_script}"
+[[ -r "$report_filter" ]] || fail "benchmark report filter is not readable: ${report_filter}"
 
 if [[ -z "$output_root" ]]; then
   output_root="$(mktemp -d /tmp/solis-ebpf-overhead-XXXXXXXX)"
@@ -215,7 +238,7 @@ check_remote_clean() {
   local process_status=0
   local file_status=0
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
-    "pgrep -f '[s]olis-noise' >/dev/null 2>&1" || process_status=$?
+    "pgrep -x 'fio' >/dev/null 2>&1" || process_status=$?
   case "$process_status" in
     0) fail "an existing solis-noise workload is running on ${vm_name}" ;;
     1) ;;
@@ -232,7 +255,7 @@ check_remote_clean() {
 
 stop_remote_workload() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
-    "pkill -TERM -f '[s]olis-noise' 2>/dev/null || true" >/dev/null 2>&1 || true
+    "pkill -TERM -x 'fio' 2>/dev/null || true" >/dev/null 2>&1 || true
 }
 
 remove_guest_fio_file() {
@@ -318,6 +341,13 @@ write_fio_metrics() {
     io_bytes: (.jobs[0].write.io_bytes // 0),
     runtime_ms: (.jobs[0].write.runtime // 0),
     latency_mean_ns: (.jobs[0].write.lat_ns.mean // .jobs[0].write.clat_ns.mean // 0),
+    latency_stddev_ns: (.jobs[0].write.lat_ns.stddev // .jobs[0].write.clat_ns.stddev // 0),
+    completion_latency_mean_ns: (.jobs[0].write.clat_ns.mean // 0),
+    completion_latency_stddev_ns: (.jobs[0].write.clat_ns.stddev // 0),
+    completion_latency_p50_ns: (.jobs[0].write.clat_ns.percentile["50.000000"] // 0),
+    completion_latency_p95_ns: (.jobs[0].write.clat_ns.percentile["95.000000"] // 0),
+    completion_latency_p99_ns: (.jobs[0].write.clat_ns.percentile["99.000000"] // 0),
+    submission_latency_mean_ns: (.jobs[0].write.slat_ns.mean // 0),
     error: (.jobs[0].error // 0)
   }' "$input" >"$output"
 }
@@ -516,10 +546,61 @@ write_run_summary() {
           if $baseline[0].latency_mean_ns > 0
           then (($ebpf_fio[0].latency_mean_ns - $baseline[0].latency_mean_ns) / $baseline[0].latency_mean_ns * 100)
           else 0 end
+        ),
+        completion_latency_mean_change_percent: (
+          if $baseline[0].completion_latency_mean_ns > 0
+          then (($ebpf_fio[0].completion_latency_mean_ns - $baseline[0].completion_latency_mean_ns) / $baseline[0].completion_latency_mean_ns * 100)
+          else 0 end
+        ),
+        completion_latency_p50_change_percent: (
+          if $baseline[0].completion_latency_p50_ns > 0
+          then (($ebpf_fio[0].completion_latency_p50_ns - $baseline[0].completion_latency_p50_ns) / $baseline[0].completion_latency_p50_ns * 100)
+          else 0 end
+        ),
+        completion_latency_p95_change_percent: (
+          if $baseline[0].completion_latency_p95_ns > 0
+          then (($ebpf_fio[0].completion_latency_p95_ns - $baseline[0].completion_latency_p95_ns) / $baseline[0].completion_latency_p95_ns * 100)
+          else 0 end
+        ),
+        completion_latency_p99_change_percent: (
+          if $baseline[0].completion_latency_p99_ns > 0
+          then (($ebpf_fio[0].completion_latency_p99_ns - $baseline[0].completion_latency_p99_ns) / $baseline[0].completion_latency_p99_ns * 100)
+          else 0 end
         )
       },
       result: "PASS"
     }' >"${run_dir}/run-summary.json"
+}
+
+write_control_summary() {
+  local control_dir=$1
+  local pair=$2
+  jq -n \
+    --argjson pair "$pair" \
+    --slurpfile first "${control_dir}/first/fio-metrics.json" \
+    --slurpfile second "${control_dir}/second/fio-metrics.json" '
+    def percent_change($before; $after):
+      if $before > 0 then (($after - $before) / $before * 100) else 0 end;
+    {
+      pair: $pair,
+      phase_order: "baseline baseline",
+      first: {fio: $first[0]},
+      second: {fio: $second[0]},
+      comparison: {
+        latency_mean_change_percent: percent_change($first[0].latency_mean_ns; $second[0].latency_mean_ns),
+        latency_mean_absolute_change_percent: (percent_change($first[0].latency_mean_ns; $second[0].latency_mean_ns) | fabs),
+        completion_latency_mean_change_percent: percent_change($first[0].completion_latency_mean_ns; $second[0].completion_latency_mean_ns),
+        completion_latency_mean_absolute_change_percent: (percent_change($first[0].completion_latency_mean_ns; $second[0].completion_latency_mean_ns) | fabs),
+        completion_latency_p50_change_percent: percent_change($first[0].completion_latency_p50_ns; $second[0].completion_latency_p50_ns),
+        completion_latency_p50_absolute_change_percent: (percent_change($first[0].completion_latency_p50_ns; $second[0].completion_latency_p50_ns) | fabs),
+        completion_latency_p95_change_percent: percent_change($first[0].completion_latency_p95_ns; $second[0].completion_latency_p95_ns),
+        completion_latency_p95_absolute_change_percent: (percent_change($first[0].completion_latency_p95_ns; $second[0].completion_latency_p95_ns) | fabs),
+        completion_latency_p99_change_percent: percent_change($first[0].completion_latency_p99_ns; $second[0].completion_latency_p99_ns),
+        completion_latency_p99_absolute_change_percent: (percent_change($first[0].completion_latency_p99_ns; $second[0].completion_latency_p99_ns) | fabs)
+      },
+      result: "PASS"
+    }
+  ' >"${control_dir}/control-summary.json"
 }
 
 print_plan
@@ -545,7 +626,30 @@ for ((iteration = 1; iteration <= iterations; iteration++)); do
     "${run_dir}/run-summary.json"
 done
 
-jq -s \
+for ((control_pair = 1; control_pair <= control_pairs; control_pair++)); do
+  control_dir="${output_root}/control-$(printf '%02d' "$control_pair")"
+  [[ ! -e "$control_dir" ]] || fail "benchmark control output already exists: ${control_dir}"
+  mkdir -m 0700 "$control_dir"
+  echo "=== Control pair ${control_pair}/${control_pairs}: baseline baseline ==="
+  run_phase baseline "${control_dir}/first"
+  if ((settle_seconds > 0)); then
+    echo "Settling for ${settle_seconds}s"
+    sleep "$settle_seconds"
+  fi
+  run_phase baseline "${control_dir}/second"
+  write_control_summary "$control_dir" "$control_pair"
+  echo "Control pair ${control_pair}: PASS"
+  jq '{pair, comparison}' "${control_dir}/control-summary.json"
+done
+
+jq -s '.' "${output_root}"/run-*/run-summary.json >"${output_root}/paired-runs.json"
+if ((control_pairs > 0)); then
+  jq -s '.' "${output_root}"/control-*/control-summary.json >"${output_root}/control-runs.json"
+else
+  printf '%s\n' '[]' >"${output_root}/control-runs.json"
+fi
+
+jq -n \
   --arg observed_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg vm "$vm_name" \
   --arg kernel_release "$(uname -r)" \
@@ -557,59 +661,12 @@ jq -s \
   --argjson settle_seconds "$settle_seconds" \
   --argjson rate_mib "$rate_mib" \
   --argjson rate_iops_per_job "$rate_iops_per_job" \
+  --argjson requested_iterations "$iterations" \
+  --argjson requested_control_pairs "$control_pairs" \
   --slurpfile build "${output_root}/solis-version.json" \
-  '{
-    schema_version: "1",
-    observed_at_utc: $observed_at_utc,
-    vm: $vm,
-    host: {
-      kernel_release: $kernel_release,
-      architecture: $architecture
-    },
-    build: $build[0],
-    config_source: $config_source,
-    workload: {
-      duration_seconds: $duration_seconds,
-      interval_seconds: $interval_seconds,
-      warmup_seconds: $warmup_seconds,
-      settle_seconds: $settle_seconds,
-      target_rate_mib_per_sec: $rate_mib,
-      rate_iops_per_job: $rate_iops_per_job,
-      fio_jobs: 4,
-      block_size_kib: 4,
-      durable_fdatasync_every_writes: 1024
-    },
-    runs: .,
-    summary: {
-      baseline_iops_mean: (map(.baseline.fio.iops) | add / length),
-      ebpf_iops_mean: (map(.ebpf_enabled.fio.iops) | add / length),
-      iops_overhead_percent_mean: (map(.comparison.iops_overhead_percent) | add / length),
-      bandwidth_change_percent_mean: (map(.comparison.bandwidth_change_percent) | add / length),
-      latency_mean_change_percent_mean: (map(.comparison.latency_mean_change_percent) | add / length),
-      collector_cpu_core_percent_mean: (map(.ebpf_enabled.collector_resources.cpu_core_percent) | add / length),
-      collector_max_rss_bytes_max: (map(.ebpf_enabled.collector_resources.max_rss_bytes) | max),
-      map_full_total: (map(.ebpf_enabled.collector.map_full) | add),
-      dropped_events_total: (map(.ebpf_enabled.collector.dropped_events) | add),
-      ring_buffer_lost_total: (map(.ebpf_enabled.collector.ring_buffer_lost) | add),
-      incomplete_at_window_end_total: (map(.ebpf_enabled.collector.incomplete_at_window_end) | add)
-    },
-    interpretation: [
-      "Workload deltas include kernel eBPF and userspace collector effects but remain subject to normal run-to-run variance.",
-      "Collector CPU time does not directly measure all in-kernel eBPF execution cost.",
-      "This benchmark is experimental evidence, not a production overhead guarantee."
-    ],
-    privacy: {
-      process_arguments_collected: false,
-      environment_collected: false,
-      guest_files_collected: false,
-      query_text_collected: false,
-      table_data_collected: false,
-      request_body_collected: false,
-      response_body_collected: false,
-      secrets_collected: false
-    },
-    result: "PASS"
-  }' "${output_root}"/run-*/run-summary.json >"${output_root}/benchmark-report.json"
+  --slurpfile runs "${output_root}/paired-runs.json" \
+  --slurpfile controls "${output_root}/control-runs.json" \
+  -f "$report_filter" >"${output_root}/benchmark-report.json"
 
 bad_modes="$(find "$output_root" -type f -printf '%m %p\n' | awk '$1 != "600"')"
 [[ -z "$bad_modes" ]] || fail "benchmark contains non-0600 files: ${bad_modes}"
@@ -629,5 +686,6 @@ if [[ -n "$sudo_keepalive_pid" ]] && kill -0 "$sudo_keepalive_pid" 2>/dev/null; 
 fi
 sudo_keepalive_pid=""
 trap - EXIT INT TERM
-echo "=== Benchmark complete: PASS ==="
+echo "=== Benchmark safety validation: PASS ==="
+jq '{safety_assessment, performance_assessment}' "${output_root}/benchmark-report.json"
 echo "Benchmark report: ${output_root}/benchmark-report.json"

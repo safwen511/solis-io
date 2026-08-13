@@ -317,16 +317,19 @@ The paired benchmark harness compares the same bounded fio workload with and wit
 # One short baseline/eBPF pair using b-stress.
 ./lab/scripts/benchmark-ebpf-overhead.sh
 
-# Three paired observations at a lower bounded write rate.
+# Six balanced eBPF pairs plus two baseline/baseline variance controls.
 mkdir -m 0700 /tmp/solis-ebpf-benchmark
 ./lab/scripts/benchmark-ebpf-overhead.sh \
-  --iterations 3 \
+  --iterations 6 \
+  --control-pairs 2 \
   --duration-seconds 60 \
   --rate-mib 25 \
   --output-dir /tmp/solis-ebpf-benchmark
 ```
 
-The output directories and files are private (`0700` and `0600`) and end with `benchmark-report.json`, which records the Solis build, kernel, architecture, workload, paired observations, and aggregate measurements. Safety validation requires a successful collector, target-VM attribution, false privacy flags, and zero map-full, dropped-event, and ring-loss counters. Performance deltas are reported without an automatic threshold: the rate ceiling deliberately bounds writes and can hide throughput differences, so latency and resource measurements must also be reviewed. A small number of paired runs cannot establish a production overhead guarantee, and collector CPU time does not include every in-kernel execution cost. The fixed fio file is removed after each phase, and preflight refuses existing jobs or files it does not own.
+The output directories and files are private (`0700` and `0600`) and end with schema-v2 `benchmark-report.json`, which records the Solis build, kernel, architecture, workload, paired observations, control observations, and aggregate measurements. Each fio phase retains total-latency mean/standard deviation and completion-latency mean, p50, p95, and p99. The report provides mean, median, range, sample standard deviation, and an exploratory paired Student-t 95% interval. Baseline/baseline controls estimate ordinary phase-to-phase variance. At least six eBPF pairs with balanced phase order and two control pairs are required before the report is marked ready for manual performance review.
+
+Safety validation requires a successful collector, target-VM attribution, false privacy flags, and zero map-full, dropped-event, and ring-loss counters. That safety result is separate from performance: the benchmark never emits an automatic performance pass or fail. The rate ceiling deliberately bounds writes and can hide throughput differences, so a zero throughput delta is not evidence of zero overhead. Latency distributions, control variance, confidence intervals, CPU, and RSS must be reviewed together. Even a review-ready result is experimental rather than a production overhead guarantee, and collector CPU time does not include every in-kernel execution cost. The fixed fio file is removed after each phase, and preflight refuses existing fio processes or files it does not own without reading process arguments.
 
 ## Safety and privacy
 

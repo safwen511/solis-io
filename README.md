@@ -1,8 +1,8 @@
 # Solis I/O
 
-Solis I/O is a Linux/KVM/libvirt single-host storage-latency attribution tool for identifying whether provider-side I/O pressure affected a VM and which neighboring VM contributed.
+Solis I/O is a single-host Linux/KVM/libvirt observability tool that correlates provider-side block latency with local VM ownership to investigate storage noisy-neighbor incidents.
 
-> **Status:** Experimental, working in the included lab, and not production-ready.
+> **Current release:** `v0.2.0-experimental` — working and repeatably validated in the included lab, but not production-ready.
 
 ## What problem it solves
 
@@ -14,11 +14,11 @@ When a customer reports that a VM is slow, host-wide disk metrics rarely answer 
 - What latency did those attributed block requests experience?
 - How much work could not be attributed safely?
 
-Solis combines libvirt inventory, storage topology, QEMU process accounting, cgroup validation counters, and eBPF block-request latency into one provider-side evidence chain. Report-backed diagnosis can correlate that infrastructure evidence with an application experiment. Live-only diagnosis remains cautious because infrastructure evidence alone cannot prove application impact.
+Solis combines libvirt inventory, storage topology, QEMU process accounting, cgroup validation counters, and eBPF block-request latency into one provider-side evidence chain. It can identify a dominant local VM contributor and show whether the victim and suspect shared a storage path during the same observation window. Report-backed or controlled-lab application measurements can strengthen that correlation; infrastructure telemetry alone does not prove customer impact or root cause.
 
-## Current milestone
+## Current release milestone
 
-The current milestone provides a working experimental single-host path:
+`v0.2.0-experimental` provides a working experimental single-host investigation path:
 
 - Real typed-BTF eBPF programs attach to `block_rq_issue` and `block_rq_complete`.
 - Issue and completion events are correlated inside the kernel to measure request latency.
@@ -28,9 +28,13 @@ The current milestone provides a working experimental single-host path:
 - Host and per-VM totals, fixed histograms, approximate percentiles, attribution quality, and unattributed counters are reported.
 - VM-attributed latency is integrated into `diagnose noisy-neighbor`, `capture noisy-neighbor`, and `watch noisy-neighbor`.
 - Capture-generated `observe-snapshot.json` reuses the same VM-attribution report without a second eBPF attachment and preserves the report's own timestamp and duration.
-- Diagnosis supports human output and machine-readable JSON.
+- Suspect discovery ranks same-storage local VMs and can select the dominant writer without an explicit `--suspect`.
+- Diagnosis supports human output and machine-readable JSON; capture writes private evidence bundles with checksums and an operator report.
+- A bounded `a-client -> a-web -> a-db` workload and a live-impact harness align application baseline, pressure, and recovery phases with Solis evidence.
+- A paired eBPF overhead/safety harness separates collector safety from inconclusive or review-only performance results.
+- A deterministic Linux/amd64 archive workflow embeds the authentic eBPF ELF and records release identity and checksums.
 
-This is working in the lab, but it remains experimental. Multi-host operation is out of scope. A reproducible experimental Linux/amd64 archive workflow is available; production service lifecycle and broad compatibility guarantees are not implemented.
+The following are deliberately not part of this release: a TUI, daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, command-driven observability and attribution tool.
 
 ## Architecture
 
@@ -54,6 +58,8 @@ request -> bio -> bi_blkg -> blkcg -> css -> cgroup -> kernfs_node.id
 ```
 
 `block_rq_issue` stores an issue timestamp and sanitized metadata in bounded BPF maps. `block_rq_complete` looks up the same opaque request identity, calculates latency, and updates fixed host, device/operation, and cgroup/device/operation aggregates.
+
+The measured interval is Linux block-request issue-to-completion latency on the host. It is not HTTP latency, database execution time, guest-visible device latency, or an exact physical-media service-time measurement. The live-impact harness reports application timing separately so those evidence layers are not conflated.
 
 The request identity is used only inside the kernel as a bounded correlation key. Raw request addresses, bio pointers, blkcg pointers, cgroup pointers, and other kernel addresses are never emitted to userspace or JSON.
 
@@ -114,14 +120,14 @@ go build -o solis ./cmd/solis
 
 ### Experimental release archive
 
-Official archives are built only from a clean commit carrying an exact tag of
+Release archives are built only from a clean commit carrying an exact tag of
 the form `vMAJOR.MINOR.PATCH-experimental`:
 
 ```bash
 mkdir -p dist
 ./scripts/test-release-workflow.sh
 ./scripts/build-release.sh --output-dir dist
-sha256sum -c dist/solis-v0.2.0-experimental-linux-amd64.tar.gz.sha256
+(cd dist && sha256sum -c solis-v0.2.0-experimental-linux-amd64.tar.gz.sha256)
 ```
 
 The builder verifies that the committed eBPF object is a non-empty ELF and
@@ -134,12 +140,18 @@ rebuilds require the same Go toolchain, module inputs, committed eBPF object,
 and release script.
 
 Each archive contains `solis`, `INSTALL.md`, `RELEASE-METADATA.json`, and
-internal checksums; the adjacent `.sha256` authenticates the archive. See
+internal checksums; the adjacent `.sha256` verifies archive integrity. See
 [`docs/INSTALL.md`](docs/INSTALL.md) for fixed-path atomic installation,
 uninstallation, non-invasive post-install checks, kernel/libvirt/cgroup
 requirements, privileges, and lockdown limitations. The archive installs no
 daemon, service, user, scheduled job, controller, or remote agent. Target hosts
 do not need Clang or LLVM because the authentic object is embedded.
+
+The release workflow was validated by building the same tagged source twice
+and comparing byte-identical archives. This reproducibility statement is
+conditional on the same Go toolchain, module inputs, committed eBPF object,
+and release script; the archive is checksummed but not cryptographically
+signed or accompanied by an SBOM/provenance attestation yet.
 
 Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then built-in development defaults. The built-in paths are intended for the repository lab, not installed production use.
 
@@ -244,17 +256,28 @@ Watch uses VM-attributed eBPF latency as an additional evidence layer. Degraded 
 
 ## Lab validation
 
-The current milestone was validated with a controlled fio random-write workload inside the `b-stress` lab VM while `a-web` was the victim:
+The release was validated on the included x86-64 Ubuntu/KVM/libvirt lab with
+Linux `7.0.0-29-generic`, kernel BTF, cgroup v2, local qcow2-backed VMs, and the
+committed little-endian eBPF object. Controlled durable fio workloads produced
+these outcomes:
 
 - Typed-BTF programs loaded and attached successfully on the test kernel.
 - Host request issue/completion latency events and fixed histograms populated.
-- The blkcg/cgroup ownership path attributed the dominant I/O to `b-stress`.
-- `a-web` remained at low or zero VM-attributed operations during that window.
-- Attribution coverage was high and the unattributed percentage remained low.
-- Diagnosis rendered the VM attribution evidence and kept its caveats visible.
+- Idle, suspect-only, victim-only, and mixed-load scenarios all passed their
+  expected attribution assertions.
+- Suspect-only attribution selected `b-stress` with 99.53% attributed work in
+  the recorded run; the victim-only run retained 93.98%, and the mixed run
+  retained 96.52% while representing both active VMs.
+- The idle scenario remained honest: it did not fabricate VM latency when no
+  useful attributed activity was present.
+- Diagnosis, discovery, capture, observe projection, manifest checksums, file
+  modes, and privacy scans passed together.
 - All privacy flags remained false.
 
-This validates the implementation path in the lab. It does not establish universal kernel compatibility, production overhead bounds, or causality for every workload.
+These are recorded results from one controlled host profile, not fixed expected
+operation counts or compatibility/performance guarantees. They validate the
+implementation and evidence path in this lab; they do not establish universal
+kernel compatibility or causality for arbitrary workloads.
 
 The repeatable lab harness validates idle, suspect-only, victim-only, or mixed VM activity. It checks capture modes, JSON, manifest checksums, attribution expectations, stale evidence states, permissions, and privacy boundaries:
 
@@ -335,6 +358,14 @@ mkdir -m 0700 /tmp/solis-live-impact
 
 The harness refuses existing client/fio processes and the fixed fio file, uses exact process names rather than process arguments for lifecycle checks, and cleans up only the workloads it starts. It requires interactive sudo authentication and allowlisted SSH access to `a-client` and `b-stress`. All directories and files are private (`0700` and `0600`). The final `live-impact-report.json` combines baseline/pressure/recovery application timing, selected-suspect evidence, VM-attributed block latency, attribution coverage, caveats, and false privacy flags. It also validates capture JSON, manifest checksums, file modes, phase completeness, and forbidden pointer/process-path output. Application latency movement and VM-attributed storage pressure are time-correlated controlled-lab evidence; the report does not claim universal causality or production impact.
 
+In the recorded default run, all 3,600 requests completed successfully at 30
+requests/second without client saturation. Average application latency rose
+9.01% during `b-stress` pressure, the worst one-second p95 rose 47.64%, and
+recovery average returned to 1.50% below baseline. During the overlapping
+Solis window, 99.35% of work was attributed, with 703,153 operations assigned
+to `b-stress` and 6 to `a-web`. This is a useful controlled time correlation,
+not a general customer-impact or causality claim.
+
 ### eBPF overhead and safety benchmark
 
 The paired benchmark harness compares the same bounded fio workload with and without the VM block-latency collector. It rate-limits the default workload to approximately 50 MiB/s, uses periodic data syncs so provider-side block activity is observable, alternates phase order across iterations, and retains collector CPU time, maximum RSS, attribution coverage, map pressure, event-loss counters, fio throughput, and guest-visible latency:
@@ -360,6 +391,15 @@ The output directories and files are private (`0700` and `0600`) and end with sc
 
 Safety validation requires a successful collector, target-VM attribution, false privacy flags, and zero map-full, dropped-event, and ring-loss counters. That safety result is separate from performance: the benchmark never emits an automatic performance pass or fail. The rate ceiling deliberately bounds writes and can hide throughput differences, so a zero throughput delta is not evidence of zero overhead. Latency distributions, control variance, confidence intervals, CPU, and RSS must be reviewed together. Even a review-ready result is experimental rather than a production overhead guarantee, and collector CPU time does not include every in-kernel execution cost. The fixed fio file is removed after each phase, and preflight refuses existing fio processes or files it does not own without reading process arguments.
 
+The recorded six-pair/two-control run passed collector safety: attribution stayed
+above 99.6%, userspace collector CPU averaged about 0.91% of one core, maximum
+RSS was about 31.4 MiB, and map-full, dropped-event, ring-loss, and incomplete
+counters remained zero. Performance remained unresolved: paired mean-latency
+change averaged +4.41%, the median was -0.82%, and the exploratory 95% interval
+spanned -18.53% to +27.35%. Baseline/baseline controls showed much larger
+natural variance, so no directional eBPF latency effect or production overhead
+bound was established.
+
 ## Safety and privacy
 
 The eBPF attribution, diagnosis, capture, watch, and status telemetry paths are designed around counters, timings, topology, and health metadata. They do not collect:
@@ -378,21 +418,77 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 
 ## Limitations
 
-- Solis is experimental and not production-ready.
-- The current implementation is focused on a single Linux KVM/libvirt host with cgroup v2.
-- VM-attributed eBPF latency requires kernel BTF, compatible typed block tracepoints, the embedded object, and sufficient eBPF capabilities.
-- Secure Boot kernel lockdown or LSM policy can prevent program loading even for root.
-- Kernel BTF and block-layer layout changes can make metadata or ownership fields unavailable.
-- Request merging, requeues, flush semantics, missing bio/blkcg ownership, unknown cgroups, and map capacity can reduce attribution coverage.
-- Device-mapper, encryption, LVM, partitions, and other stacked layers can make device interpretation ambiguous; Solis reports layers separately where practical.
-- QEMU procfs counters are process-accounting signals and may require elevated access.
-- Live-only infrastructure evidence cannot prove application slowdown without report or external application evidence.
-- Multi-host collection, a controller, production daemon lifecycle, authentication, retention policy, production package-manager integration, and compatibility guarantees are not implemented.
+- **Maturity:** Solis is experimental. The working lab and release workflow do
+  not constitute a production support, availability, or compatibility promise.
+- **Deployment scope:** collection is limited to one local Linux KVM/libvirt
+  host using cgroup v2. There is no fleet, remote-host agent, controller, or
+  cross-host correlation.
+- **Release target:** the current archive is little-endian `linux/amd64` only.
+  It is not a Debian/RPM package and does not install a daemon or service.
+- **Kernel dependency:** VM attribution requires kernel BTF, compatible
+  typed-BTF block hooks and ownership fields, the embedded object, and adequate
+  eBPF capabilities. CO-RE reduces but does not eliminate kernel-layout drift.
+- **Security policy:** Secure Boot lockdown, LSM policy, tracing permissions,
+  or missing capabilities can prevent load/attach even for UID 0. Solis reports
+  unavailability; changing host security policy is an operator decision.
+- **Latency semantics:** measured latency is host block-request
+  issue-to-completion time. It is not directly application latency, guest I/O
+  latency, database time, customer impact, or exact physical-media service time.
+- **Attribution semantics:** `available` means coverage passed the documented
+  unattributed threshold and exact cgroup-ID matches were found. It does not
+  mean every request was assigned correctly or that a VM caused victim impact.
+- **Block lifecycle:** request merging, requeues, flush behavior, missing
+  `bio`/`blkcg`, unknown cgroups, VM/cgroup replacement during a window,
+  incomplete requests, and bounded-map pressure can reduce coverage.
+- **Storage topology:** device-mapper, encryption, LVM, partitions, and other
+  stacked layers can make physical-device interpretation ambiguous. Solis keeps
+  validation rows separate rather than blindly summing layers.
+- **Percentiles:** p50/p95/p99 values use fixed bounded histograms and are
+  approximate bucket estimates. Count, total, minimum, maximum, and average use
+  the observed aggregates.
+- **Supporting evidence:** cgroup `io.stat`, `virsh domstats`, and QEMU process
+  accounting are validation/correlation counters, not equivalent latency
+  measurements. QEMU procfs access may require elevated permissions.
+- **Diagnosis:** live infrastructure evidence can support a noisy-neighbor
+  verdict but cannot independently prove application slowdown. Controlled or
+  external application evidence is needed for an impact claim.
+- **Performance:** the completed benchmark established safe collector lifecycle
+  and stable userspace resource use on one host, but natural storage variance
+  prevented a directional latency-overhead conclusion or upper bound.
+- **Release trust:** archives have SHA-256 checksums and deterministic metadata,
+  but are not signed and do not yet include an SBOM or provenance attestation.
+  Byte-identical rebuilding depends on matching toolchain and module inputs.
+- **Operator interface:** the current interface is CLI/JSON/report based. There
+  is no TUI, API server, automatic remediation, VM control, authentication
+  layer, retention manager, or package-manager lifecycle.
+- **Lab tooling:** workload and validation scripts use the included fixed VM
+  names, addresses, and files. They are controlled lab fixtures, not a generic
+  production workload framework.
 
 ## Roadmap
 
-- Run and retain long-duration harness results across idle, victim-load, noisy-neighbor, and mixed-load scenarios.
-- Run and retain multi-iteration eBPF overhead/safety results on the supported host profile.
-- Polish operator-facing demo and incident reports around attribution quality and caveats.
-- Validate the experimental archive on additional compatible Linux/KVM/libvirt host profiles.
-- Evaluate broader hypervisor support only after the single-host KVM/libvirt path is hardened.
+The next milestone is a read-only, single-host TUI built on the existing command
+models and JSON semantics. It should show host/storage state, VM activity,
+attribution quality, unattributed work, selected victim/suspect evidence, and
+capture state without adding VM controls, a daemon, or new verdict logic.
+
+After that, the priorities are:
+
+1. **Soak and lifecycle validation:** exercise longer windows, cancellation,
+   repeated attach/detach, VM restart and cgroup replacement, high event rates,
+   map pressure, partial evidence, and cleanup failures.
+2. **Compatibility matrix:** test additional supported Linux kernels, BTF
+   layouts, libvirt/QEMU versions, cgroup v2 layouts, and storage stacks; publish
+   explicit supported/degraded/unavailable outcomes.
+3. **Performance characterization:** repeat balanced/control measurements on
+   quieter and additional hosts, add carefully bounded non-rate-limited trials,
+   and avoid publishing an overhead bound until variance supports one.
+4. **Release provenance:** automate clean-tag artifact verification, add
+   signatures, SBOM/provenance metadata, and fresh-host install smoke tests.
+5. **Operator polish:** improve TUI/report navigation and explanations while
+   keeping raw counters, caveats, privacy flags, and unavailable sections
+   visible.
+
+Multi-host orchestration, fleet management, remote agents, automatic VM
+remediation, and broader hypervisor support remain outside the current
+single-host KVM/libvirt roadmap.

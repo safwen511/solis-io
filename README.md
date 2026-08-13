@@ -30,7 +30,7 @@ The current milestone provides a working experimental single-host path:
 - Capture-generated `observe-snapshot.json` reuses the same VM-attribution report without a second eBPF attachment and preserves the report's own timestamp and duration.
 - Diagnosis supports human output and machine-readable JSON.
 
-This is working in the lab, but it remains experimental. Multi-host operation is out of scope, and production packaging and service lifecycle are not implemented.
+This is working in the lab, but it remains experimental. Multi-host operation is out of scope. A reproducible experimental Linux/amd64 archive workflow is available; production service lifecycle and broad compatibility guarantees are not implemented.
 
 ## Architecture
 
@@ -111,6 +111,35 @@ go build -o solis ./cmd/solis
 ./solis doctor
 ./solis inventory
 ```
+
+### Experimental release archive
+
+Official archives are built only from a clean commit carrying an exact tag of
+the form `vMAJOR.MINOR.PATCH-experimental`:
+
+```bash
+mkdir -p dist
+./scripts/test-release-workflow.sh
+./scripts/build-release.sh --output-dir dist
+sha256sum -c dist/solis-v0.2.0-experimental-linux-amd64.tar.gz.sha256
+```
+
+The builder verifies that the committed eBPF object is a non-empty ELF and
+that its map layouts match the Go runtime types before compiling. It produces
+a statically configured `linux/amd64` binary with the version, full Git commit,
+commit-derived UTC build time, Go version, and platform embedded in `solis
+version`. Host paths and the linker build ID are removed, and archive ownership,
+ordering, and timestamps are normalized to the tagged commit. Byte-identical
+rebuilds require the same Go toolchain, module inputs, committed eBPF object,
+and release script.
+
+Each archive contains `solis`, `INSTALL.md`, `RELEASE-METADATA.json`, and
+internal checksums; the adjacent `.sha256` authenticates the archive. See
+[`docs/INSTALL.md`](docs/INSTALL.md) for fixed-path atomic installation,
+uninstallation, non-invasive post-install checks, kernel/libvirt/cgroup
+requirements, privileges, and lockdown limitations. The archive installs no
+daemon, service, user, scheduled job, controller, or remote agent. Target hosts
+do not need Clang or LLVM because the authentic object is embedded.
 
 Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then built-in development defaults. The built-in paths are intended for the repository lab, not installed production use.
 
@@ -358,12 +387,12 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 - Device-mapper, encryption, LVM, partitions, and other stacked layers can make device interpretation ambiguous; Solis reports layers separately where practical.
 - QEMU procfs counters are process-accounting signals and may require elevated access.
 - Live-only infrastructure evidence cannot prove application slowdown without report or external application evidence.
-- Multi-host collection, a controller, production daemon lifecycle, authentication, retention policy, compatibility guarantees, and production packaging are not implemented.
+- Multi-host collection, a controller, production daemon lifecycle, authentication, retention policy, production package-manager integration, and compatibility guarantees are not implemented.
 
 ## Roadmap
 
 - Run and retain long-duration harness results across idle, victim-load, noisy-neighbor, and mixed-load scenarios.
 - Run and retain multi-iteration eBPF overhead/safety results on the supported host profile.
 - Polish operator-facing demo and incident reports around attribution quality and caveats.
-- Add an install/package workflow with versioned embedded objects and compatibility checks.
+- Validate the experimental archive on additional compatible Linux/KVM/libvirt host profiles.
 - Evaluate broader hypervisor support only after the single-host KVM/libvirt path is hardened.

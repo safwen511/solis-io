@@ -497,16 +497,19 @@ func classifyVMBlockLoadError(err error) error {
 type ciliumVMBlockObjectLoader struct{}
 
 const (
+	vmBlockRequestStartsMapName         = "request_starts"
 	vmBlockDeviceOperationMapName       = "device_operation_stats"
 	vmBlockCgroupDeviceOperationMapName = "cgroup_device_operation_stats"
 )
 
-// VMBlockMapLayoutError identifies an ELF/Go key-layout mismatch before map
-// iteration. It contains sizes and a map name only, never map contents.
+// VMBlockMapLayoutError identifies an ELF/Go key- or value-layout mismatch
+// before map iteration. It contains sizes and a map name only, never map
+// contents.
 type VMBlockMapLayoutError struct {
-	MapName           string
-	KeySizeFromObject uint32
-	GoKeySize         int
+	MapName        string
+	Component      string
+	SizeFromObject uint32
+	GoSize         int
 }
 
 func (err *VMBlockMapLayoutError) Error() string {
@@ -514,8 +517,10 @@ func (err *VMBlockMapLayoutError) Error() string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"map layout mismatch for %s: object key size %d, Go key size %d",
-		firstNonEmpty(strings.TrimSpace(err.MapName), "unknown"), err.KeySizeFromObject, err.GoKeySize,
+		"map layout mismatch for %s: object %s size %d, Go %s size %d",
+		firstNonEmpty(strings.TrimSpace(err.MapName), "unknown"),
+		firstNonEmpty(strings.TrimSpace(err.Component), "data"), err.SizeFromObject,
+		firstNonEmpty(strings.TrimSpace(err.Component), "data"), err.GoSize,
 	)
 }
 
@@ -561,11 +566,21 @@ func validateVMBlockCollectionSpec(spec *ciliumebpf.CollectionSpec) error {
 		}
 	}
 	for _, name := range []string{
-		"counters", "request_starts", "latency_stats", "device_operation_stats", "cgroup_device_operation_stats",
+		"counters", vmBlockRequestStartsMapName, "latency_stats", "device_operation_stats", "cgroup_device_operation_stats",
 	} {
 		if _, available := spec.Maps[name]; !available {
 			return fmt.Errorf("%w: embedded eBPF object is stale or incompatible; missing map %s", ErrVMBlockObjectInvalid, name)
 		}
+	}
+	if err := validateVMBlockMapKeyLayout(
+		vmBlockRequestStartsMapName, spec.Maps[vmBlockRequestStartsMapName].KeySize, uint64(0),
+	); err != nil {
+		return fmt.Errorf("%w: %w", ErrVMBlockObjectInvalid, err)
+	}
+	if err := validateVMBlockMapValueLayout(
+		vmBlockRequestStartsMapName, spec.Maps[vmBlockRequestStartsMapName].ValueSize, vmBlockIssueValue{},
+	); err != nil {
+		return fmt.Errorf("%w: %w", ErrVMBlockObjectInvalid, err)
 	}
 	if err := validateVMBlockMapKeyLayout(
 		vmBlockDeviceOperationMapName, spec.Maps[vmBlockDeviceOperationMapName].KeySize, vmBlockDeviceOperationKey{},
@@ -584,7 +599,17 @@ func validateVMBlockMapKeyLayout(mapName string, objectKeySize uint32, key any) 
 	goKeySize := binary.Size(key)
 	if goKeySize < 0 || uint32(goKeySize) != objectKeySize {
 		return &VMBlockMapLayoutError{
-			MapName: strings.TrimSpace(mapName), KeySizeFromObject: objectKeySize, GoKeySize: goKeySize,
+			MapName: strings.TrimSpace(mapName), Component: "key", SizeFromObject: objectKeySize, GoSize: goKeySize,
+		}
+	}
+	return nil
+}
+
+func validateVMBlockMapValueLayout(mapName string, objectValueSize uint32, value any) error {
+	goValueSize := binary.Size(value)
+	if goValueSize < 0 || uint32(goValueSize) != objectValueSize {
+		return &VMBlockMapLayoutError{
+			MapName: strings.TrimSpace(mapName), Component: "value", SizeFromObject: objectValueSize, GoSize: goValueSize,
 		}
 	}
 	return nil
@@ -637,6 +662,12 @@ func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 	}
 	partial.CgroupDeviceOperations = cgroupDeviceOperations
 
+	if err := validateVMBlockMapKeyLayout(vmBlockRequestStartsMapName, objects.RequestStarts.KeySize(), uint64(0)); err != nil {
+		return partial, err
+	}
+	if err := validateVMBlockMapValueLayout(vmBlockRequestStartsMapName, objects.RequestStarts.ValueSize(), vmBlockIssueValue{}); err != nil {
+		return partial, err
+	}
 	var requestKey uint64
 	var issueValue vmBlockIssueValue
 	iterator := objects.RequestStarts.Iterate()
@@ -762,6 +793,7 @@ type vmBlockIssueValue struct {
 	DeviceAvailable    uint8
 	OwnershipAvailable uint8
 	Reserved           uint8
+	Padding            uint32
 }
 
 type vmBlockCgroupDeviceOperationKey struct {

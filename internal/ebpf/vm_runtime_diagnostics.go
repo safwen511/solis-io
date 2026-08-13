@@ -72,8 +72,14 @@ func applyVMBlockMapLayoutDiagnostics(diagnostics *VMBlockRuntimeDiagnostics, er
 		return
 	}
 	diagnostics.MapName = layoutError.MapName
-	diagnostics.KeySizeFromObject = layoutError.KeySizeFromObject
-	diagnostics.GoKeySize = layoutError.GoKeySize
+	diagnostics.MapLayoutComponent = layoutError.Component
+	if layoutError.Component == "value" {
+		diagnostics.ValueSizeFromObject = layoutError.SizeFromObject
+		diagnostics.GoValueSize = layoutError.GoSize
+		return
+	}
+	diagnostics.KeySizeFromObject = layoutError.SizeFromObject
+	diagnostics.GoKeySize = layoutError.GoSize
 }
 
 func boundedError(err error) string {

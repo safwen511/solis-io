@@ -82,8 +82,11 @@ type VMBlockRuntimeDiagnostics struct {
 	EUID                    int                      `json:"euid"`
 	RawError                string                   `json:"raw_error"`
 	MapName                 string                   `json:"map"`
+	MapLayoutComponent      string                   `json:"map_layout_component"`
 	KeySizeFromObject       uint32                   `json:"key_size_from_object"`
 	GoKeySize               int                      `json:"go_key_size"`
+	ValueSizeFromObject     uint32                   `json:"value_size_from_object"`
+	GoValueSize             int                      `json:"go_value_size"`
 	CapabilitySummary       VMBlockCapabilitySummary `json:"capability_summary"`
 	LockdownMode            string                   `json:"lockdown_mode"`
 	MemlockLimit            string                   `json:"memlock_limit"`

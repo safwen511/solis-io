@@ -396,7 +396,7 @@ func TestValidateVMBlockCollectionSpecRejectsStaleObject(t *testing.T) {
 		},
 		Maps: map[string]*ciliumebpf.MapSpec{
 			"counters":               {},
-			"request_starts":         {},
+			"request_starts":         {KeySize: 8, ValueSize: 32},
 			"latency_stats":          {},
 			"device_operation_stats": {KeySize: 12},
 		},
@@ -415,6 +415,12 @@ func TestValidateVMBlockCollectionSpecRejectsStaleObject(t *testing.T) {
 	if !errors.Is(err, ErrVMBlockObjectInvalid) || !errors.As(err, &layoutError) || layoutError.MapName != vmBlockCgroupDeviceOperationMapName {
 		t.Fatalf("spec layout mismatch was not classified as object_invalid: %v", err)
 	}
+	spec.Maps[vmBlockCgroupDeviceOperationMapName].KeySize = 24
+	spec.Maps[vmBlockRequestStartsMapName].ValueSize = 28
+	err = validateVMBlockCollectionSpec(spec)
+	if !errors.Is(err, ErrVMBlockObjectInvalid) || !errors.As(err, &layoutError) || layoutError.MapName != vmBlockRequestStartsMapName || layoutError.Component != "value" || layoutError.SizeFromObject != 28 || layoutError.GoSize != 32 {
+		t.Fatalf("request-start value mismatch was not classified precisely: %v", err)
+	}
 }
 
 func TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes(t *testing.T) {
@@ -431,6 +437,12 @@ func TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes(t *testing.T) {
 	}
 	if got, want := binary.Size(vmBlockCgroupDeviceOperationKey{}), int(spec.Maps[vmBlockCgroupDeviceOperationMapName].KeySize); got != want || got != 24 {
 		t.Fatalf("cgroup-device-operation key size = Go %d, object %d, want 24", got, want)
+	}
+	if got, want := binary.Size(uint64(0)), int(spec.Maps[vmBlockRequestStartsMapName].KeySize); got != want || got != 8 {
+		t.Fatalf("request-start key size = Go %d, object %d, want 8", got, want)
+	}
+	if got, want := binary.Size(vmBlockIssueValue{}), int(spec.Maps[vmBlockRequestStartsMapName].ValueSize); got != want || got != 32 {
+		t.Fatalf("request-start value size = Go %d, object %d, want 32", got, want)
 	}
 	if err := validateVMBlockCollectionSpec(spec); err != nil {
 		t.Fatalf("generated object layout rejected: %v", err)
@@ -455,6 +467,41 @@ func TestVMBlockCgroupDeviceOperationKeyBinaryRoundTrip(t *testing.T) {
 	}
 }
 
+func TestVMBlockIssueValueBinaryRoundTripConsumesObjectLayout(t *testing.T) {
+	want := vmBlockIssueValue{
+		TimestampNS: 42, CgroupID: 99, Major: 259, Minor: 3,
+		Operation: 1, DeviceAvailable: 1, OwnershipAvailable: 1,
+	}
+	var encoded bytes.Buffer
+	if err := binary.Write(&encoded, binary.LittleEndian, want); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Len() != 32 {
+		t.Fatalf("encoded issue value size = %d, want 32", encoded.Len())
+	}
+	var got vmBlockIssueValue
+	if err := binary.Read(&encoded, binary.LittleEndian, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("decoded issue value = %#v, want %#v", got, want)
+	}
+}
+
+func TestVMBlockValueLayoutMismatchDiagnostics(t *testing.T) {
+	err := &VMBlockMapLayoutError{
+		MapName: vmBlockRequestStartsMapName, Component: "value", SizeFromObject: 32, GoSize: 28,
+	}
+	diagnostics := VMBlockRuntimeDiagnostics{}
+	applyVMBlockMapLayoutDiagnostics(&diagnostics, err)
+	if diagnostics.MapName != vmBlockRequestStartsMapName || diagnostics.MapLayoutComponent != "value" || diagnostics.ValueSizeFromObject != 32 || diagnostics.GoValueSize != 28 {
+		t.Fatalf("value layout diagnostics = %#v", diagnostics)
+	}
+	if diagnostics.KeySizeFromObject != 0 || diagnostics.GoKeySize != 0 {
+		t.Fatalf("value mismatch polluted key diagnostics = %#v", diagnostics)
+	}
+}
+
 func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T) {
 	latency := VMBlockKernelLatency{Count: 1, TotalNS: 2_000, MinNS: 2_000, MaxNS: 2_000, WriteOps: 1}
 	latency.Buckets[0] = 1
@@ -462,7 +509,7 @@ func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T)
 		counters: VMBlockKernelCounters{IssueSeen: 1, CompleteSeen: 1, CompletedLatencyEvents: 1},
 		latency:  latency,
 		counterErr: &VMBlockMapLayoutError{
-			MapName: vmBlockCgroupDeviceOperationMapName, KeySizeFromObject: 24, GoKeySize: 20,
+			MapName: vmBlockCgroupDeviceOperationMapName, Component: "key", SizeFromObject: 24, GoSize: 20,
 		},
 	}
 	source, _ := fakeCiliumVMBlockSource(resources)
@@ -470,7 +517,7 @@ func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T)
 	if report.Availability.Available || report.Availability.Status != "map_layout_mismatch" || report.Diagnostics.Stage != "map_read" {
 		t.Fatalf("layout failure = availability:%#v diagnostics:%#v", report.Availability, report.Diagnostics)
 	}
-	if report.Diagnostics.MapName != vmBlockCgroupDeviceOperationMapName || report.Diagnostics.KeySizeFromObject != 24 || report.Diagnostics.GoKeySize != 20 {
+	if report.Diagnostics.MapName != vmBlockCgroupDeviceOperationMapName || report.Diagnostics.MapLayoutComponent != "key" || report.Diagnostics.KeySizeFromObject != 24 || report.Diagnostics.GoKeySize != 20 {
 		t.Fatalf("layout diagnostics = %#v", report.Diagnostics)
 	}
 	if report.HostSummary.TotalOps != 1 || report.VMs[0].TotalOps != 0 {

@@ -252,6 +252,82 @@ Without `--output-dir`, the harness creates a private directory under `/tmp`. It
 
 The repository's lab-only workload and demo scripts are not part of the Solis product command path.
 
+### Normal tenant-A application traffic
+
+The lab includes a bounded client workload for the existing application path:
+
+```text
+a-client -> a-web GET /write -> PostgreSQL INSERT on a-db
+```
+
+Deploying the client copies one project-owned Python program to `a-client`; it does not enable a daemon or background service:
+
+```bash
+./lab/scripts/deploy-client-workload.sh
+```
+
+Generate a fixed 30 requests/second for 60 seconds, with no more than 20 requests in flight:
+
+```bash
+client_report=$(mktemp /tmp/a-client-traffic-XXXXXXXX.json)
+./lab/scripts/run-client-workload.sh \
+  --duration 60 \
+  --rate 30 \
+  --concurrency 20 \
+  > "$client_report"
+echo "Client report: $client_report"
+```
+
+The client has a fixed target (`a-web` at `192.168.130.20/write`), bounded duration/rate/concurrency, and produces deterministic aggregate JSON with one-second windows. It retains no request or response bodies, SQL text, table data, or secrets. The default represents steady lab traffic rather than a literal count of production users; increase the rate only after confirming that `a-client` itself is not saturated. This traffic can run continuously across a baseline, `b-stress` pressure, and recovery sequence while Solis captures provider-side evidence.
+
+### Live application-impact validation
+
+The live-impact harness automates that complete controlled timeline: normal `a-client` traffic, a baseline window, durable `b-stress` pressure, an overlapping Solis noisy-neighbor capture, and a recovery window. Deploy the current client first so its fixed non-payload process identity is available to safe lifecycle checks:
+
+```bash
+./lab/scripts/deploy-client-workload.sh
+
+# Show timing and targets without sudo, SSH, or workload generation.
+./lab/scripts/validate-live-app-impact.sh --dry-run
+
+# Run the default 30s baseline, 60s pressure, and 30s recovery scenario.
+./lab/scripts/validate-live-app-impact.sh
+```
+
+To retain the result at a chosen location, create an empty private directory first:
+
+```bash
+mkdir -m 0700 /tmp/solis-live-impact
+./lab/scripts/validate-live-app-impact.sh \
+  --rate 30 \
+  --concurrency 20 \
+  --output-dir /tmp/solis-live-impact
+```
+
+The harness refuses existing client/fio processes and the fixed fio file, uses exact process names rather than process arguments for lifecycle checks, and cleans up only the workloads it starts. It requires interactive sudo authentication and allowlisted SSH access to `a-client` and `b-stress`. All directories and files are private (`0700` and `0600`). The final `live-impact-report.json` combines baseline/pressure/recovery application timing, selected-suspect evidence, VM-attributed block latency, attribution coverage, caveats, and false privacy flags. It also validates capture JSON, manifest checksums, file modes, phase completeness, and forbidden pointer/process-path output. Application latency movement and VM-attributed storage pressure are time-correlated controlled-lab evidence; the report does not claim universal causality or production impact.
+
+### eBPF overhead and safety benchmark
+
+The paired benchmark harness compares the same bounded fio workload with and without the VM block-latency collector. It rate-limits the default workload to approximately 50 MiB/s, uses periodic data syncs so provider-side block activity is observable, alternates phase order across iterations, and retains collector CPU time, maximum RSS, attribution coverage, map pressure, event-loss counters, fio throughput, and guest-visible latency:
+
+```bash
+# Print the benchmark plan without sudo, SSH, or workload generation.
+./lab/scripts/benchmark-ebpf-overhead.sh --dry-run
+
+# One short baseline/eBPF pair using b-stress.
+./lab/scripts/benchmark-ebpf-overhead.sh
+
+# Three paired observations at a lower bounded write rate.
+mkdir -m 0700 /tmp/solis-ebpf-benchmark
+./lab/scripts/benchmark-ebpf-overhead.sh \
+  --iterations 3 \
+  --duration-seconds 60 \
+  --rate-mib 25 \
+  --output-dir /tmp/solis-ebpf-benchmark
+```
+
+The output directories and files are private (`0700` and `0600`) and end with `benchmark-report.json`, which records the Solis build, kernel, architecture, workload, paired observations, and aggregate measurements. Safety validation requires a successful collector, target-VM attribution, false privacy flags, and zero map-full, dropped-event, and ring-loss counters. Performance deltas are reported without an automatic threshold: the rate ceiling deliberately bounds writes and can hide throughput differences, so latency and resource measurements must also be reviewed. A small number of paired runs cannot establish a production overhead guarantee, and collector CPU time does not include every in-kernel execution cost. The fixed fio file is removed after each phase, and preflight refuses existing jobs or files it does not own.
+
 ## Safety and privacy
 
 The eBPF attribution, diagnosis, capture, watch, and status telemetry paths are designed around counters, timings, topology, and health metadata. They do not collect:
@@ -284,7 +360,7 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 ## Roadmap
 
 - Run and retain long-duration harness results across idle, victim-load, noisy-neighbor, and mixed-load scenarios.
-- Benchmark eBPF map pressure, event coverage, CPU overhead, and cleanup safety under sustained I/O.
+- Run and retain multi-iteration eBPF overhead/safety results on the supported host profile.
 - Polish operator-facing demo and incident reports around attribution quality and caveats.
 - Add an install/package workflow with versioned embedded objects and compatibility checks.
 - Evaluate broader hypervisor support only after the single-host KVM/libvirt path is hardened.

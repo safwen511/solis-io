@@ -36,6 +36,7 @@ import (
 	statusview "github.com/safwen511/solis-io/internal/status"
 	"github.com/safwen511/solis-io/internal/storage"
 	"github.com/safwen511/solis-io/internal/storagevm"
+	topview "github.com/safwen511/solis-io/internal/top"
 	"github.com/safwen511/solis-io/internal/traceplan"
 	"github.com/safwen511/solis-io/internal/version"
 	watcher "github.com/safwen511/solis-io/internal/watch"
@@ -124,8 +125,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		return runStatus(runtimeConfig, options, stdout)
 	case "top":
-		fmt.Fprintln(stdout, "solis top: live VM I/O view will be implemented here")
-		return nil
+		options, err := parseTopArgs(args)
+		if err != nil {
+			return err
+		}
+		return runTop(runtimeConfig, options, stdout)
 	case "trace":
 		victim, suspect, err := parseTracePlanArgs(args)
 		if err != nil {
@@ -213,6 +217,7 @@ const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --
 const ebpfVMBlockLatencyUsage = "usage: solis ebpf vm-block-latency [--duration <duration>] [--interval <duration>] [--device <block-device-name>] [--victim <vm>] [--suspect <vm>] [--all-vms] [--output <path>] --json"
 const vmStorageStatsUsage = "usage: solis vm storage-stats [--victim <vm>] [--suspect <vm>] [--all-vms] [--duration <duration>] [--interval <duration>] [--output <path>] --json"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
+const topUsage = "usage: solis top [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--clear | --no-clear] [--sort <field>]"
 const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
 const serviceStatusUsage = "usage: solis service status --vm <name> --json"
@@ -353,6 +358,8 @@ func usageForCommand(args []string) string {
 			return ebpfUsage
 		case "status":
 			return statusUsage
+		case "top":
+			return topUsage
 		case "version":
 			return "usage: solis version [--json]"
 		}
@@ -425,6 +432,16 @@ type statusOptions struct {
 	Iterations int
 	Clear      bool
 	Sort       string
+}
+
+type topOptions struct {
+	Duration           time.Duration
+	Interval           time.Duration
+	Every              time.Duration
+	Iterations         int
+	IncludeEBPFLatency bool
+	Clear              bool
+	Sort               string
 }
 
 type observeSnapshotOptions struct {
@@ -740,6 +757,99 @@ func parseStatusArgs(args []string) (statusOptions, error) {
 	}
 	if !options.Watch && (seen["--every"] || seen["--iterations"] || seen["--clear"] || seen["--no-clear"]) {
 		return statusOptions{}, fmt.Errorf("%s: --every, --iterations, --clear, and --no-clear require --watch", statusUsage)
+	}
+	return options, nil
+}
+
+func parseTopArgs(args []string) (topOptions, error) {
+	options := topOptions{
+		Duration: 3 * time.Second,
+		Interval: time.Second,
+		Every:    5 * time.Second,
+		Clear:    true,
+		Sort:     "pressure",
+	}
+	if len(args) == 0 || args[0] != "top" {
+		return topOptions{}, errors.New(topUsage)
+	}
+	seen := make(map[string]bool)
+	booleanTargets := map[string]*bool{"--include-ebpf-latency": &options.IncludeEBPFLatency}
+	for index := 1; index < len(args); index++ {
+		option := args[index]
+		if matched, err := setKnownBooleanOption(option, topUsage, seen, booleanTargets); matched {
+			if err != nil {
+				return topOptions{}, err
+			}
+			continue
+		}
+		if value, matched, err := booleanFlag(option, "--clear"); matched {
+			if err != nil {
+				return topOptions{}, fmt.Errorf("%s: %w", topUsage, err)
+			}
+			if seen["--clear"] {
+				return topOptions{}, fmt.Errorf("%s: --clear specified more than once", topUsage)
+			}
+			seen["--clear"] = true
+			options.Clear = value
+			continue
+		}
+		if value, matched, err := booleanFlag(option, "--no-clear"); matched {
+			if err != nil {
+				return topOptions{}, fmt.Errorf("%s: %w", topUsage, err)
+			}
+			if seen["--no-clear"] {
+				return topOptions{}, fmt.Errorf("%s: --no-clear specified more than once", topUsage)
+			}
+			seen["--no-clear"] = true
+			options.Clear = !value
+			continue
+		}
+		if seen[option] {
+			return topOptions{}, fmt.Errorf("%s: %s specified more than once", topUsage, option)
+		}
+		seen[option] = true
+		switch option {
+		case "--duration", "--interval", "--every", "--iterations", "--sort":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return topOptions{}, fmt.Errorf("%s: %s requires a value", topUsage, option)
+			}
+			value := strings.TrimSpace(args[index+1])
+			index++
+			switch option {
+			case "--duration", "--interval", "--every":
+				parsed, err := time.ParseDuration(value)
+				if err != nil || parsed <= 0 {
+					return topOptions{}, fmt.Errorf("%s: invalid %s %q", topUsage, option, value)
+				}
+				switch option {
+				case "--duration":
+					options.Duration = parsed
+				case "--interval":
+					options.Interval = parsed
+				case "--every":
+					options.Every = parsed
+				}
+			case "--iterations":
+				iterations, err := strconv.Atoi(value)
+				if err != nil || iterations <= 0 {
+					return topOptions{}, fmt.Errorf("%s: invalid --iterations %q", topUsage, value)
+				}
+				options.Iterations = iterations
+			case "--sort":
+				if !topview.ValidSortField(value) {
+					return topOptions{}, fmt.Errorf("%s: invalid --sort field %q; allowed: name, pressure, write, ops, latency", topUsage, value)
+				}
+				options.Sort = strings.ToLower(value)
+			}
+		default:
+			return topOptions{}, fmt.Errorf("%s: unknown option %s", topUsage, option)
+		}
+	}
+	if options.Interval > options.Duration {
+		return topOptions{}, fmt.Errorf("%s: interval %s cannot exceed duration %s", topUsage, options.Interval, options.Duration)
+	}
+	if seen["--clear"] && seen["--no-clear"] {
+		return topOptions{}, fmt.Errorf("%s: --clear and --no-clear cannot be used together", topUsage)
 	}
 	return options, nil
 }
@@ -2317,6 +2427,140 @@ func runStatusWatch(ctx context.Context, runtimeConfig solisconfig.Runtime, opti
 	}
 }
 
+type liveTopSource struct {
+	runtimeConfig solisconfig.Runtime
+}
+
+type topStatusCollectionResult struct {
+	report statusview.Report
+	err    error
+}
+
+type topHostCollectionResult struct {
+	report hostmetrics.HostStatus
+	err    error
+}
+
+func (source liveTopSource) Collect(ctx context.Context, request topview.CollectRequest) (topview.Snapshot, error) {
+	select {
+	case <-ctx.Done():
+		return topview.Snapshot{}, ctx.Err()
+	default:
+	}
+	vms, err := inventory.LoadFromConfig(source.runtimeConfig.Settings.InventoryCSV)
+	if err != nil {
+		return topview.Snapshot{}, fmt.Errorf("load VM inventory: %w", err)
+	}
+	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(source.runtimeConfig))
+	snapshot := topview.Snapshot{
+		Status:               statusview.Report{SchemaVersion: statusview.SchemaVersion, Duration: request.Duration.String(), Interval: request.Interval.String(), VMs: []statusview.VMStatus{}},
+		StatusState:          "collection_error",
+		EBPFLatencyRequested: request.IncludeEBPFLatency,
+	}
+
+	var mappings []ebpf.VMBlockCgroupMapping
+	latencyPrepared := false
+	if request.IncludeEBPFLatency {
+		targets, targetErr := selectVMBlockLatencyTargets(vms, ebpfVMBlockLatencyOptions{AllVMs: true})
+		if targetErr != nil {
+			snapshot.EBPFUnavailableState = "target_selection_error"
+		} else {
+			var mappingErr error
+			mappings, mappingErr = ebpf.BuildVMCgroupMappings(targets)
+			if mappingErr != nil {
+				snapshot.EBPFUnavailableState = "mapping_error"
+			} else {
+				latencyPrepared = true
+			}
+		}
+	}
+
+	snapshot.ObservedAtUTC = time.Now().UTC()
+	statusResults := make(chan topStatusCollectionResult, 1)
+	go func() {
+		report, collectErr := statusview.CollectWithThresholds(
+			vms,
+			request.Duration,
+			request.Interval,
+			source.runtimeConfig.Settings.Thresholds,
+		)
+		statusResults <- topStatusCollectionResult{report: report, err: collectErr}
+	}()
+	var hostResults chan topHostCollectionResult
+	hostOptions, hostOptionsErr := hostStatusOptions(source.runtimeConfig.Settings)
+	if hostOptionsErr != nil {
+		snapshot.HostUnavailableState = "configuration_error"
+	} else {
+		hostOptions.Interval = request.Duration
+		hostOptions.CollectNetwork = false
+		hostResults = make(chan topHostCollectionResult, 1)
+		go func() {
+			report, collectErr := hostmetrics.Collect(hostOptions)
+			hostResults <- topHostCollectionResult{report: report, err: collectErr}
+		}()
+	}
+
+	var latencyResults chan ebpf.VMBlockLatencyReport
+	if latencyPrepared {
+		latencyResults = make(chan ebpf.VMBlockLatencyReport, 1)
+		go func() {
+			latencyResults <- ebpf.CollectVMBlockLatencyReportForPlatform(ctx, ebpf.VMBlockLatencyCollectOptions{
+				Duration: request.Duration,
+				Interval: request.Interval,
+			}, mappings, runtime.GOOS)
+		}()
+	}
+
+	statusDone := false
+	hostDone := hostResults == nil
+	latencyDone := latencyResults == nil
+	for !statusDone || !hostDone || !latencyDone {
+		select {
+		case <-ctx.Done():
+			return topview.Snapshot{}, ctx.Err()
+		case statusResult := <-statusResults:
+			statusDone = true
+			statusResults = nil
+			if statusResult.err == nil {
+				snapshot.Status = statusResult.report
+				snapshot.StatusAvailable = true
+				snapshot.StatusState = "available"
+			}
+		case hostResult := <-hostResults:
+			hostDone = true
+			hostResults = nil
+			if hostResult.err == nil {
+				snapshot.Host = &hostResult.report
+			} else {
+				snapshot.HostUnavailableState = "collection_error"
+			}
+		case report := <-latencyResults:
+			latencyDone = true
+			latencyResults = nil
+			snapshot.EBPFLatency = &report
+		}
+	}
+	return snapshot, nil
+}
+
+func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err := topview.Run(ctx, w, liveTopSource{runtimeConfig: runtimeConfig}, topview.Options{
+		Duration:           options.Duration,
+		Interval:           options.Interval,
+		Every:              options.Every,
+		Iterations:         options.Iterations,
+		Clear:              options.Clear,
+		Sort:               options.Sort,
+		IncludeEBPFLatency: options.IncludeEBPFLatency,
+	})
+	if err != nil {
+		return fmt.Errorf("top error: %w", err)
+	}
+	return nil
+}
+
 func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	lab := false
 	if len(args) == 2 && args[1] == "--lab" {
@@ -3069,7 +3313,7 @@ Commands:
   solis observe snapshot --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] --json
   solis observe watch --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] [--output-dir <dir>] --json
   solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]
-  solis top
+  solis top [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--clear | --no-clear] [--sort <field>]
   solis inspect <vm> [--verbose]
   solis experiment summarize <report-dir>
   solis incidents explain <report-dir> --victim <name> --suspect <name>

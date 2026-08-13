@@ -1271,6 +1271,68 @@ func TestParseStatusArgsValidatesOptions(t *testing.T) {
 	}
 }
 
+func TestParseTopArgs(t *testing.T) {
+	options, err := parseTopArgs([]string{
+		"top",
+		"--duration", "4s",
+		"--interval", "1s",
+		"--every", "6s",
+		"--iterations", "3",
+		"--include-ebpf-latency",
+		"--no-clear",
+		"--sort", "ops",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Duration != 4*time.Second || options.Interval != time.Second || options.Every != 6*time.Second ||
+		options.Iterations != 3 || !options.IncludeEBPFLatency || options.Clear || options.Sort != "ops" {
+		t.Fatalf("options = %#v", options)
+	}
+	defaults, err := parseTopArgs([]string{"top"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Duration != 3*time.Second || defaults.Interval != time.Second || defaults.Every != 5*time.Second ||
+		defaults.Iterations != 0 || defaults.IncludeEBPFLatency || !defaults.Clear || defaults.Sort != "pressure" {
+		t.Fatalf("defaults = %#v", defaults)
+	}
+}
+
+func TestParseTopBooleanValuesAndValidation(t *testing.T) {
+	options, err := parseTopArgs([]string{"top", "--include-ebpf-latency=true", "--clear=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.IncludeEBPFLatency || options.Clear {
+		t.Fatalf("options = %#v", options)
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"top", "--duration", "1s", "--interval", "2s"}, want: "cannot exceed duration"},
+		{args: []string{"top", "--sort", "tenant"}, want: "invalid --sort field"},
+		{args: []string{"top", "--iterations", "0"}, want: "invalid --iterations"},
+		{args: []string{"top", "--clear", "--no-clear"}, want: "cannot be used together"},
+		{args: []string{"top", "--json"}, want: "unknown option --json"},
+	} {
+		if _, err := parseTopArgs(test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("parseTopArgs(%v) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestTopHelpUsesImplementedCommandUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := Run([]string{"top", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(stdout.String()) != topUsage {
+		t.Fatalf("help = %q, want %q", strings.TrimSpace(stdout.String()), topUsage)
+	}
+}
+
 func TestParseVMStorageStatsArgs(t *testing.T) {
 	options, err := parseVMStorageStatsArgs([]string{
 		"vm", "storage-stats", "--victim", "a-web", "--suspect", "b-stress", "--json",

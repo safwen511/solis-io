@@ -2,7 +2,7 @@
 
 Solis I/O is a single-host Linux/KVM/libvirt observability tool that correlates provider-side block latency with local VM ownership to investigate storage noisy-neighbor incidents.
 
-> **Current release:** `v0.2.0-experimental` — working and repeatably validated in the included lab, but not production-ready.
+> **Current tagged release:** `v0.2.0-experimental` — working and repeatably validated in the included lab, but not production-ready. The current source milestone additionally includes the read-only `solis top` dashboard described below.
 
 ## What problem it solves
 
@@ -16,7 +16,7 @@ When a customer reports that a VM is slow, host-wide disk metrics rarely answer 
 
 Solis combines libvirt inventory, storage topology, QEMU process accounting, cgroup validation counters, and eBPF block-request latency into one provider-side evidence chain. It can identify a dominant local VM contributor and show whether the victim and suspect shared a storage path during the same observation window. Report-backed or controlled-lab application measurements can strengthen that correlation; infrastructure telemetry alone does not prove customer impact or root cause.
 
-## Current release milestone
+## Current milestone
 
 `v0.2.0-experimental` provides a working experimental single-host investigation path:
 
@@ -33,8 +33,9 @@ Solis combines libvirt inventory, storage topology, QEMU process accounting, cgr
 - A bounded `a-client -> a-web -> a-db` workload and a live-impact harness align application baseline, pressure, and recovery phases with Solis evidence.
 - A paired eBPF overhead/safety harness separates collector safety from inconclusive or review-only performance results.
 - A deterministic Linux/amd64 archive workflow embeds the authentic eBPF ELF and records release identity and checksums.
+- The current source includes a read-only `solis top` dashboard that refreshes bounded QEMU pressure and optional VM-attributed eBPF latency windows.
 
-The following are deliberately not part of this release: a TUI, daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, command-driven observability and attribution tool.
+The tagged `v0.2.0-experimental` archive predates `solis top`; build the current source to exercise the dashboard until a newer experimental release is tagged. The following remain deliberately out of scope: a daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, operator-driven observability and attribution tool.
 
 ## Architecture
 
@@ -45,7 +46,7 @@ Solis builds evidence in layers:
 3. **QEMU pressure** samples `/proc/<qemu-pid>/io` byte and syscall counters. High `syscw/s` is a fallback activity signal when byte counters do not advance meaningfully; it is not treated as an exact byte count.
 4. **Validation counters** use cgroup v2 `io.stat` and `virsh domstats --block` deltas. These provide byte, operation, and virtual-disk timing evidence, not host block-latency histograms.
 5. **Typed-BTF eBPF latency** correlates block request issue and completion, extracts operation and device metadata, and resolves blkcg ownership.
-6. **Observe, diagnosis, capture, and watch** combine storage sharing, QEMU pressure, VM-attributed eBPF evidence, explicit missing evidence, and conservative correlations or verdict rules.
+6. **Top, observe, diagnosis, capture, and watch** present or combine storage sharing, QEMU pressure, VM-attributed eBPF evidence, explicit missing evidence, and conservative correlations or verdict rules.
 
 The capture workflow writes private, atomic evidence bundles containing the human diagnosis, `incident-report.md`, `evidence-summary.json`, raw `ebpf-vm-block-latency.json` when requested, a compact privacy-safe attribution projection in `observe-snapshot.json`, and `manifest.json` checksums. The observe projection excludes raw loader diagnostics and cgroup identifiers and labels the reused diagnosis evidence window explicitly.
 
@@ -163,6 +164,41 @@ Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then bu
 ./solis status --watch --iterations 5 --sort pressure --no-clear
 ./solis vm storage-stats --victim a-web --suspect b-stress --duration 5s --interval 1s --json
 ```
+
+### Read-only terminal dashboard
+
+`solis top` repeatedly samples the existing provider-side status model. It
+shows mapped physical storage, per-VM QEMU write pressure, and explicit
+unavailable states without requiring eBPF:
+
+```bash
+./solis top
+
+# A finite, log-friendly run without terminal clear sequences.
+./solis top --iterations 3 --every 5s --sort write --no-clear
+```
+
+VM-attributed block operations and approximate p95 latency are opt-in because
+loading the eBPF collector normally requires elevated host privileges:
+
+```bash
+sudo ./solis top \
+  --include-ebpf-latency \
+  --duration 3s \
+  --interval 1s \
+  --every 5s \
+  --sort ops
+```
+
+Each refresh starts bounded status and eBPF samples in the same local
+observation window. The dashboard never enters terminal raw mode; Ctrl-C stops
+it through normal signal handling. It is read-only and has no VM actions,
+arbitrary command execution, capture trigger, daemon, or new verdict logic.
+When the eBPF collector is not requested, denied, degraded, or unavailable,
+that state remains visible and missing per-VM latency is rendered as `-` rather
+than a fabricated zero. Access to per-QEMU `/proc/<pid>/io` counters may also
+require elevated permission; the dashboard marks those VM pressure rows
+unavailable instead of treating them as idle.
 
 ### Unified observe snapshot
 
@@ -458,21 +494,18 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 - **Release trust:** archives have SHA-256 checksums and deterministic metadata,
   but are not signed and do not yet include an SBOM or provenance attestation.
   Byte-identical rebuilding depends on matching toolchain and module inputs.
-- **Operator interface:** the current interface is CLI/JSON/report based. There
-  is no TUI, API server, automatic remediation, VM control, authentication
-  layer, retention manager, or package-manager lifecycle.
+- **Operator interface:** the current source includes a compact read-only
+  refresh dashboard plus CLI/JSON/report workflows. It is not a terminal raw-
+  mode application and does not yet provide interactive navigation. There is
+  no API server, automatic remediation, VM control, authentication layer,
+  retention manager, or package-manager lifecycle.
 - **Lab tooling:** workload and validation scripts use the included fixed VM
   names, addresses, and files. They are controlled lab fixtures, not a generic
   production workload framework.
 
 ## Roadmap
 
-The next milestone is a read-only, single-host TUI built on the existing command
-models and JSON semantics. It should show host/storage state, VM activity,
-attribution quality, unattributed work, selected victim/suspect evidence, and
-capture state without adding VM controls, a daemon, or new verdict logic.
-
-After that, the priorities are:
+With the first read-only terminal dashboard in place, the priorities are:
 
 1. **Soak and lifecycle validation:** exercise longer windows, cancellation,
    repeated attach/detach, VM restart and cgroup replacement, high event rates,
@@ -485,9 +518,9 @@ After that, the priorities are:
    and avoid publishing an overhead bound until variance supports one.
 4. **Release provenance:** automate clean-tag artifact verification, add
    signatures, SBOM/provenance metadata, and fresh-host install smoke tests.
-5. **Operator polish:** improve TUI/report navigation and explanations while
-   keeping raw counters, caveats, privacy flags, and unavailable sections
-   visible.
+5. **Operator polish:** add optional dashboard navigation and report/capture
+   context while keeping the interface read-only and raw counters, caveats,
+   privacy flags, and unavailable sections visible.
 
 Multi-host orchestration, fleet management, remote agents, automatic VM
 remediation, and broader hypervisor support remain outside the current

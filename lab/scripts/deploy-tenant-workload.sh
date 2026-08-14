@@ -34,10 +34,11 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly project_dir="$(cd -- "${script_dir}/../.." && pwd)"
 readonly webapp_file="${project_dir}/lab/workloads/webapp/solis_webapp.py"
 readonly schema_file="${project_dir}/lab/workloads/db/schema.sql"
+readonly retention_file="${project_dir}/lab/workloads/db/retention.sql"
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
 readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
 
-if [[ ! -r "$webapp_file" || ! -r "$schema_file" ]]; then
+if [[ ! -r "$webapp_file" || ! -r "$schema_file" || ! -r "$retention_file" ]]; then
   echo "Workload application or schema file is missing under ${project_dir}/lab/workloads" >&2
   exit 1
 fi
@@ -51,9 +52,11 @@ echo "DB:     $db_ip"
 echo
 echo "=== Configuring PostgreSQL on ${db_ip} ==="
 scp "${ssh_options[@]}" "$schema_file" "${ssh_user}@${db_ip}:/tmp/solis-schema.sql"
+scp "${ssh_options[@]}" "$retention_file" "${ssh_user}@${db_ip}:/tmp/solis-retention.sql"
 ssh "${ssh_options[@]}" "${ssh_user}@${db_ip}" \
   "sudo -n env TENANT_SUBNET='${tenant_subnet}' bash -s" <<'REMOTE_DB_SETUP'
 set -euo pipefail
+trap 'rm -f -- /tmp/solis-schema.sql /tmp/solis-retention.sql' EXIT
 
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'solis'" | grep -qx 1; then
   sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER solis WITH PASSWORD 'solispass'"
@@ -78,7 +81,43 @@ if ! grep -Fqx "$hba_rule" "$hba_file"; then
 fi
 
 systemctl restart postgresql
-rm -f /tmp/solis-schema.sql
+
+install -d -m 0755 /opt/solis-workload
+install -m 0644 /tmp/solis-retention.sql /opt/solis-workload/request_log_retention.sql
+
+cat > /etc/systemd/system/solis-workload-retention.service <<'EOF'
+[Unit]
+Description=Bound Solis lab request-log retention
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/psql --no-psqlrc --set=ON_ERROR_STOP=1 --dbname=solisapp --file=/opt/solis-workload/request_log_retention.sql
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+EOF
+
+cat > /etc/systemd/system/solis-workload-retention.timer <<'EOF'
+[Unit]
+Description=Run bounded Solis lab request-log retention
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now solis-workload-retention.timer
+systemctl start solis-workload-retention.service
 REMOTE_DB_SETUP
 
 echo

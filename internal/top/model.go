@@ -2,11 +2,13 @@
 package top
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/hostmetrics"
@@ -23,10 +25,22 @@ type Options struct {
 	Duration           time.Duration
 	Interval           time.Duration
 	Every              time.Duration
+	UIRefresh          time.Duration
 	Iterations         int
 	Clear              bool
 	Sort               string
 	IncludeEBPFLatency bool
+	Application        bool
+	Color              bool
+	// RunWorkflow executes one fixed application workflow after live collection
+	// is paused. Its bounded summary is rendered inside the application. A
+	// workflow may also return private detail which remains in memory until the
+	// operator explicitly saves or discards it.
+	RunWorkflow func(context.Context, LaunchRequest) (WorkflowResult, error)
+	// SaveWorkflowDetail persists an explicitly requested detailed artifact.
+	// The CLI supplies the hardened private atomic writer; the dashboard never
+	// invents paths or writes files itself.
+	SaveWorkflowDetail func(WorkflowDetail) (string, error)
 }
 
 // CollectRequest identifies one bounded dashboard observation window.
@@ -41,6 +55,8 @@ type CollectRequest struct {
 // other internal collector details.
 type Snapshot struct {
 	ObservedAtUTC        time.Time
+	CompletedAtUTC       time.Time
+	Inventory            []InventoryVM
 	Status               statusview.Report
 	StatusAvailable      bool
 	StatusState          string
@@ -51,17 +67,45 @@ type Snapshot struct {
 	EBPFUnavailableState string
 }
 
+// InventoryVM is the bounded identity and runtime-state projection used by the
+// application. It deliberately excludes process arguments, cgroup identity,
+// raw diagnostics, and guest data.
+type InventoryVM struct {
+	Name      string
+	Tenant    string
+	Role      string
+	State     string
+	Network   string
+	PlannedIP string
+	LeaseIP   string
+	MemoryMB  string
+	VCPUs     string
+	DiskGB    string
+	DiskPath  string
+}
+
 // View is the deterministic, privacy-safe dashboard projection.
 type View struct {
-	ObservedAtUTC time.Time
-	Duration      string
-	Interval      string
-	Storage       []StorageView
-	Pressures     statusview.PressureCounts
-	StatusState   string
-	Host          HostView
-	Attribution   AttributionView
-	Rows          []VMRow
+	ObservedAtUTC  time.Time
+	CompletedAtUTC time.Time
+	Duration       string
+	Interval       string
+	Storage        []StorageView
+	Pressures      statusview.PressureCounts
+	StatusState    string
+	Host           HostView
+	Attribution    AttributionView
+	VMs            VMCounts
+	Rows           []VMRow
+}
+
+// VMCounts summarizes the complete configured inventory, including VMs that
+// are not running and therefore cannot have live pressure or eBPF samples.
+type VMCounts struct {
+	Total      int
+	Running    int
+	NotRunning int
+	Unknown    int
 }
 
 // HostView contains a small provider-side host summary. Availability is kept
@@ -127,6 +171,16 @@ type VMRow struct {
 	Name                   string
 	Tenant                 string
 	Role                   string
+	State                  string
+	Network                string
+	PlannedIP              string
+	LeaseIP                string
+	MemoryMB               string
+	VCPUs                  string
+	DiskGB                 string
+	DiskPath               string
+	PhysicalDisk           string
+	Running                bool
 	Pressure               string
 	PressureReason         string
 	WriteMiBPerSecond      float64
@@ -175,10 +229,11 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 		return View{}, fmt.Errorf("invalid top sort field %q", sortField)
 	}
 	view := View{
-		ObservedAtUTC: snapshot.ObservedAtUTC.UTC(),
-		Duration:      snapshot.Status.Duration,
-		Interval:      snapshot.Status.Interval,
-		StatusState:   statusEvidenceState(snapshot),
+		ObservedAtUTC:  snapshot.ObservedAtUTC.UTC(),
+		CompletedAtUTC: snapshot.CompletedAtUTC.UTC(),
+		Duration:       snapshot.Status.Duration,
+		Interval:       snapshot.Status.Interval,
+		StatusState:    statusEvidenceState(snapshot),
 		Attribution: AttributionView{
 			Requested: snapshot.EBPFLatencyRequested,
 			Status:    AttributionNotRequested,
@@ -188,9 +243,47 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 	if view.ObservedAtUTC.IsZero() {
 		view.ObservedAtUTC = time.Now().UTC()
 	}
+	if view.CompletedAtUTC.IsZero() {
+		view.CompletedAtUTC = view.ObservedAtUTC
+	}
 
-	rows := make(map[string]VMRow, len(snapshot.Status.VMs))
+	rows := make(map[string]VMRow, len(snapshot.Inventory)+len(snapshot.Status.VMs))
 	storage := make(map[string]struct{})
+	for _, vm := range snapshot.Inventory {
+		name := strings.TrimSpace(vm.Name)
+		if name == "" {
+			continue
+		}
+		state := normalizedVMState(vm.State)
+		running := state == "running"
+		pressure := "not_running"
+		pressureReason := "VM is not running"
+		switch state {
+		case "running":
+			pressure = AttributionUnavailable
+			pressureReason = "live QEMU pressure is unavailable"
+		case "unknown":
+			pressure = AttributionUnavailable
+			pressureReason = "libvirt runtime state is unavailable"
+		}
+		rows[name] = VMRow{
+			Name:             displayText(name),
+			Tenant:           displayText(vm.Tenant),
+			Role:             displayText(vm.Role),
+			State:            displayText(state),
+			Network:          displayText(vm.Network),
+			PlannedIP:        displayText(vm.PlannedIP),
+			LeaseIP:          displayText(vm.LeaseIP),
+			MemoryMB:         displayText(vm.MemoryMB),
+			VCPUs:            displayText(vm.VCPUs),
+			DiskGB:           displayText(vm.DiskGB),
+			DiskPath:         displayText(vm.DiskPath),
+			Running:          running,
+			Pressure:         pressure,
+			PressureReason:   pressureReason,
+			AttributionState: stateForVMState(state),
+		}
+	}
 	for _, vm := range snapshot.Status.VMs {
 		name := strings.TrimSpace(vm.Name)
 		if name == "" {
@@ -200,24 +293,39 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 		if !vm.IOAvailable {
 			pressure = AttributionUnavailable
 		}
-		rows[name] = VMRow{
-			Name:                   name,
-			Tenant:                 displayText(vm.Tenant),
-			Role:                   displayText(vm.Role),
-			Pressure:               displayText(pressure),
-			PressureReason:         safePressureReason(vm.Reason, vm.IOAvailable),
-			WriteMiBPerSecond:      vm.AverageWriteMiBPerSecond,
-			MaxWriteMiBPerSecond:   vm.MaxWriteMiBPerSecond,
-			WriteSyscallsPerSecond: vm.AverageSyscwPerSecond,
-			WriteAvailable:         vm.IOAvailable,
-			AttributionState:       AttributionNotRequested,
+		row := rows[name]
+		row.Name = displayText(name)
+		row.Tenant = displayText(vm.Tenant)
+		row.Role = displayText(vm.Role)
+		row.State = displayText(firstNonEmpty(vm.State, row.State, "running"))
+		row.Running = normalizedVMState(row.State) == "running"
+		row.Pressure = displayText(pressure)
+		row.PressureReason = safePressureReason(vm.Reason, vm.IOAvailable)
+		row.WriteMiBPerSecond = vm.AverageWriteMiBPerSecond
+		row.MaxWriteMiBPerSecond = vm.MaxWriteMiBPerSecond
+		row.WriteSyscallsPerSecond = vm.AverageSyscwPerSecond
+		row.WriteAvailable = vm.IOAvailable
+		row.PhysicalDisk = displayText(vm.PhysicalDisk)
+		row.AttributionState = AttributionNotRequested
+		if row.DiskPath == "-" || row.DiskPath == "" {
+			row.DiskPath = displayText(vm.Disk)
 		}
+		rows[name] = row
 		device := strings.TrimSpace(vm.PhysicalDisk)
 		if device != "" && device != "-" {
 			storage[device] = struct{}{}
 		}
 	}
 	for _, row := range rows {
+		view.VMs.Total++
+		switch normalizedVMState(row.State) {
+		case "running":
+			view.VMs.Running++
+		case "unknown":
+			view.VMs.Unknown++
+		default:
+			view.VMs.NotRunning++
+		}
 		switch row.Pressure {
 		case statusview.PressureHigh:
 			view.Pressures.High++
@@ -231,7 +339,9 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 	if snapshot.EBPFLatencyRequested {
 		view.Attribution.Status = firstNonEmpty(snapshot.EBPFUnavailableState, AttributionUnavailable)
 		for name, row := range rows {
-			row.AttributionState = view.Attribution.Status
+			if row.Running {
+				row.AttributionState = view.Attribution.Status
+			}
 			rows[name] = row
 		}
 	}
@@ -261,9 +371,11 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 			row, exists := rows[name]
 			if !exists {
 				row = VMRow{
-					Name:             name,
+					Name:             displayText(name),
 					Tenant:           displayText(vm.Tenant),
 					Role:             displayText(vm.Role),
+					State:            "running",
+					Running:          true,
 					Pressure:         AttributionUnavailable,
 					AttributionState: view.Attribution.Status,
 				}
@@ -282,7 +394,10 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 				row.AttributionAvailable = true
 				row.AttributionState = firstNonEmpty(vm.AttributionQuality, report.AttributionQuality)
 				row.MappingQuality = displayText(vm.MappingQuality)
-				row.Devices = append([]string(nil), vm.Devices...)
+				row.Devices = make([]string, 0, len(vm.Devices))
+				for _, device := range vm.Devices {
+					row.Devices = append(row.Devices, displayText(device))
+				}
 				sort.Strings(row.Devices)
 				row.DeviceOperations = projectDeviceOperations(vm.DeviceOperations)
 			} else {
@@ -343,6 +458,28 @@ func safePressureReason(reason string, available bool) string {
 	}
 }
 
+func normalizedVMState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running":
+		return "running"
+	case "shut off", "shutoff", "stopped", "paused", "pmsuspended", "crashed", "blocked":
+		return strings.ToLower(strings.TrimSpace(state))
+	default:
+		return "unknown"
+	}
+}
+
+func stateForVMState(state string) string {
+	switch normalizedVMState(state) {
+	case "running":
+		return AttributionNotRequested
+	case "unknown":
+		return AttributionUnavailable
+	default:
+		return "not_running"
+	}
+}
+
 func statusEvidenceState(snapshot Snapshot) string {
 	if !snapshot.StatusAvailable {
 		return normalizedState(snapshot.StatusState, false)
@@ -399,7 +536,7 @@ func buildStorageViews(devices map[string]struct{}, report *hostmetrics.HostStat
 	}
 	views := make([]StorageView, 0, len(devices))
 	for path := range devices {
-		view := StorageView{Device: path}
+		view := StorageView{Device: displayText(path)}
 		if device, ok := byName[filepath.Base(path)]; ok && device.RateAvailability.Available {
 			view.Available = true
 			view.ReadMiBPerSecond = sectorsPerSecondToMiB(device.ReadSectorsPerSecond)
@@ -432,6 +569,21 @@ func sortRows(rows []VMRow, field string) {
 		case "pressure":
 			if pressureRank(left.Pressure) != pressureRank(right.Pressure) {
 				return pressureRank(left.Pressure) < pressureRank(right.Pressure)
+			}
+			// Within the same coarse QEMU pressure class, keep the most
+			// consequential measured I/O visible first. This avoids hiding a
+			// rate-limited but dominant eBPF source beneath alphabetic peers.
+			if left.AttributionAvailable != right.AttributionAvailable {
+				return left.AttributionAvailable
+			}
+			if left.AttributedOps != right.AttributedOps {
+				return left.AttributedOps > right.AttributedOps
+			}
+			if left.WriteAvailable != right.WriteAvailable {
+				return left.WriteAvailable
+			}
+			if left.WriteMiBPerSecond != right.WriteMiBPerSecond {
+				return left.WriteMiBPerSecond > right.WriteMiBPerSecond
 			}
 		case "write":
 			if left.WriteAvailable != right.WriteAvailable {
@@ -475,7 +627,19 @@ func displayText(value string) string {
 	if value == "" {
 		return "-"
 	}
-	return value
+	const maxRunes = 128
+	filtered := make([]rune, 0, len(value))
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			filtered = append(filtered, '?')
+		} else {
+			filtered = append(filtered, character)
+		}
+		if len(filtered) == maxRunes {
+			break
+		}
+	}
+	return string(filtered)
 }
 
 func firstNonEmpty(values ...string) string {

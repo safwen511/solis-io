@@ -57,6 +57,30 @@ func TestResolveLoadsEnvironmentAndFlagWins(t *testing.T) {
 	}
 }
 
+func TestResolveUsesInstalledDefaultAfterFlagAndEnvironment(t *testing.T) {
+	installedPath := writeNamedConfig(t, "installed.json", validConfigJSON("installed.csv"))
+	environmentPath := writeNamedConfig(t, "environment.json", validConfigJSON("environment.csv"))
+	previous := InstalledDefaultPath
+	InstalledDefaultPath = installedPath
+	t.Cleanup(func() { InstalledDefaultPath = previous })
+
+	runtime, _, err := Resolve([]string{"inventory"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Path != installedPath || filepath.Base(runtime.Settings.InventoryCSV) != "installed.csv" {
+		t.Fatalf("installed runtime = %#v", runtime)
+	}
+
+	runtime, _, err = Resolve([]string{"inventory"}, environmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Path != environmentPath || filepath.Base(runtime.Settings.InventoryCSV) != "environment.csv" {
+		t.Fatalf("environment did not override installed default: %#v", runtime)
+	}
+}
+
 func TestLoadReportsUsefulErrors(t *testing.T) {
 	tests := []struct {
 		name string

@@ -84,7 +84,10 @@ if [[ -n "$rate_iops" && ! "$rate_iops" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
-readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
+# The remote fio job never needs terminal input. Detaching SSH stdin keeps a
+# background workload from being stopped by the shell with SIGTTIN while Solis
+# owns the foreground terminal.
+readonly ssh_options=(-n -o BatchMode=yes -o ConnectTimeout=10)
 fio_sync_options=()
 if [[ "$durable" == true ]]; then
   fio_sync_options+=(--fdatasync=1024)

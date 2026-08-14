@@ -5,6 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly repo_root="$(cd -- "${script_dir}/.." && pwd)"
 readonly object_relative_path="internal/ebpf/bpf/generated/vm_block_latency_bpfel.o"
 readonly install_relative_path="docs/INSTALL.md"
+readonly license_relative_path="LICENSE"
 readonly version_package="github.com/safwen511/solis-io/internal/version"
 
 output_dir="${repo_root}/dist"
@@ -93,6 +94,8 @@ readonly object_sha256="$(sha256sum "$object_relative_path" | awk '{print $1}')"
 
 [[ -f "$install_relative_path" && ! -L "$install_relative_path" ]] ||
   fail "release install documentation is missing or unsafe: ${install_relative_path}"
+[[ -f "$license_relative_path" && ! -L "$license_relative_path" ]] ||
+  fail "release license is missing or unsafe: ${license_relative_path}"
 
 echo "=== Verifying authentic embedded eBPF object ==="
 GOWORK=off go test -mod=readonly ./internal/ebpf \
@@ -154,6 +157,8 @@ readonly binary_size="$(stat -c '%s' "${package_dir}/solis")"
 
 cp -- "$install_relative_path" "${package_dir}/INSTALL.md"
 chmod 0644 "${package_dir}/INSTALL.md"
+cp -- "$license_relative_path" "${package_dir}/LICENSE"
+chmod 0644 "${package_dir}/LICENSE"
 
 jq -n \
   --arg version "$version" \
@@ -175,6 +180,7 @@ jq -n \
     source_date_epoch: $source_date_epoch,
     go_version: $go_version,
     platform: $platform,
+    license: "Proprietary - All Rights Reserved",
     binary: {
       path: "solis",
       sha256: $binary_sha256,
@@ -201,7 +207,7 @@ chmod 0644 "${package_dir}/RELEASE-METADATA.json"
 
 (
   cd "$package_dir"
-  sha256sum solis INSTALL.md RELEASE-METADATA.json >SHA256SUMS
+  sha256sum solis INSTALL.md LICENSE RELEASE-METADATA.json >SHA256SUMS
 )
 chmod 0644 "${package_dir}/SHA256SUMS"
 

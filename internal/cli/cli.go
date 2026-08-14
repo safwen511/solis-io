@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -62,8 +63,15 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	if len(args) == 0 {
-		printUsage(stdout)
-		return nil
+		if !interactiveTopAvailable(stdout) {
+			printUsage(stdout)
+			return nil
+		}
+		args = []string{"monitor"}
+	}
+	args, err = expandOperatorCommand(args, runtimeConfig.Settings.CaptureOutputRoot)
+	if err != nil {
+		return err
 	}
 
 	switch args[0] {
@@ -217,7 +225,10 @@ const ebpfBlockLatencyUsage = "usage: solis ebpf block-latency [--victim <vm> --
 const ebpfVMBlockLatencyUsage = "usage: solis ebpf vm-block-latency [--duration <duration>] [--interval <duration>] [--device <block-device-name>] [--victim <vm>] [--suspect <vm>] [--all-vms] [--output <path>] --json"
 const vmStorageStatsUsage = "usage: solis vm storage-stats [--victim <vm>] [--suspect <vm>] [--all-vms] [--duration <duration>] [--interval <duration>] [--output <path>] --json"
 const statusUsage = "usage: solis status [--duration <duration>] [--interval <duration>] [--json] [--watch] [--every <duration>] [--iterations <n>] [--clear | --no-clear] [--sort <field>]"
-const topUsage = "usage: solis top [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--clear | --no-clear] [--sort <field>]"
+const topUsage = "usage: solis top [--duration <duration>] [--interval <duration>] [--every <duration>] [--ui-refresh <duration>] [--iterations <n>] [--include-ebpf-latency] [--clear | --no-clear] [--sort <field>]"
+const monitorUsage = "usage: solis monitor [--duration <duration>] [--interval <duration>] [--every <duration>] [--ui-refresh <duration>] [--iterations <n>] [--include-ebpf-latency=false] [--clear | --no-clear] [--sort <field>]"
+const investigateUsage = "usage: solis investigate <victim-vm> [suspect-vm] [--duration <duration>] [--interval <duration>] [--include-ebpf-latency=false] [--json] [--output <path> | --output-dir <dir>]"
+const bundleUsage = "usage: solis bundle <victim-vm> [suspect-vm] [--duration <duration>] [--interval <duration>] [--include-ebpf-latency=false] [--output-dir <dir>]"
 const hostStatusUsage = "usage: solis host status --json"
 const guestStatusUsage = "usage: solis guest status --vm <name> --json"
 const serviceStatusUsage = "usage: solis service status --vm <name> --json"
@@ -360,6 +371,12 @@ func usageForCommand(args []string) string {
 			return statusUsage
 		case "top":
 			return topUsage
+		case "monitor":
+			return monitorUsage
+		case "investigate":
+			return investigateUsage
+		case "bundle":
+			return bundleUsage
 		case "version":
 			return "usage: solis version [--json]"
 		}
@@ -367,6 +384,83 @@ func usageForCommand(args []string) string {
 	var builder strings.Builder
 	printUsage(&builder)
 	return strings.TrimSpace(builder.String())
+}
+
+func interactiveTopAvailable(stdout io.Writer) bool {
+	output, ok := stdout.(*os.File)
+	return ok && topview.IsTerminal(os.Stdin) && topview.IsTerminal(output)
+}
+
+func expandOperatorCommand(args []string, captureOutputRoot string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, errors.New("operator command is required")
+	}
+	switch args[0] {
+	case "monitor":
+		expanded := append([]string{"top"}, args[1:]...)
+		expanded = append(expanded, "--application")
+		if !hasOption(expanded, "--duration") {
+			expanded = append(expanded, "--duration", "5s")
+		}
+		if !hasOption(expanded, "--every") {
+			expanded = append(expanded, "--every", "7s")
+		}
+		if !hasOption(expanded, "--ui-refresh") {
+			expanded = append(expanded, "--ui-refresh", "200ms")
+		}
+		if !hasOption(expanded, "--include-ebpf-latency") {
+			expanded = append(expanded, "--include-ebpf-latency")
+		}
+		return expanded, nil
+	case "investigate":
+		return expandTargetOperatorCommand(args, "diagnose", "", investigateUsage)
+	case "bundle":
+		return expandTargetOperatorCommand(args, "capture", captureOutputRoot, bundleUsage)
+	default:
+		return args, nil
+	}
+}
+
+func expandTargetOperatorCommand(args []string, command, defaultOutputDirectory, usage string) ([]string, error) {
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") || strings.TrimSpace(args[1]) == "" {
+		return nil, errors.New(usage)
+	}
+	victim := strings.TrimSpace(args[1])
+	index := 2
+	suspect := ""
+	if index < len(args) && !strings.HasPrefix(args[index], "-") {
+		suspect = strings.TrimSpace(args[index])
+		if suspect == "" {
+			return nil, errors.New(usage)
+		}
+		index++
+	}
+	expanded := []string{command, "noisy-neighbor", "--victim", victim}
+	if suspect == "" {
+		expanded = append(expanded, "--discover-suspects")
+	} else {
+		expanded = append(expanded, "--suspect", suspect)
+	}
+	remainder := args[index:]
+	if !hasOption(remainder, "--include-ebpf-latency") {
+		expanded = append(expanded, "--include-ebpf-latency")
+	}
+	if command == "capture" && !hasOption(remainder, "--output-dir") {
+		if strings.TrimSpace(defaultOutputDirectory) == "" {
+			return nil, errors.New("bundle capture output directory is unavailable")
+		}
+		expanded = append(expanded, "--output-dir", defaultOutputDirectory)
+	}
+	return append(expanded, remainder...), nil
+}
+
+func hasOption(args []string, name string) bool {
+	for _, argument := range args {
+		if argument == name || strings.HasPrefix(argument, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 type ebpfBlockLatencyOptions struct {
@@ -438,10 +532,12 @@ type topOptions struct {
 	Duration           time.Duration
 	Interval           time.Duration
 	Every              time.Duration
+	UIRefresh          time.Duration
 	Iterations         int
 	IncludeEBPFLatency bool
 	Clear              bool
 	Sort               string
+	Application        bool
 }
 
 type observeSnapshotOptions struct {
@@ -773,7 +869,10 @@ func parseTopArgs(args []string) (topOptions, error) {
 		return topOptions{}, errors.New(topUsage)
 	}
 	seen := make(map[string]bool)
-	booleanTargets := map[string]*bool{"--include-ebpf-latency": &options.IncludeEBPFLatency}
+	booleanTargets := map[string]*bool{
+		"--include-ebpf-latency": &options.IncludeEBPFLatency,
+		"--application":          &options.Application,
+	}
 	for index := 1; index < len(args); index++ {
 		option := args[index]
 		if matched, err := setKnownBooleanOption(option, topUsage, seen, booleanTargets); matched {
@@ -809,17 +908,20 @@ func parseTopArgs(args []string) (topOptions, error) {
 		}
 		seen[option] = true
 		switch option {
-		case "--duration", "--interval", "--every", "--iterations", "--sort":
+		case "--duration", "--interval", "--every", "--ui-refresh", "--iterations", "--sort":
 			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
 				return topOptions{}, fmt.Errorf("%s: %s requires a value", topUsage, option)
 			}
 			value := strings.TrimSpace(args[index+1])
 			index++
 			switch option {
-			case "--duration", "--interval", "--every":
+			case "--duration", "--interval", "--every", "--ui-refresh":
 				parsed, err := time.ParseDuration(value)
 				if err != nil || parsed <= 0 {
 					return topOptions{}, fmt.Errorf("%s: invalid %s %q", topUsage, option, value)
+				}
+				if option == "--ui-refresh" && parsed < 100*time.Millisecond {
+					return topOptions{}, fmt.Errorf("%s: --ui-refresh must be at least 100ms", topUsage)
 				}
 				switch option {
 				case "--duration":
@@ -828,6 +930,8 @@ func parseTopArgs(args []string) (topOptions, error) {
 					options.Interval = parsed
 				case "--every":
 					options.Every = parsed
+				case "--ui-refresh":
+					options.UIRefresh = parsed
 				}
 			case "--iterations":
 				iterations, err := strconv.Atoi(value)
@@ -2453,6 +2557,7 @@ func (source liveTopSource) Collect(ctx context.Context, request topview.Collect
 	}
 	vms = inventory.EnrichWithOptions(vms, privacySafeEnrichOptions(source.runtimeConfig))
 	snapshot := topview.Snapshot{
+		Inventory:            projectTopInventory(vms),
 		Status:               statusview.Report{SchemaVersion: statusview.SchemaVersion, Duration: request.Duration.String(), Interval: request.Interval.String(), VMs: []statusview.VMStatus{}},
 		StatusState:          "collection_error",
 		EBPFLatencyRequested: request.IncludeEBPFLatency,
@@ -2543,7 +2648,28 @@ func (source liveTopSource) Collect(ctx context.Context, request topview.Collect
 			snapshot.EBPFLatency = &report
 		}
 	}
+	snapshot.CompletedAtUTC = time.Now().UTC()
 	return snapshot, nil
+}
+
+func projectTopInventory(vms []inventory.VM) []topview.InventoryVM {
+	projected := make([]topview.InventoryVM, 0, len(vms))
+	for _, vm := range vms {
+		projected = append(projected, topview.InventoryVM{
+			Name:      vm.Name,
+			Tenant:    vm.Tenant,
+			Role:      vm.Role,
+			State:     vm.State,
+			Network:   vm.Network,
+			PlannedIP: vm.IPPlan,
+			LeaseIP:   vm.IPLease,
+			MemoryMB:  vm.Memory,
+			VCPUs:     vm.VCPUs,
+			DiskGB:    vm.DiskGB,
+			DiskPath:  vm.Disk,
+		})
+	}
+	return projected
 }
 
 func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) error {
@@ -2553,10 +2679,12 @@ func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) 
 		Duration:           options.Duration,
 		Interval:           options.Interval,
 		Every:              options.Every,
+		UIRefresh:          options.UIRefresh,
 		Iterations:         options.Iterations,
 		Clear:              options.Clear,
 		Sort:               options.Sort,
 		IncludeEBPFLatency: options.IncludeEBPFLatency,
+		Application:        options.Application,
 	}
 	source := liveTopSource{runtimeConfig: runtimeConfig}
 	var err error
@@ -2564,12 +2692,28 @@ func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) 
 	interactive := options.Iterations == 0 && options.Clear && outputIsFile &&
 		topview.IsTerminal(os.Stdin) && topview.IsTerminal(outputFile)
 	if interactive {
-		restore, rawErr := topview.EnterRawMode(os.Stdin)
+		if options.Application {
+			topOptions.Color = terminalColorEnabled()
+			topOptions.RunWorkflow = func(workflowContext context.Context, request topview.LaunchRequest) (topview.WorkflowResult, error) {
+				return runTopWorkflow(workflowContext, runtimeConfig, request)
+			}
+			topOptions.SaveWorkflowDetail = func(detail topview.WorkflowDetail) (string, error) {
+				return saveTopWorkflowDetail(runtimeConfig.Settings.CaptureOutputRoot, detail)
+			}
+		}
+		restoreTerminal, rawErr := topview.EnterRawMode(os.Stdin)
 		if rawErr != nil {
 			return fmt.Errorf("top error: %w", rawErr)
 		}
+		restoreScreen := func() error { return nil }
+		if options.Application {
+			restoreScreen, rawErr = topview.EnterApplicationScreen(w)
+			if rawErr != nil {
+				return fmt.Errorf("top error: %w", errors.Join(rawErr, restoreTerminal()))
+			}
+		}
 		err = topview.RunInteractive(ctx, os.Stdin, w, source, topOptions)
-		err = errors.Join(err, restore())
+		err = errors.Join(err, restoreScreen(), restoreTerminal())
 	} else {
 		err = topview.Run(ctx, w, source, topOptions)
 	}
@@ -2577,6 +2721,244 @@ func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) 
 		return fmt.Errorf("top error: %w", err)
 	}
 	return nil
+}
+
+func topLaunchArgs(request topview.LaunchRequest, captureOutputRoot string) ([]string, error) {
+	vm := strings.TrimSpace(request.VM)
+	requireVM := func() error {
+		if vm == "" {
+			return errors.New("selected workflow requires a VM")
+		}
+		return nil
+	}
+	switch request.Workflow {
+	case topview.WorkflowInvestigate:
+		if err := requireVM(); err != nil {
+			return nil, err
+		}
+		return []string{"diagnose", "noisy-neighbor", "--victim", vm, "--discover-suspects", "--include-ebpf-latency"}, nil
+	case topview.WorkflowBundle:
+		if err := requireVM(); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(captureOutputRoot) == "" {
+			return nil, errors.New("capture output directory is unavailable")
+		}
+		return []string{"capture", "noisy-neighbor", "--victim", vm, "--discover-suspects", "--include-ebpf-latency", "--output-dir", captureOutputRoot}, nil
+	case topview.WorkflowWatch:
+		if err := requireVM(); err != nil {
+			return nil, err
+		}
+		return []string{"watch", "noisy-neighbor", "--victim", vm, "--discover-suspects", "--include-ebpf-latency", "--window", "5s", "--every", "7s", "--iterations", "3"}, nil
+	case topview.WorkflowObserve:
+		if err := requireVM(); err != nil {
+			return nil, err
+		}
+		return []string{"observe", "snapshot", "--victim", vm, "--discover-suspects", "--include-ebpf-latency", "--json"}, nil
+	case topview.WorkflowDoctor:
+		return []string{"doctor"}, nil
+	case topview.WorkflowEBPFDoctor:
+		return []string{"ebpf", "doctor"}, nil
+	case topview.WorkflowInventory:
+		return []string{"inventory"}, nil
+	case topview.WorkflowStatus:
+		return []string{"status"}, nil
+	case topview.WorkflowVersion:
+		return []string{"version"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported application workflow %q", request.Workflow)
+	}
+}
+
+const maxEmbeddedWorkflowOutputBytes = 256 * 1024
+
+type boundedWorkflowWriter struct {
+	contents  strings.Builder
+	remaining int
+	truncated bool
+}
+
+func newBoundedWorkflowWriter(limit int) *boundedWorkflowWriter {
+	return &boundedWorkflowWriter{remaining: limit}
+}
+
+func (writer *boundedWorkflowWriter) Write(value []byte) (int, error) {
+	written := len(value)
+	if writer.remaining <= 0 {
+		writer.truncated = writer.truncated || written > 0
+		return written, nil
+	}
+	kept := len(value)
+	if kept > writer.remaining {
+		kept = writer.remaining
+		writer.truncated = true
+	}
+	_, _ = writer.contents.Write(value[:kept])
+	writer.remaining -= kept
+	return written, nil
+}
+
+func (writer *boundedWorkflowWriter) String() string {
+	result := writer.contents.String()
+	if writer.truncated {
+		result += "\n[workflow output truncated at the bounded application limit]\n"
+	}
+	return result
+}
+
+func runTopWorkflow(ctx context.Context, runtimeConfig solisconfig.Runtime, request topview.LaunchRequest) (topview.WorkflowResult, error) {
+	args, err := topLaunchArgs(request, runtimeConfig.Settings.CaptureOutputRoot)
+	if err != nil {
+		return topview.WorkflowResult{}, fmt.Errorf("command center: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return topview.WorkflowResult{}, err
+	}
+	w := newBoundedWorkflowWriter(maxEmbeddedWorkflowOutputBytes)
+	_, _ = fmt.Fprintf(w, "Solis Command Center: %s\n\n", request.Workflow)
+	var runErr error
+	var detail *topview.WorkflowDetail
+	switch request.Workflow {
+	case topview.WorkflowInvestigate:
+		runErr = runDiagnoseCommand(runtimeConfig, args, w)
+	case topview.WorkflowBundle:
+		runErr = runCaptureCommand(runtimeConfig, args, w)
+	case topview.WorkflowWatch:
+		options, err := parseWatchNoisyNeighborArgsWithDefault(args, runtimeConfig.Settings.CaptureOutputRoot)
+		if err != nil {
+			runErr = err
+			break
+		}
+		stats := watcher.FinalSummary{}
+		runErr = runNoisyNeighborWatch(ctx, runtimeConfig, options, w, &stats)
+		if summaryErr := watcher.WriteFinal(w, stats); runErr == nil && summaryErr != nil {
+			runErr = summaryErr
+		}
+		if runErr != nil {
+			runErr = fmt.Errorf("watch noisy-neighbor error: %w", runErr)
+		}
+	case topview.WorkflowObserve:
+		options, err := parseObserveSnapshotArgs(args)
+		if err != nil {
+			runErr = err
+			break
+		}
+		snapshot, err := collectObserveSnapshot(ctx, runtimeConfig, options)
+		if err != nil {
+			runErr = err
+			break
+		}
+		var detailed bytes.Buffer
+		if err := observe.WriteJSON(&detailed, snapshot); err != nil {
+			runErr = fmt.Errorf("observe snapshot error: %w", err)
+			break
+		}
+		runErr = writeObserveWorkflowSummary(w, snapshot)
+		if runErr == nil {
+			observedAt, parseErr := time.Parse(time.RFC3339Nano, snapshot.ObservedAtUTC)
+			if parseErr != nil {
+				observedAt = time.Now().UTC()
+			}
+			detail = &topview.WorkflowDetail{
+				SuggestedName: fmt.Sprintf("observe-%s-%s.json", diagnose.FormatUTCTimestamp(observedAt), diagnose.SanitizeFilenamePart(request.VM)),
+				Contents:      detailed.Bytes(),
+			}
+		}
+	case topview.WorkflowDoctor:
+		runErr = runDoctor(runtimeConfig, args, w)
+	case topview.WorkflowEBPFDoctor:
+		runErr = runEBPFCommand(runtimeConfig, args, w)
+	case topview.WorkflowInventory:
+		runErr = runInventory(runtimeConfig, w)
+	case topview.WorkflowStatus:
+		options, err := parseStatusArgs(args)
+		if err != nil {
+			runErr = err
+			break
+		}
+		runErr = runStatus(runtimeConfig, options, w)
+	case topview.WorkflowVersion:
+		runErr = runVersion(args, w)
+	default:
+		runErr = fmt.Errorf("command center: unsupported workflow %q", request.Workflow)
+	}
+	if runErr == nil {
+		runErr = ctx.Err()
+	}
+	return topview.WorkflowResult{Output: w.String(), Detail: detail}, runErr
+}
+
+func terminalColorEnabled() bool {
+	if _, disabled := os.LookupEnv("NO_COLOR"); disabled {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
+}
+
+func saveTopWorkflowDetail(root string, detail topview.WorkflowDetail) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", errors.New("configured capture output root is unavailable")
+	}
+	name := strings.TrimSpace(detail.SuggestedName)
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return "", errors.New("detailed observation filename is invalid")
+	}
+	if len(detail.Contents) == 0 {
+		return "", errors.New("detailed observation is empty")
+	}
+	path := filepath.Join(root, name)
+	if err := output.WritePrivateAtomicFile(path, func(writer io.Writer) error {
+		_, err := writer.Write(detail.Contents)
+		return err
+	}); err != nil {
+		return "", fmt.Errorf("save detailed observation: %w", err)
+	}
+	return path, nil
+}
+
+func writeObserveWorkflowSummary(w io.Writer, snapshot observe.ObserveSnapshot) error {
+	suspect := strings.TrimSpace(snapshot.SelectedSuspect)
+	if suspect == "" {
+		suspect = "-"
+	}
+	if _, err := fmt.Fprintf(w,
+		"OBSERVATION SUMMARY\n"+
+			"Observed: %s  Window: %s  Interval: %s\n"+
+			"Selected VM: %s  Selected suspect: %s  Mode: %s\n"+
+			"Evidence quality: %s  Sections unavailable: %d  Correlations: %d\n"+
+			"Storage: available=%t shared_physical_disk=%t device=%s\n"+
+			"QEMU: available=%t dominant_writer=%s victim_write=%.2f MiB/s suspect_write=%.2f MiB/s\n",
+		snapshot.ObservedAtUTC, snapshot.Duration, snapshot.Interval,
+		snapshot.Victim.Name, suspect, snapshot.SuspectMode,
+		snapshot.EvidenceQuality.Overall, len(snapshot.UnavailableSections), len(snapshot.Correlations),
+		snapshot.StorageTopology.Available, snapshot.StorageTopology.SharedPhysicalDisk, snapshot.StorageTopology.PhysicalDisk,
+		snapshot.QEMUEvidence.Available, snapshot.QEMUEvidence.DominantWriter,
+		snapshot.QEMUEvidence.VictimAverageWriteMiBS, snapshot.QEMUEvidence.SuspectAverageWriteMiBS); err != nil {
+		return err
+	}
+	if attribution := snapshot.EBPFVMAttribution; attribution != nil {
+		if _, err := fmt.Fprintf(w,
+			"eBPF VM attribution: available=%t quality=%s host_ops=%d attributed=%.2f%% unattributed=%.2f%%\n"+
+				"VM operations: selected=%d (p95~=%.3f ms) suspect=%d (p95~=%.3f ms) matched_vms=%d\n",
+			attribution.Available, attribution.Quality, attribution.HostTotalOps,
+			attribution.AttributedPercent, attribution.UnattributedPercent,
+			attribution.VictimTotalOps, attribution.VictimP95MS,
+			attribution.SuspectTotalOps, attribution.SuspectP95MS, attribution.MatchedVMCount); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(w, "eBPF VM attribution: not included in this snapshot"); err != nil {
+		return err
+	}
+	privacy := snapshot.Privacy
+	privacySafe := !privacy.ProcessArgumentsCollected && !privacy.EnvironmentCollected &&
+		!privacy.GuestFilesCollected && !privacy.QueryTextCollected && !privacy.TableDataCollected &&
+		!privacy.RequestBodyCollected && !privacy.ResponseBodyCollected && !privacy.SecretsCollected
+	_, err := fmt.Fprintf(w,
+		"Privacy boundary: safe=%t; no arguments, environment, guest files, query/table data, bodies, secrets, or kernel addresses.\n"+
+			"Detailed JSON: available in memory; choose whether to save it below.\n",
+		privacySafe)
+	return err
 }
 
 func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
@@ -3312,7 +3694,14 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Solis I/O
 
 Usage:
-  solis [--config <path>] <command> [options]
+  solis [--config <path>] [command] [options]
+
+Easy operator commands:
+  sudo solis
+  sudo solis monitor
+  sudo solis investigate <victim-vm> [suspect-vm]
+  sudo solis bundle <victim-vm> [suspect-vm]
+  solis doctor
 
 Commands:
   solis version [--json]
@@ -3346,7 +3735,7 @@ Commands:
   solis watch noisy-neighbor --victim <vm> (--suspect <vm> | --discover-suspects) [--window <duration>] [--every <duration>] [--iterations <n>] [--include-ebpf-latency] [--capture-on-alert] [--cooldown <duration>] [--output-dir <dir>] [--verbose]
 
 Configuration precedence:
-  --config <path> > SOLIS_CONFIG > built-in development defaults
+  --config <path> > SOLIS_CONFIG > installed build default > built-in development defaults
 
 Solis I/O is a Linux-only provider-side KVM storage latency attribution tool.`)
 }

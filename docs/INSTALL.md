@@ -9,7 +9,7 @@ module, or persistent eBPF program.
 From the directory containing the downloaded archive and checksum file:
 
 ```bash
-archive=solis-v0.2.0-experimental-linux-amd64.tar.gz
+archive=solis-v0.3.0-experimental-linux-amd64.tar.gz
 sha256sum -c "${archive}.sha256"
 tar -xzf "$archive"
 cd "${archive%.tar.gz}"

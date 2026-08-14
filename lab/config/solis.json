@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "inventory_csv": "vms.csv",
+  "capture_output_root": "../reports/captures",
+  "default_report_dir": "../reports/workload/20260808T174825Z",
+  "libvirt_uri": "qemu:///system",
+  "thresholds": {
+    "write_mib_per_sec": 10,
+    "write_syscalls_per_sec": 10000,
+    "dominance_ratio": 2
+  }
+}

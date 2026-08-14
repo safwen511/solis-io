@@ -30,6 +30,8 @@ id_ed25519
 *.db
 *.sqlite
 *.sqlite3
+__pycache__/
+*.py[cod]
 
 # Editors
 .vscode/
@@ -43,3 +45,4 @@ id_ed25519
 CODEX.md
 
 lab/reports/captures/capture-*/
+lab/reports/captures/observe-*.json

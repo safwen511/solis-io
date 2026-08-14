@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,10 @@ import (
 	"github.com/safwen511/solis-io/internal/ebpf"
 	"github.com/safwen511/solis-io/internal/guest"
 	"github.com/safwen511/solis-io/internal/inventory"
+	"github.com/safwen511/solis-io/internal/observability"
+	"github.com/safwen511/solis-io/internal/observe"
 	"github.com/safwen511/solis-io/internal/storagevm"
+	topview "github.com/safwen511/solis-io/internal/top"
 	"github.com/safwen511/solis-io/internal/version"
 )
 
@@ -49,6 +53,92 @@ func TestRunVersionHumanAndJSON(t *testing.T) {
 	}
 	if err := Run([]string{"version", "--yaml"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "usage: solis version") {
 		t.Fatalf("invalid version flag error = %v", err)
+	}
+}
+
+func TestCommandCenterBuildsOnlyFixedParseableWorkflowArguments(t *testing.T) {
+	tests := []struct {
+		request topview.LaunchRequest
+		check   func([]string) error
+	}{
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowInvestigate, VM: "a-web"}, check: func(args []string) error {
+			_, err := parseDiagnoseNoisyNeighborArgs(args)
+			return err
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowBundle, VM: "a-web"}, check: func(args []string) error {
+			_, err := parseCaptureNoisyNeighborArgs(args)
+			return err
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowWatch, VM: "a-web"}, check: func(args []string) error {
+			options, err := parseWatchNoisyNeighborArgs(args)
+			if err == nil && options.Iterations != 3 {
+				return errors.New("embedded watch is not bounded to three iterations")
+			}
+			return err
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowObserve, VM: "a-web"}, check: func(args []string) error {
+			_, err := parseObserveSnapshotArgs(args)
+			return err
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowDoctor}, check: func(args []string) error {
+			if strings.Join(args, " ") != "doctor" {
+				return errors.New("unexpected doctor arguments")
+			}
+			return nil
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowEBPFDoctor}, check: func(args []string) error {
+			if strings.Join(args, " ") != "ebpf doctor" {
+				return errors.New("unexpected eBPF doctor arguments")
+			}
+			return nil
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowInventory}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowStatus}, check: func(args []string) error {
+			_, err := parseStatusArgs(args)
+			return err
+		}},
+		{request: topview.LaunchRequest{Workflow: topview.WorkflowVersion}},
+	}
+	for _, test := range tests {
+		args, err := topLaunchArgs(test.request, "/var/lib/solis/captures")
+		if err != nil {
+			t.Errorf("topLaunchArgs(%q) error = %v", test.request.Workflow, err)
+			continue
+		}
+		if len(args) == 0 {
+			t.Errorf("topLaunchArgs(%q) returned no arguments", test.request.Workflow)
+			continue
+		}
+		if test.check != nil {
+			if err := test.check(args); err != nil {
+				t.Errorf("topLaunchArgs(%q) = %v: %v", test.request.Workflow, args, err)
+			}
+		}
+	}
+
+	if _, err := topLaunchArgs(topview.LaunchRequest{Workflow: topview.WorkflowInvestigate}, "/tmp/captures"); err == nil {
+		t.Fatal("VM workflow accepted an empty selection")
+	}
+	if _, err := topLaunchArgs(topview.LaunchRequest{Workflow: topview.WorkflowBundle, VM: "a-web"}, ""); err == nil {
+		t.Fatal("bundle workflow accepted an empty capture root")
+	}
+	if _, err := topLaunchArgs(topview.LaunchRequest{Workflow: "arbitrary"}, "/tmp/captures"); err == nil {
+		t.Fatal("arbitrary workflow was accepted")
+	}
+}
+
+func TestBoundedWorkflowWriterPreservesPrefixAndMarksTruncation(t *testing.T) {
+	writer := newBoundedWorkflowWriter(5)
+	value := []byte("abcdefgh")
+	written, err := writer.Write(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != len(value) {
+		t.Fatalf("Write returned %d, want %d", written, len(value))
+	}
+	if got := writer.String(); !strings.HasPrefix(got, "abcde") || !strings.Contains(got, "output truncated") {
+		t.Fatalf("bounded output = %q", got)
 	}
 }
 
@@ -237,6 +327,77 @@ func TestRunObserveSnapshotRejectsUnknownTargetsBeforeCollection(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Errorf("error = %v, want %q", err, test.want)
 		}
+	}
+}
+
+func TestObserveWorkflowSummaryIsCompactAndIncludesAttribution(t *testing.T) {
+	snapshot := observe.ObserveSnapshot{
+		ObservedAtUTC: "2026-08-14T01:30:00Z", Duration: "10s", Interval: "2s",
+		Victim: observe.Target{Name: "a-web"}, SelectedSuspect: "b-stress", SuspectMode: "discover-suspects",
+		EvidenceQuality: observe.EvidenceQuality{Overall: observe.EvidenceMeasured},
+		StorageTopology: observe.StorageTopology{Available: true, SharedPhysicalDisk: true, PhysicalDisk: "/dev/nvme0n1"},
+		QEMUEvidence: observe.QEMUEvidence{
+			Available: true, DominantWriter: "b-stress", VictimAverageWriteMiBS: 0.1, SuspectAverageWriteMiBS: 6.25,
+		},
+		EBPFVMAttribution: &observe.EBPFVMAttribution{
+			Available: true, Quality: "available", HostTotalOps: 8100,
+			AttributedPercent: 99.2, UnattributedPercent: 0.8,
+			VictimTotalOps: 20, VictimP95MS: 0.25, SuspectTotalOps: 8000, SuspectP95MS: 20, MatchedVMCount: 3,
+		},
+		Privacy: observability.PrivacyFlags{},
+	}
+	var output bytes.Buffer
+	if err := writeObserveWorkflowSummary(&output, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	for _, want := range []string{
+		"OBSERVATION SUMMARY", "Selected VM: a-web", "Selected suspect: b-stress",
+		"Evidence quality: measured", "dominant_writer=b-stress", "quality=available",
+		"attributed=99.20%", "selected=20", "suspect=8000", "Privacy boundary: safe=true",
+		"Detailed JSON: available in memory",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Observe summary missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `"host_status"`) || strings.Count(text, "\n") > 14 {
+		t.Fatalf("Observe summary dumped detailed JSON instead of a compact report:\n%s", text)
+	}
+}
+
+func TestSaveTopWorkflowDetailUsesPrivateAtomicOutput(t *testing.T) {
+	root := t.TempDir()
+	detail := topview.WorkflowDetail{
+		SuggestedName: "observe-20260814T013000Z-a-web.json",
+		Contents:      []byte("{\n  \"schema_version\": \"1\"\n}\n"),
+	}
+	path, err := saveTopWorkflowDetail(root, detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != filepath.Join(root, detail.SuggestedName) {
+		t.Fatalf("saved path = %q", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("saved mode = %o, want 600", info.Mode().Perm())
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contents, detail.Contents) {
+		t.Fatalf("saved detail = %q", contents)
+	}
+	if _, err := saveTopWorkflowDetail(root, topview.WorkflowDetail{SuggestedName: "../escape.json", Contents: []byte("{}")}); err == nil {
+		t.Fatal("path traversal detail name was accepted")
+	}
+	if _, err := saveTopWorkflowDetail(filepath.Join(root, "missing"), detail); err == nil || !strings.Contains(err.Error(), "parent") {
+		t.Fatalf("missing parent error = %v", err)
 	}
 }
 
@@ -1277,6 +1438,7 @@ func TestParseTopArgs(t *testing.T) {
 		"--duration", "4s",
 		"--interval", "1s",
 		"--every", "6s",
+		"--ui-refresh", "250ms",
 		"--iterations", "3",
 		"--include-ebpf-latency",
 		"--no-clear",
@@ -1285,7 +1447,7 @@ func TestParseTopArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Duration != 4*time.Second || options.Interval != time.Second || options.Every != 6*time.Second ||
+	if options.Duration != 4*time.Second || options.Interval != time.Second || options.Every != 6*time.Second || options.UIRefresh != 250*time.Millisecond ||
 		options.Iterations != 3 || !options.IncludeEBPFLatency || options.Clear || options.Sort != "ops" {
 		t.Fatalf("options = %#v", options)
 	}
@@ -1294,7 +1456,7 @@ func TestParseTopArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if defaults.Duration != 3*time.Second || defaults.Interval != time.Second || defaults.Every != 5*time.Second ||
-		defaults.Iterations != 0 || defaults.IncludeEBPFLatency || !defaults.Clear || defaults.Sort != "pressure" {
+		defaults.UIRefresh != 0 || defaults.Iterations != 0 || defaults.IncludeEBPFLatency || !defaults.Clear || defaults.Sort != "pressure" {
 		t.Fatalf("defaults = %#v", defaults)
 	}
 }
@@ -1314,6 +1476,7 @@ func TestParseTopBooleanValuesAndValidation(t *testing.T) {
 		{args: []string{"top", "--duration", "1s", "--interval", "2s"}, want: "cannot exceed duration"},
 		{args: []string{"top", "--sort", "tenant"}, want: "invalid --sort field"},
 		{args: []string{"top", "--iterations", "0"}, want: "invalid --iterations"},
+		{args: []string{"top", "--ui-refresh", "50ms"}, want: "must be at least 100ms"},
 		{args: []string{"top", "--clear", "--no-clear"}, want: "cannot be used together"},
 		{args: []string{"top", "--json"}, want: "unknown option --json"},
 	} {
@@ -1331,6 +1494,151 @@ func TestTopHelpUsesImplementedCommandUsage(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != topUsage {
 		t.Fatalf("help = %q, want %q", strings.TrimSpace(stdout.String()), topUsage)
 	}
+}
+
+func TestOperatorCommandExpansion(t *testing.T) {
+	monitor, err := expandOperatorCommand([]string{"monitor", "--sort", "ops"}, "/var/lib/solis/captures")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range [][]string{
+		{"top"}, {"--application"}, {"--sort", "ops"}, {"--duration", "5s"}, {"--every", "7s"}, {"--ui-refresh", "200ms"}, {"--include-ebpf-latency"},
+	} {
+		if !containsArguments(monitor, want) {
+			t.Errorf("monitor expansion %v missing %v", monitor, want)
+		}
+	}
+	monitorOptions, err := parseTopArgs(monitor)
+	if err != nil {
+		t.Fatalf("expanded monitor did not parse: %v", err)
+	}
+	if monitorOptions.Duration != 5*time.Second || monitorOptions.Every != 7*time.Second || monitorOptions.UIRefresh != 200*time.Millisecond ||
+		!monitorOptions.IncludeEBPFLatency || !monitorOptions.Application {
+		t.Fatalf("monitor defaults = %#v", monitorOptions)
+	}
+
+	investigate, err := expandOperatorCommand([]string{"investigate", "a-web", "--json"}, "/var/lib/solis/captures")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInvestigate := []string{
+		"diagnose", "noisy-neighbor", "--victim", "a-web", "--discover-suspects",
+		"--include-ebpf-latency", "--json",
+	}
+	if strings.Join(investigate, " ") != strings.Join(wantInvestigate, " ") {
+		t.Fatalf("investigate expansion = %v, want %v", investigate, wantInvestigate)
+	}
+	investigateOptions, err := parseDiagnoseNoisyNeighborArgs(investigate)
+	if err != nil {
+		t.Fatalf("expanded investigate did not parse: %v", err)
+	}
+	if investigateOptions.Victim != "a-web" || !investigateOptions.DiscoverSuspects || !investigateOptions.IncludeEBPFLatency || !investigateOptions.JSON {
+		t.Fatalf("investigate options = %#v", investigateOptions)
+	}
+
+	bundle, err := expandOperatorCommand([]string{"bundle", "a-web", "b-stress"}, "/var/lib/solis/captures")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBundle := []string{
+		"capture", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
+		"--include-ebpf-latency", "--output-dir", "/var/lib/solis/captures",
+	}
+	if strings.Join(bundle, " ") != strings.Join(wantBundle, " ") {
+		t.Fatalf("bundle expansion = %v, want %v", bundle, wantBundle)
+	}
+	bundleOptions, err := parseCaptureNoisyNeighborArgs(bundle)
+	if err != nil {
+		t.Fatalf("expanded bundle did not parse: %v", err)
+	}
+	if bundleOptions.Victim != "a-web" || bundleOptions.Suspect != "b-stress" ||
+		!bundleOptions.IncludeEBPFLatency || bundleOptions.OutputDirectory != "/var/lib/solis/captures" {
+		t.Fatalf("bundle options = %#v", bundleOptions)
+	}
+}
+
+func TestOperatorCommandOverridesAndValidation(t *testing.T) {
+	monitor, err := expandOperatorCommand([]string{
+		"monitor", "--duration", "9s", "--every", "10s", "--ui-refresh", "300ms", "--include-ebpf-latency=false",
+	}, "captures")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(strings.Join(monitor, " "), "--duration") != 1 ||
+		strings.Count(strings.Join(monitor, " "), "--every") != 1 ||
+		strings.Count(strings.Join(monitor, " "), "--ui-refresh") != 1 ||
+		strings.Count(strings.Join(monitor, " "), "--include-ebpf-latency") != 1 {
+		t.Fatalf("monitor defaults duplicated explicit options: %v", monitor)
+	}
+	bundle, err := expandOperatorCommand([]string{"bundle", "a-web", "--output-dir", "/tmp/captures", "--include-ebpf-latency=false"}, "captures")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(strings.Join(bundle, " "), "--output-dir") != 1 ||
+		strings.Count(strings.Join(bundle, " "), "--include-ebpf-latency") != 1 {
+		t.Fatalf("bundle defaults duplicated explicit options: %v", bundle)
+	}
+	for _, args := range [][]string{{"investigate"}, {"investigate", "--json"}, {"bundle"}} {
+		if _, err := expandOperatorCommand(args, "captures"); err == nil {
+			t.Errorf("expandOperatorCommand(%v) unexpectedly succeeded", args)
+		}
+	}
+}
+
+func TestOperatorCommandHelpAndBareNonTerminalBehavior(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"monitor", "--help"}, want: monitorUsage},
+		{args: []string{"investigate", "--help"}, want: investigateUsage},
+		{args: []string{"bundle", "--help"}, want: bundleUsage},
+	} {
+		var stdout bytes.Buffer
+		if err := Run(test.args, &stdout, &bytes.Buffer{}); err != nil {
+			t.Fatalf("Run(%v) error = %v", test.args, err)
+		}
+		if strings.TrimSpace(stdout.String()) != test.want {
+			t.Errorf("Run(%v) help = %q, want %q", test.args, strings.TrimSpace(stdout.String()), test.want)
+		}
+	}
+	var stdout bytes.Buffer
+	if err := Run(nil, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Easy operator commands:") || !strings.Contains(stdout.String(), "sudo solis monitor") {
+		t.Fatalf("bare non-terminal output did not remain helpful usage:\n%s", stdout.String())
+	}
+}
+
+func TestTopInventoryProjectionExcludesProcessAndCgroupInternals(t *testing.T) {
+	projected := projectTopInventory([]inventory.VM{{
+		Name: "a-web", Tenant: "tenant-a", Role: "web", State: "running", Network: "tenant-a-net",
+		IPPlan: "192.168.130.20", IPLease: "192.168.130.20", Memory: "2048", VCPUs: "2",
+		DiskGB: "20", Disk: "/images/a-web.qcow2", QEMUPID: "1234", QEMUCmdline: "forbidden internal arguments",
+	}})
+	if len(projected) != 1 {
+		t.Fatalf("projection = %#v", projected)
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower := strings.ToLower(string(encoded))
+	for _, forbidden := range []string{"qemu_pid", "qemupid", "cmdline", "forbidden internal arguments", "cgroup", "request_pointer"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("inventory projection contains forbidden field %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func containsArguments(arguments, sequence []string) bool {
+	for index := 0; index+len(sequence) <= len(arguments); index++ {
+		if strings.Join(arguments[index:index+len(sequence)], "\x00") == strings.Join(sequence, "\x00") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseVMStorageStatsArgs(t *testing.T) {

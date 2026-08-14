@@ -2,7 +2,7 @@
 
 Solis I/O is a single-host Linux/KVM/libvirt observability tool that correlates provider-side block latency with local VM ownership to investigate storage noisy-neighbor incidents.
 
-> **Current tagged release:** `v0.2.0-experimental` — working and repeatably validated in the included lab, but not production-ready. The current source milestone additionally includes the read-only `solis top` dashboard described below.
+> **Current release milestone:** `v0.3.0-experimental` — working and repeatably validated in the included lab, but not production-ready.
 
 ## What problem it solves
 
@@ -18,7 +18,7 @@ Solis combines libvirt inventory, storage topology, QEMU process accounting, cgr
 
 ## Current milestone
 
-`v0.2.0-experimental` provides a working experimental single-host investigation path:
+`v0.3.0-experimental` provides a working experimental single-host investigation path:
 
 - Real typed-BTF eBPF programs attach to `block_rq_issue` and `block_rq_complete`.
 - Issue and completion events are correlated inside the kernel to measure request latency.
@@ -35,9 +35,17 @@ Solis combines libvirt inventory, storage topology, QEMU process accounting, cgr
 - A deterministic Linux/amd64 archive workflow embeds the authentic eBPF ELF and records release identity and checksums.
 - The current source includes a read-only, keyboard-navigable `solis top`
   dashboard that refreshes bounded QEMU pressure and optional VM-attributed
-  eBPF latency windows.
+  eBPF latency windows. It also includes the shorter `monitor`, `investigate`,
+  and `bundle` operator commands, a bounded derived state-change feed, and a
+  generic selected-VM investigation panel with recent evidence windows and
+  same-storage peers. The bare interactive application keeps the Solis wordmark
+  visible and adds a fixed allowlisted Command Center for existing workflows;
+  it does not provide arbitrary command execution or VM controls.
+- An opt-in lab-only steady-traffic service can keep both tenant application
+  paths active at a low bounded rate. A database timer retains only two hours
+  of demonstration rows; it is not installed by the Solis binary.
 
-The tagged `v0.2.0-experimental` archive predates `solis top`; build the current source to exercise the dashboard until a newer experimental release is tagged. The following remain deliberately out of scope: a daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, operator-driven observability and attribution tool.
+The following remain deliberately out of scope: a daemon or service, multi-host collection, a controller, remote agents, VM control operations, automatic remediation, and package-manager integration. Solis remains a local, operator-driven observability and attribution tool.
 
 ## Architecture
 
@@ -75,6 +83,23 @@ Attribution quality is conservative:
 - `unavailable`: more than 25%, no completed attributed events, no VM match, or an unsupported ownership path
 
 Request merging, requeues, stacked storage layers, and kernel-specific layouts can still affect what is attributable. The result is evidence, not perfect attribution or proof of customer impact.
+
+### What Solis uses from Cilium eBPF
+
+The Go module pins `github.com/cilium/ebpf` at `v0.22.0`. Solis uses its
+userspace APIs to parse the embedded authentic ELF (`LoadCollectionSpecFromReader`),
+load and assign programs and maps (`LoadAndAssign`), retain bounded verifier
+diagnostics (`VerifierError`), attach the two typed tracing programs
+(`link.AttachTracing`), inspect kernel BTF (`btf.LoadKernelSpec` plus type and
+member lookups), and read, iterate, and close BPF maps, programs, and links. The
+generator also pins Cilium's `bpf2go` command at `v0.22.0`.
+
+Cilium is not the attribution algorithm, and Solis does not use BCC or libbpf
+Go bindings. The project-owned BPF C program defines request correlation,
+CO-RE metadata reads, blkcg ownership traversal, counters, and aggregate maps.
+Packaged libbpf headers are used only while compiling that source in the
+controlled generator container. Cilium supplies the pure-Go loading,
+typed-tracing attachment, BTF inspection, map access, and lifecycle layer.
 
 ## Example output
 
@@ -130,7 +155,7 @@ the form `vMAJOR.MINOR.PATCH-experimental`:
 mkdir -p dist
 ./scripts/test-release-workflow.sh
 ./scripts/build-release.sh --output-dir dist
-(cd dist && sha256sum -c solis-v0.2.0-experimental-linux-amd64.tar.gz.sha256)
+(cd dist && sha256sum -c solis-v0.3.0-experimental-linux-amd64.tar.gz.sha256)
 ```
 
 The builder verifies that the committed eBPF object is a non-empty ELF and
@@ -142,7 +167,7 @@ ordering, and timestamps are normalized to the tagged commit. Byte-identical
 rebuilds require the same Go toolchain, module inputs, committed eBPF object,
 and release script.
 
-Each archive contains `solis`, `INSTALL.md`, `RELEASE-METADATA.json`, and
+Each archive contains `solis`, `INSTALL.md`, `LICENSE`, `RELEASE-METADATA.json`, and
 internal checksums; the adjacent `.sha256` verifies archive integrity. See
 [`docs/INSTALL.md`](docs/INSTALL.md) for fixed-path atomic installation,
 uninstallation, non-invasive post-install checks, kernel/libvirt/cgroup
@@ -153,10 +178,105 @@ do not need Clang or LLVM because the authentic object is embedded.
 The release workflow was validated by building the same tagged source twice
 and comparing byte-identical archives. This reproducibility statement is
 conditional on the same Go toolchain, module inputs, committed eBPF object,
-and release script; the archive is checksummed but not cryptographically
-signed or accompanied by an SBOM/provenance attestation yet.
+and release script. The release tag is cryptographically signed; the archive
+is checksummed but does not yet have a detached artifact signature, SBOM, or
+provenance attestation.
 
-Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then built-in development defaults. The built-in paths are intended for the repository lab, not installed production use.
+Portable configuration is selected with `--config`, then `SOLIS_CONFIG`, then
+an installer-embedded default path when present, and finally built-in
+development defaults. The built-in paths are intended for the repository lab,
+not installed production use.
+
+### Fast operator workflow
+
+On an interactive terminal, running Solis without a subcommand opens the live
+monitor. `monitor` is the explicit equivalent and enables VM-attributed eBPF
+collection by default:
+
+```bash
+sudo ./solis
+sudo ./solis monitor
+```
+
+For the current development checkout, install a checkout-aware command once
+and then invoke Solis from any directory:
+
+```bash
+./scripts/install-dev-command.sh
+cd /tmp
+sudo solis
+```
+
+The installer atomically rebuilds Solis, installs a root-owned
+`/usr/local/bin/solis` binary, and installs a root-owned
+`/etc/solis/config.json`. That generated configuration contains absolute paths
+to this checkout's inventory and report directories, so they do not depend on
+the caller's working directory. It installs no daemon or service. The installed
+binary never executes a user-writable wrapper or checkout binary under sudo.
+Because this is a development installation, the checkout must remain at the
+same path; use the release installation procedure in
+[`docs/INSTALL.md`](docs/INSTALL.md) for a standalone binary and supply an
+explicit production configuration. A caller-provided `--config` still takes
+precedence over the installed default.
+The installer refuses existing targets unless an intentional update is
+requested with `./scripts/install-dev-command.sh --replace`.
+
+The application keeps Solis branding visible on every interactive frame rather
+than treating it as a transient splash. Wide terminals keep the full block
+wordmark even when their height is modest; narrow terminals use a compact
+persistent brand so the working data remains readable. Boxed Session, Live Evidence, Navigation,
+and active-workspace regions give timing, measurements, navigation, and the VM
+table distinct visual hierarchy. Home shows host/storage status and all VMs in
+the resolved Solis inventory; VM profiles, events, and a Command Center live in
+separate panels so a normal terminal does not scroll on every refresh. Running VMs receive live QEMU
+pressure and, when quality permits, VM-attributed block operations and latency.
+Stopped or paused VMs remain selectable but never receive fabricated zero-I/O
+metrics. Press Enter on a selected VM to open its identity, network, addressing,
+configured capacity, disk-backend, pressure, operation, latency, and attribution
+details. The Command Center exposes fixed allowlisted in-application workflows for investigation,
+private capture, watch, observe, system/eBPF doctors, inventory, status, and
+version. It never accepts a shell command. Before a workflow starts, Solis
+cancels the active evidence window and detaches the collector and eBPF links.
+The workflow then runs asynchronously in a bounded, sanitized output panel
+without leaving the application. Press `b` after completion to return to the
+Command Center and resume live evidence collection. The terminal is restored
+only when the operator quits Solis.
+
+The wide header's upper-right process block reports Solis's own CPU use as a
+percentage of one core, current RSS memory, actual process disk-read and
+disk-write rates, goroutine count, and uptime. These are live aggregate
+self-metrics, not host totals or VM metrics. Disk I/O is process throughput for
+the current interval; it is not evidence-directory size or total disk capacity.
+The self-meter reads no process arguments, environment values, open filenames,
+payloads, or other-process data.
+
+Observe renders a compact evidence summary instead of paging through the full
+JSON snapshot. The detailed JSON remains in memory until the operator answers
+the on-screen prompt: press `s` to save it as a private `0600`
+`observe-<timestamp>-<vm>.json` file directly beneath the configured
+`capture_output_root`, or press `b` to discard it and resume monitoring. The
+save uses the same symlink-resistant, same-parent atomic private writer as
+other hardened single-file output. The parent directory must already exist.
+
+The short investigation commands reuse the existing diagnosis and private
+capture implementations. With one VM argument, Solis discovers a same-storage
+suspect; a second VM argument selects the suspect explicitly:
+
+```bash
+sudo ./solis investigate a-web
+sudo ./solis investigate a-web b-stress
+
+sudo ./solis bundle a-web
+sudo ./solis bundle a-web b-stress
+```
+
+`bundle` writes beneath the configured `capture_output_root`. `investigate`
+and `bundle` enable VM-attributed eBPF evidence by default; pass
+`--include-ebpf-latency=false` for an explicitly non-eBPF run. The established
+long forms remain supported for scripting and fine-grained options. Bare Solis
+prints help instead of starting an endless monitor when input or output is not
+a terminal. These are fixed, allowlisted command aliases—not arbitrary command
+execution.
 
 ### VM and host status
 
@@ -192,22 +312,82 @@ sudo ./solis top \
   --sort ops
 ```
 
+For the normal interactive experience, `sudo ./solis monitor` selects a 5-second
+observation window, a 7-second evidence-collection cadence, a 200 ms display
+refresh, and eBPF attribution by default. The fast display refresh updates
+navigation, collection state, and the age of the last completed measurement;
+it does not present stale evidence as a new 200 ms kernel sample. A custom
+display cadence can be selected with `--ui-refresh 500ms` (minimum 100 ms).
+The lower-level `top` defaults remain unchanged.
+
 Each refresh starts bounded status and eBPF samples in the same local
 observation window. On a real terminal, the dashboard temporarily enables
 character-at-a-time input while preserving normal Ctrl-C signal handling, and
-restores the original terminal settings only after active collector cleanup.
-Use `j`/`k` or the arrow keys to select a VM; `n`, `p`, `w`, `o`, and `l` sort
-by name, pressure, write rate, attributed operations, and p95 latency; `r`
+uses the terminal alternate screen so redraws do not accumulate as repeated
+applications in shell scrollback. It restores the cursor, primary screen, and
+original terminal settings only after active collector cleanup. The header
+separately reports collection state, evidence cadence, display refresh, last
+completion time, and data age. Each complete frame is assembled in memory and
+written to the terminal in one operation. Every occupied row is erased before
+it is repainted, and unused rows below the frame are cleared afterward. This
+prevents shorter rows or panels from retaining stale suffixes without a
+flashing full-screen clear or visible partial-frame tearing during the default
+200 ms display refresh. Terminal dimensions are queried on every frame: a
+narrow resized terminal switches to a compact wordmark, split status
+rows, reduced VM columns, shorter keys, and a compact Command Center instead of
+allowing wide tables to corrupt adjacent rows or pushing controls off-screen.
+Use `j`/`k` or the up/down arrows to select a VM. Tab or left/right cycles Home,
+Investigate VM, Events, and Command Center; the number keys `1` through `4`
+open them directly. Enter investigates the selected VM or runs the selected
+fixed workflow inside Solis. Workflow output has a persistent line-position and
+keyboard hint and is scrollable with `j`/`k` or the up/down arrows; `b` returns
+to the Command Center and resumes monitoring after the workflow completes.
+Observe additionally offers `s` to persist its private detailed snapshot.
+Selected VMs and commands use a `▶` marker, and table columns have explicit
+visual separators. Interactive frames use restrained semantic terminal colors
+for selection, availability, degraded/error states, and section identity;
+redirected output stays plain, and setting `NO_COLOR` disables color. `n`,
+`p`, `w`, `o`, and `l` sort by
+name, pressure, write rate, attributed operations, and p95 latency; `r`
 refreshes, `?` shows help, and `q` exits. The selected-VM panel shows operation
-classes, p50/p95/p99, mapping quality, and bounded device/operation aggregates.
+classes, p50/p95/p99, mapping
+quality, and bounded device/operation aggregates. The event panel retains at
+most 12 controlled state transitions derived from adjacent samples: QEMU
+pressure changes, attribution availability/quality changes, and changes in the
+dominant attributed VM. It is explicitly not a raw kernel event stream or an
+alert/root-cause timeline.
 Redirected output, `--iterations`, and `--no-clear` retain the deterministic
-non-interactive renderer. The dashboard is read-only and has no VM actions,
-arbitrary command execution, capture trigger, daemon, or new verdict logic.
+non-interactive renderer. Live monitoring is read-only and has no VM actions,
+arbitrary command execution, daemon, or new verdict logic. Command Center
+actions reuse established CLI workflows inside a bounded output panel;
+monitoring, diagnosis, readiness,
+inventory, status, watch, observe, and version are read-only until the operator
+explicitly confirms an Observe detail save. Bundle writes a private evidence
+directory through the hardened capture writer; confirmed Observe detail uses
+the hardened private atomic file writer. Parameter-heavy pair/report commands remain listed in the
+Command Center as advanced CLI capabilities rather than receiving guessed
+inputs.
 When the eBPF collector is not requested, denied, degraded, or unavailable,
 that state remains visible and missing per-VM latency is rendered as `-` rather
 than a fabricated zero. Access to per-QEMU `/proc/<pid>/io` counters may also
 require elevated permission; the dashboard marks those VM pressure rows
 unavailable instead of treating them as idle.
+
+When running the lab fio helper in the background beside the interactive
+application, detach its stdin so the shell cannot suspend its SSH process for
+attempting terminal input:
+
+```bash
+./lab/scripts/run-fio-noise.sh b-stress 60 --durable --rate-iops 3200 \
+  </dev/null >/tmp/solis-app-fio.txt 2>&1 &
+fio_pid=$!
+sleep 10
+sudo ./solis
+wait "$fio_pid"
+```
+
+The helper itself also invokes SSH with detached stdin; the explicit redirect
+makes that ownership clear in copied operator commands.
 
 ### Unified observe snapshot
 
@@ -377,6 +557,122 @@ echo "Client report: $client_report"
 
 The client has a fixed target (`a-web` at `192.168.130.20/write`), bounded duration/rate/concurrency, and produces deterministic aggregate JSON with one-second windows. It retains no request or response bodies, SQL text, table data, or secrets. The default represents steady lab traffic rather than a literal count of production users; increase the rate only after confirming that `a-client` itself is not saturated. This traffic can run continuously across a baseline, `b-stress` pressure, and recovery sequence while Solis captures provider-side evidence.
 
+### Always-on two-tenant lab traffic
+
+For a monitor that always has a small realistic application baseline, deploy
+both tenant web/database services first. Re-running these commands also installs
+and starts a database retention timer that deletes demonstration rows older
+than two hours every 15 minutes:
+
+```bash
+./lab/scripts/deploy-tenant-workload.sh tenant-a
+./lab/scripts/deploy-tenant-workload.sh tenant-b
+```
+
+Review the continuous-client plan without SSH or changes, then deploy it to
+`a-client` and `b-client` at the default two requests/second each:
+
+```bash
+./lab/scripts/manage-steady-traffic.sh deploy --tenant all --rate 2 --dry-run
+./lab/scripts/manage-steady-traffic.sh deploy --tenant all --rate 2
+./lab/scripts/manage-steady-traffic.sh status
+```
+
+The fixed paths are `a-client -> a-web -> a-db` and
+`b-client -> b-web -> b-db`. The client services restart after a failure and at
+boot, retain no request or response bodies, and emit only one bounded aggregate
+summary every five minutes. Deploy/start refuses to run unless the matching
+database retention timer is active. Stop or remove only these exact lab
+services with:
+
+```bash
+./lab/scripts/manage-steady-traffic.sh stop
+./lab/scripts/manage-steady-traffic.sh remove
+```
+
+This is an opt-in controlled lab fixture, not a Solis daemon, remote agent,
+production traffic model, or product installation side effect. Even at the
+bounded rate it intentionally writes guest storage; qcow2 allocation and
+PostgreSQL vacuum behavior should still be monitored during long soak tests.
+
+### Active moderate-pressure lab
+
+The active-lab manager combines both tenant application paths with an optional
+moderate `b-stress` storage neighbor. Its default pressure is two rate-limited
+4 KiB direct-write jobs at 800 IOPS each: about 1,600 IOPS or 6.25 MiB/s total.
+This is intended to yield thousands of completed requests per five-second eBPF
+window without reproducing the earlier 50–100 MiB/s stress runs.
+
+Review and install the profile. Setup deploys both clients at five
+requests/second and installs, but does not start, the pressure service:
+
+```bash
+./lab/scripts/manage-active-lab.sh setup --dry-run
+./lab/scripts/manage-active-lab.sh setup
+```
+
+All six application VMs and `b-stress` must already be running and reachable
+over the fixed lab SSH addresses. Setup preflights `b-stress`, fio, and its
+passwordless lab sudo before modifying the client tier; it does not start or
+control VMs automatically.
+
+Move between a normal application baseline and moderate neighbor pressure:
+
+```bash
+./lab/scripts/manage-active-lab.sh normal
+./lab/scripts/manage-active-lab.sh pressure
+./lab/scripts/manage-active-lab.sh status
+sudo ./solis
+```
+
+`normal`, `stop`, and `remove` stop the pressure service and delete its exact
+fixed `/var/lib/solis-moderate-pressure/pressure.dat` file. Its dedicated
+directory is private to the fixed lab service and is the only writable path
+granted through the systemd filesystem sandbox. The pressure file is limited
+to 1 GiB and random writes overwrite that fixed range; it does not append
+indefinitely. `normal` leaves tenant traffic active, while `stop` also stops
+both clients. `remove` removes the scenario services and the empty private
+directory. The PostgreSQL two-hour retention timer remains a required
+precondition.
+
+The rate can be changed only during setup and remains bounded:
+
+```bash
+./lab/scripts/manage-active-lab.sh setup \
+  --client-rate 5 \
+  --pressure-iops 800
+```
+
+The profile is controlled traffic for exercising attribution and latency UI;
+it is not a benchmark, production workload model, or proof of application
+impact. Exact latency still depends on the host, storage cache, kernel, and
+other activity.
+
+### Temporary artifact cleanup
+
+Solis validation can leave disposable build caches and deliberately retained
+evidence under `/tmp`. Preview the exact current-user-owned, non-symlink,
+allowlisted paths first; the helper defaults to a dry run:
+
+```bash
+./lab/scripts/cleanup-solis-temp.sh
+./lab/scripts/cleanup-solis-temp.sh --kind evidence --older-than-days 7
+```
+
+Apply only after reviewing that preview. Do not run this helper with `sudo`:
+
+```bash
+./lab/scripts/cleanup-solis-temp.sh --kind cache --apply
+./lab/scripts/cleanup-solis-temp.sh --kind evidence --older-than-days 7 --apply
+```
+
+The cache class contains only allowlisted Solis Go caches. The evidence class
+contains allowlisted Solis lab captures, reports, and test output directly
+under `/tmp`; it may contain the only copy of a validation result. Unrelated
+paths, symbolic links, paths owned by another user, and guest fio files are not
+removed. The validation and fio helpers separately clean only their fixed guest
+test file when they own the workload.
+
 ### Live application-impact validation
 
 The live-impact harness automates that complete controlled timeline: normal `a-client` traffic, a baseline window, durable `b-stress` pressure, an overlapping Solis noisy-neighbor capture, and a recovery window. Deploy the current client first so its fixed non-payload process identity is available to safe lifecycle checks:
@@ -500,17 +796,23 @@ Solis does not modify VMs, services, storage, kernel settings, or tracing mounts
 - **Performance:** the completed benchmark established safe collector lifecycle
   and stable userspace resource use on one host, but natural storage variance
   prevented a directional latency-overhead conclusion or upper bound.
-- **Release trust:** archives have SHA-256 checksums and deterministic metadata,
-  but are not signed and do not yet include an SBOM or provenance attestation.
+- **Release trust:** the release tag is signed and archives have SHA-256
+  checksums and deterministic metadata, but archive artifacts do not yet have
+  detached signatures and do not include an SBOM or provenance attestation.
   Byte-identical rebuilding depends on matching toolchain and module inputs.
 - **Operator interface:** the current source includes a compact read-only
-  keyboard-navigable dashboard plus CLI/JSON/report workflows. It has no mouse
-  interface, terminal-resize layout engine, API server, automatic remediation,
-  VM control, authentication layer, retention manager, or package-manager
-  lifecycle.
+  keyboard-navigable, multi-panel dashboard plus CLI/JSON/report workflows.
+  The investigation panel retains only eight in-memory completed windows per
+  VM and is not a time-series database.
+  Its bounded event feed contains derived local state transitions rather than
+  raw block events or a durable incident timeline. It has no mouse interface,
+  scrollable/height-aware pane engine, API server, automatic remediation, VM
+  control, authentication layer, retention manager, or package-manager
+  lifecycle. Width changes are handled with a compact adaptive layout.
 - **Lab tooling:** workload and validation scripts use the included fixed VM
   names, addresses, and files. They are controlled lab fixtures, not a generic
-  production workload framework.
+  production workload framework. The optional steady-traffic systemd units and
+  two-hour request-log retention exist only inside the lab VMs.
 
 ## Roadmap
 
@@ -527,10 +829,20 @@ With the first read-only terminal dashboard in place, the priorities are:
    and avoid publishing an overhead bound until variance supports one.
 4. **Release provenance:** automate clean-tag artifact verification, add
    signatures, SBOM/provenance metadata, and fresh-host install smoke tests.
-5. **Operator polish:** add terminal-resize handling and optional report/capture
-   context while keeping the interface read-only and raw counters, caveats,
-   privacy flags, and unavailable sections visible.
+5. **Operator polish:** add clearer compact trend visualization, bounded event
+   filtering, and optional report/capture context
+   while keeping the interface read-only and raw counters, caveats, privacy
+   flags, and unavailable sections visible.
 
 Multi-host orchestration, fleet management, remote agents, automatic VM
 remediation, and broader hypervisor support remain outside the current
 single-host KVM/libvirt roadmap.
+
+## Copyright and license
+
+Copyright (c) 2026 Safwen. All rights reserved.
+
+Solis I/O is proprietary source code. Access to the repository does not grant
+permission to use, copy, modify, redistribute, sublicense, sell, or create
+derivative works. See [`LICENSE`](LICENSE) for the complete terms. Third-party
+dependencies remain governed by their own licenses.

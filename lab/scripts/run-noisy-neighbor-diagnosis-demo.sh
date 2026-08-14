@@ -65,7 +65,7 @@ fi
 
 echo
 echo "=== Starting b-stress fio noise for 20 seconds ==="
-./lab/scripts/run-fio-noise.sh b-stress 20 > /tmp/solis-fio-diagnose-demo.txt 2>&1 &
+./lab/scripts/run-fio-noise.sh b-stress 20 </dev/null > /tmp/solis-fio-diagnose-demo.txt 2>&1 &
 fio_pid=$!
 
 echo "fio PID: $fio_pid"

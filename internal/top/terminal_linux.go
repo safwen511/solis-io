@@ -4,6 +4,7 @@ package top
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -16,6 +17,41 @@ func IsTerminal(file *os.File) bool {
 	}
 	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
 	return err == nil
+}
+
+// TerminalDimensions returns the current terminal cell dimensions for writer.
+// It is intentionally queried for every application frame so a resize does
+// not require a signal handler or retain stale layout state.
+func TerminalDimensions(writer io.Writer) (width, height int, available bool) {
+	file, ok := writer.(*os.File)
+	if !ok || file == nil {
+		return 0, 0, false
+	}
+	size, err := unix.IoctlGetWinsize(int(file.Fd()), unix.TIOCGWINSZ)
+	if err != nil || size.Col == 0 || size.Row == 0 {
+		return 0, 0, false
+	}
+	return int(size.Col), int(size.Row), true
+}
+
+// EnterApplicationScreen switches an interactive dashboard to the terminal's
+// alternate screen and hides the cursor. Repeated dashboard redraws therefore
+// do not accumulate in normal shell scrollback. The returned function always
+// restores the cursor and the primary screen.
+func EnterApplicationScreen(dst io.Writer) (func() error, error) {
+	if dst == nil {
+		return nil, fmt.Errorf("terminal output is required")
+	}
+	if _, err := fmt.Fprint(dst, "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H"); err != nil {
+		return nil, fmt.Errorf("enter terminal application screen: %w", err)
+	}
+	restore := func() error {
+		if _, err := fmt.Fprint(dst, "\x1b[?25h\x1b[?1049l"); err != nil {
+			return fmt.Errorf("restore terminal application screen: %w", err)
+		}
+		return nil
+	}
+	return restore, nil
 }
 
 // EnterRawMode enables character-at-a-time input while preserving signal

@@ -23,6 +23,11 @@ const (
 	defaultLibvirtURI      = "qemu:///system"
 )
 
+// InstalledDefaultPath may be set at build time for an installed binary. It is
+// intentionally empty in normal development and release builds unless an
+// installer explicitly supplies a root-owned default configuration path.
+var InstalledDefaultPath string
+
 // Thresholds controls conservative QEMU writer attribution.
 type Thresholds struct {
 	WriteMiBPerSecond      float64 `json:"write_mib_per_sec"`
@@ -84,6 +89,9 @@ func Resolve(args []string, environmentPath string) (Runtime, []string, error) {
 	path := strings.TrimSpace(flagPath)
 	if path == "" {
 		path = strings.TrimSpace(environmentPath)
+	}
+	if path == "" {
+		path = strings.TrimSpace(InstalledDefaultPath)
 	}
 	if path == "" {
 		return DevelopmentDefaults(), remaining, nil

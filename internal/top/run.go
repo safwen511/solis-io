@@ -21,6 +21,7 @@ func Run(ctx context.Context, dst io.Writer, source Source, options Options) err
 	}
 
 	iteration := 0
+	resourceMeter := newProcessResourceMeter(time.Now())
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,7 +53,11 @@ func Run(ctx context.Context, dst io.Writer, source Source, options Options) err
 				return err
 			}
 		}
-		if err := WriteFrame(dst, view, Frame{Iteration: iteration, Every: options.Every, Sort: options.Sort}); err != nil {
+		if err := WriteFrame(dst, view, Frame{
+			Iteration: iteration, Every: options.Every, Sort: options.Sort,
+			Application: options.Application, ShowBanner: options.Application && iteration == 1,
+			ProcessResources: resourceMeter.Sample(time.Now()),
+		}); err != nil {
 			return err
 		}
 		if options.Iterations > 0 && iteration >= options.Iterations {
@@ -82,6 +87,9 @@ func validateOptions(source Source, options Options) error {
 	}
 	if options.Every <= 0 {
 		return errors.New("top refresh interval must be positive")
+	}
+	if options.UIRefresh > 0 && options.UIRefresh < 100*time.Millisecond {
+		return errors.New("top UI refresh must be zero or at least 100ms")
 	}
 	if options.Iterations < 0 {
 		return errors.New("top iterations must not be negative")

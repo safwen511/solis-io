@@ -19,6 +19,15 @@ const (
 	keySortLatency
 	keyRefresh
 	keyHelp
+	keyNextPanel
+	keyPreviousPanel
+	keyOpenPanel
+	keyBack
+	keyHomePanel
+	keyDetailsPanel
+	keyEventsPanel
+	keyWorkflowsPanel
+	keySaveDetail
 )
 
 func readKeyActions(src io.Reader) <-chan keyAction {
@@ -65,6 +74,22 @@ func keyForByte(value byte) keyAction {
 		return keyRefresh
 	case '?', 'h', 'H':
 		return keyHelp
+	case '\t':
+		return keyNextPanel
+	case '\r', '\n':
+		return keyOpenPanel
+	case 'b', 'B':
+		return keyBack
+	case '1':
+		return keyHomePanel
+	case '2':
+		return keyDetailsPanel
+	case '3':
+		return keyEventsPanel
+	case '4':
+		return keyWorkflowsPanel
+	case 's', 'S':
+		return keySaveDetail
 	default:
 		return keyNone
 	}
@@ -84,6 +109,12 @@ func readEscapeAction(reader *bufio.Reader) keyAction {
 		return keyUp
 	case 'B':
 		return keyDown
+	case 'C':
+		return keyNextPanel
+	case 'D':
+		return keyPreviousPanel
+	case 'Z':
+		return keyPreviousPanel
 	default:
 		return keyNone
 	}

@@ -90,11 +90,11 @@ readonly extracted_package="${test_root}/extracted/${fixture_package}"
 [[ -d "$extracted_package" ]] || fail "release package root is missing"
 
 readonly entries="$(find "$extracted_package" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
-readonly expected_entries=$'INSTALL.md\nLICENSE\nRELEASE-METADATA.json\nSHA256SUMS\nsolis'
+readonly expected_entries=$'INSTALL.md\nLICENSE\nNOTICE\nRELEASE-METADATA.json\nREQUIREMENTS.md\nSHA256SUMS\nsolis'
 [[ "$entries" == "$expected_entries" ]] || fail "release package has unexpected entries"
 
 [[ "$(stat -c '%a' "${extracted_package}/solis")" == "755" ]] || fail "release binary mode is not 0755"
-for file in INSTALL.md LICENSE RELEASE-METADATA.json SHA256SUMS; do
+for file in INSTALL.md LICENSE NOTICE RELEASE-METADATA.json REQUIREMENTS.md SHA256SUMS; do
   [[ "$(stat -c '%a' "${extracted_package}/${file}")" == "644" ]] ||
     fail "release metadata mode is not 0644: ${file}"
 done
@@ -124,7 +124,7 @@ jq -e \
   .version == $version
   and .git_commit == $commit
   and .platform == "linux/amd64"
-  and .license == "Proprietary - All Rights Reserved"
+  and .license == "GPL-3.0-only"
   and .binary.cgo_enabled == false
   and .embedded_ebpf_object.sha256 == $object_sha256
   and .reproducibility.clean_exact_tag_required == true

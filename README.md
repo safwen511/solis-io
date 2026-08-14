@@ -2,7 +2,7 @@
 
 Solis I/O is a single-host Linux/KVM/libvirt observability tool that correlates provider-side block latency with local VM ownership to investigate storage noisy-neighbor incidents.
 
-> **Current release milestone:** `v0.3.0-experimental` — working and repeatably validated in the included lab, but not production-ready.
+> **Current release milestone:** `v1.0.0-experimental` — working and repeatably validated in the included lab, but not production-ready.
 
 ## What problem it solves
 
@@ -18,7 +18,7 @@ Solis combines libvirt inventory, storage topology, QEMU process accounting, cgr
 
 ## Current milestone
 
-`v0.3.0-experimental` provides a working experimental single-host investigation path:
+`v1.0.0-experimental` provides a working experimental single-host investigation path:
 
 - Real typed-BTF eBPF programs attach to `block_rq_issue` and `block_rq_complete`.
 - Issue and completion events are correlated inside the kernel to measure request latency.
@@ -155,7 +155,7 @@ the form `vMAJOR.MINOR.PATCH-experimental`:
 mkdir -p dist
 ./scripts/test-release-workflow.sh
 ./scripts/build-release.sh --output-dir dist
-(cd dist && sha256sum -c solis-v0.3.0-experimental-linux-amd64.tar.gz.sha256)
+(cd dist && sha256sum -c solis-v1.0.0-experimental-linux-amd64.tar.gz.sha256)
 ```
 
 The builder verifies that the committed eBPF object is a non-empty ELF and
@@ -167,7 +167,8 @@ ordering, and timestamps are normalized to the tagged commit. Byte-identical
 rebuilds require the same Go toolchain, module inputs, committed eBPF object,
 and release script.
 
-Each archive contains `solis`, `INSTALL.md`, `LICENSE`, `RELEASE-METADATA.json`, and
+Each archive contains `solis`, `INSTALL.md`, `LICENSE`, `NOTICE`,
+`REQUIREMENTS.md`, `RELEASE-METADATA.json`, and
 internal checksums; the adjacent `.sha256` verifies archive integrity. See
 [`docs/INSTALL.md`](docs/INSTALL.md) for fixed-path atomic installation,
 uninstallation, non-invasive post-install checks, kernel/libvirt/cgroup
@@ -840,9 +841,14 @@ single-host KVM/libvirt roadmap.
 
 ## Copyright and license
 
-Copyright (c) 2026 Safwen. All rights reserved.
+Copyright (C) 2026 Safwen.
 
-Solis I/O is proprietary source code. Access to the repository does not grant
-permission to use, copy, modify, redistribute, sublicense, sell, or create
-derivative works. See [`LICENSE`](LICENSE) for the complete terms. Third-party
-dependencies remain governed by their own licenses.
+Solis I/O is free software licensed under **GPL-3.0-only**. People may inspect,
+run, modify, and redistribute it, but a distributed modified version must keep
+the applicable copyright and license notices, identify its changes, provide
+the corresponding source, and remain under GPLv3. This permits collaboration
+without allowing the original Solis I/O work to be presented as someone
+else's authorship. See [`LICENSE`](LICENSE) for the complete license,
+[`NOTICE`](NOTICE) for project attribution, and
+[`REQUIREMENTS.md`](REQUIREMENTS.md) for runtime, build, generator, and lab
+requirements. Third-party dependencies remain governed by their own licenses.

@@ -9,7 +9,7 @@ module, or persistent eBPF program.
 From the directory containing the downloaded archive and checksum file:
 
 ```bash
-archive=solis-v0.3.0-experimental-linux-amd64.tar.gz
+archive=solis-v1.0.0-experimental-linux-amd64.tar.gz
 sha256sum -c "${archive}.sha256"
 tar -xzf "$archive"
 cd "${archive%.tar.gz}"
@@ -20,7 +20,8 @@ sha256sum -c SHA256SUMS
 Replace the example version in those filenames when installing a later
 release. Inspect `RELEASE-METADATA.json` to confirm the Git commit, source
 timestamp, Go toolchain, target platform, binary digest, and embedded eBPF
-object digest.
+object digest. Read `LICENSE` for the GPL-3.0-only terms, `NOTICE` for project
+attribution, and `REQUIREMENTS.md` for runtime and optional tooling details.
 
 ## Host requirements
 

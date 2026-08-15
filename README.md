@@ -2,6 +2,17 @@
 
 **Single-host KVM storage observability and VM attribution for Linux/libvirt.**
 
+<p align="center">
+  <a href="https://www.eodatacenter.com/">
+    <img src="docs/assets/eo-data-center-logo.webp" alt="EO Data Center logo" width="260">
+  </a>
+</p>
+
+<p align="center">
+  <em>Developed by Safwen as an internship project hosted by
+  <a href="https://www.eodatacenter.com/">EO Data Center</a>, Tunisia.</em>
+</p>
+
 Solis helps a provider investigate whether host-side storage pressure affected a
 VM and which neighboring VM contributed to that pressure. It combines live host
 metrics, libvirt inventory, QEMU I/O activity, storage topology, and real
@@ -17,6 +28,7 @@ VM-attributed eBPF block latency in one read-only terminal application.
 ## Contents
 
 - [Why Solis](#why-solis)
+- [Internship context](#internship-context)
 - [What works today](#what-works-today)
 - [Quick start](#quick-start)
 - [Interactive console](#interactive-console)
@@ -30,7 +42,7 @@ VM-attributed eBPF block latency in one read-only terminal application.
 - [Requirements and compatibility](#requirements-and-compatibility)
 - [Limitations](#limitations)
 - [Roadmap](#roadmap)
-- [License](#license)
+- [License and attribution](#license-and-attribution)
 
 ## Why Solis
 
@@ -48,6 +60,18 @@ incident:
 Solis builds that evidence chain without entering guests or inspecting
 application payloads. It keeps unavailable and unattributed work visible instead
 of filling gaps with invented measurements.
+
+## Internship context
+
+Solis I/O was developed by Safwen as an internship project hosted by
+[EO Data Center](https://www.eodatacenter.com/) in Tunisia. The project applies
+Linux, KVM/libvirt, and eBPF observability to a practical data-center problem:
+investigating host storage contention and attributing I/O activity to individual
+virtual machines.
+
+EO Data Center is acknowledged as the internship host organization. Solis I/O
+remains an experimental project and should not be interpreted as an official EO
+Data Center product, service, or support commitment.
 
 ## What works today
 
@@ -637,7 +661,7 @@ defensible rather than broadening it prematurely:
 Multi-host orchestration, remote agents, automatic VM remediation, and broader
 hypervisor support remain outside the current roadmap.
 
-## License
+## License and attribution
 
 Copyright (C) 2026 Safwen.
 
@@ -645,3 +669,9 @@ Solis I/O is licensed under [GPL-3.0-only](LICENSE). Distributed copies and
 modified versions must preserve the applicable notices and comply with GPLv3,
 including corresponding-source and same-license obligations. See [NOTICE](NOTICE)
 for project attribution.
+
+This project was developed as an internship project hosted by
+[EO Data Center](https://www.eodatacenter.com/), Tunisia. The EO Data Center
+name and logo remain the property of EO Data Center; the logo is included only
+to identify and acknowledge the host organization and is not covered by the
+project's GPL-3.0-only license.

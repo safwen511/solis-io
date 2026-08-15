@@ -4,10 +4,22 @@ Copyright (C) 2026 Safwen
 Solis I/O was originally created by Safwen. It is licensed under the GNU
 General Public License, version 3 only (GPL-3.0-only).
 
+Solis I/O was developed as an internship project hosted by EO Data Center,
+Tunisia. EO Data Center is acknowledged as the internship host organization;
+this attribution does not represent Solis I/O as an official EO Data Center
+product, service, or support commitment.
+
 Redistributed copies must retain the applicable copyright and license notices.
 Modified versions must identify that they were changed and must not
 misrepresent their origin as an official Solis I/O release. These statements
 summarize attribution already required by GPLv3 and do not add restrictions to
 the license.
 
-Third-party dependencies and tools remain governed by their own licenses.
+The EO Data Center name and logo remain the property of EO Data Center. The
+logo at docs/assets/eo-data-center-logo.webp was obtained from the official EO
+Data Center website (https://www.eodatacenter.com/site/assets/img/logo.webp)
+and is included solely to identify and acknowledge the internship host. It is
+not covered by the Solis I/O GPL-3.0-only license.
+
+Third-party dependencies, tools, names, and brand assets remain governed by
+their respective licenses and rights.

@@ -18,9 +18,9 @@ VM and which neighboring VM contributed to that pressure. It combines live host
 metrics, libvirt inventory, QEMU I/O activity, storage topology, and real
 VM-attributed eBPF block latency in one read-only terminal application.
 
-| Project status | Current release | Platform | License |
-|---|---|---|---|
-| Experimental; working in the included lab | [`v1.0.0-experimental`](https://github.com/safwen511/solis-io/releases/tag/v1.0.0-experimental) | Linux/amd64, KVM, libvirt, cgroup v2 | [GPL-3.0-only](LICENSE) |
+| Project status | Current release | Platform |
+|---|---|---|
+| Experimental; working in the included lab | [`v1.0.0-experimental`](https://github.com/safwen511/solis-io/releases/tag/v1.0.0-experimental) | Linux/amd64, KVM, libvirt, cgroup v2 |
 
 > Solis is an operator-driven experimental tool, not a production service. It
 > does not control VMs, remediate incidents, or prove customer impact by itself.
@@ -42,7 +42,7 @@ VM-attributed eBPF block latency in one read-only terminal application.
 - [Requirements and compatibility](#requirements-and-compatibility)
 - [Limitations](#limitations)
 - [Roadmap](#roadmap)
-- [License and acknowledgements](#license-and-acknowledgements)
+- [Acknowledgements](#acknowledgements)
 
 ## Why Solis
 
@@ -596,7 +596,7 @@ Its Linux/amd64 archive includes:
 - `solis`;
 - `INSTALL.md`;
 - `REQUIREMENTS.md`;
-- `LICENSE` and `NOTICE`;
+- project documentation and notices;
 - `RELEASE-METADATA.json`; and
 - internal plus archive SHA-256 checksums.
 
@@ -661,12 +661,7 @@ defensible rather than broadening it prematurely:
 Multi-host orchestration, remote agents, automatic VM remediation, and broader
 hypervisor support remain outside the current roadmap.
 
-## License and acknowledgements
-
-Solis I/O is licensed under [GPL-3.0-only](LICENSE). Distributed copies and
-modified versions must preserve the applicable notices and comply with GPLv3,
-including corresponding-source and same-license obligations. See [NOTICE](NOTICE)
-for project acknowledgements.
+## Acknowledgements
 
 Developed by Safwen during an internship at
 [EO Data Center](https://www.eodatacenter.com/), Tunisia, with appreciation for

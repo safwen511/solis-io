@@ -95,10 +95,13 @@ func CollectSummaryWithThresholds(plan Plan, duration, interval time.Duration, t
 	return summarizeSamplesWithThresholds(plan, duration, interval, samples, thresholds), nil
 }
 
+// summarizeSamples summarizes samples without discarding availability state.
 func summarizeSamples(plan Plan, duration, interval time.Duration, samples []intervalSample) SummaryReport {
 	return summarizeSamplesWithThresholds(plan, duration, interval, samples, config.DefaultThresholds())
 }
 
+// summarizeSamplesWithThresholds summarizes samples with thresholds without discarding availability
+// state.
 func summarizeSamplesWithThresholds(plan Plan, duration, interval time.Duration, samples []intervalSample, thresholds config.Thresholds) SummaryReport {
 	thresholds = EffectiveThresholds(thresholds)
 	accumulators := make(map[string]*summaryAccumulator, len(plan.Targets))
@@ -173,6 +176,7 @@ func SummaryForPlan(source SummaryReport, plan Plan) SummaryReport {
 	return finalizeSummary(report)
 }
 
+// finalizeSummary builds finalize summary from validated inputs.
 func finalizeSummary(report SummaryReport) SummaryReport {
 	report.Thresholds = EffectiveThresholds(report.Thresholds)
 	thresholds := report.Thresholds
@@ -244,6 +248,7 @@ func finalizeSummary(report SummaryReport) SummaryReport {
 	return report
 }
 
+// targetHasType reports whether target has type.
 func targetHasType(target Target, targetType string) bool {
 	for _, candidate := range strings.Split(target.TargetType, ",") {
 		if candidate == targetType {
@@ -253,6 +258,7 @@ func targetHasType(target Target, targetType string) bool {
 	return false
 }
 
+// formatWriteRatio formats write ratio using the stable output contract.
 func formatWriteRatio(suspect, victim float64, configured ...config.Thresholds) string {
 	thresholds := thresholdArgument(configured)
 	if suspect < thresholds.WriteMiBPerSecond {
@@ -264,6 +270,7 @@ func formatWriteRatio(suspect, victim float64, configured ...config.Thresholds) 
 	return fmt.Sprintf("%.2fx", suspect/victim)
 }
 
+// suspectIsDominant reports whether suspect is dominant.
 func suspectIsDominant(victim, suspect float64, configured ...config.Thresholds) bool {
 	thresholds := thresholdArgument(configured)
 	if suspect < thresholds.WriteMiBPerSecond {
@@ -297,6 +304,7 @@ func DominantWriteBytesWithThresholds(comparison, candidate float64, thresholds 
 	return suspectIsDominant(comparison, candidate, thresholds)
 }
 
+// formatSyscwRatio formats syscw ratio using the stable output contract.
 func formatSyscwRatio(suspect, victim float64, configured ...config.Thresholds) string {
 	thresholds := thresholdArgument(configured)
 	if suspect < thresholds.WriteSyscallsPerSecond {
@@ -308,6 +316,7 @@ func formatSyscwRatio(suspect, victim float64, configured ...config.Thresholds) 
 	return fmt.Sprintf("%.2fx", suspect/victim)
 }
 
+// suspectSyscwIsDominant reports whether suspect syscw is dominant.
 func suspectSyscwIsDominant(victim, suspect float64, configured ...config.Thresholds) bool {
 	thresholds := thresholdArgument(configured)
 	if suspect < thresholds.WriteSyscallsPerSecond {
@@ -348,6 +357,8 @@ func DominantWriteSyscallsWithThresholds(comparison, candidate float64, threshol
 	return suspectSyscwIsDominant(comparison, candidate, thresholds)
 }
 
+// syscallPressureClassification derives stable operator-facing text for syscall pressure
+// classification.
 func syscallPressureClassification(meaningful bool) string {
 	if meaningful {
 		return "HIGH"
@@ -355,6 +366,7 @@ func syscallPressureClassification(meaningful bool) string {
 	return "NONE"
 }
 
+// conclusionForSignals derives stable operator-facing text for conclusion for signals.
 func conclusionForSignals(victimWrite, suspectWrite, suspectSyscw float64, configured ...config.Thresholds) string {
 	thresholds := thresholdArgument(configured)
 	if suspectWrite >= thresholds.WriteMiBPerSecond {
@@ -385,6 +397,7 @@ func EffectiveThresholds(thresholds config.Thresholds) config.Thresholds {
 	return thresholds
 }
 
+// thresholdArgument builds threshold argument from validated inputs.
 func thresholdArgument(configured []config.Thresholds) config.Thresholds {
 	if len(configured) == 0 {
 		return config.DefaultThresholds()
@@ -444,6 +457,7 @@ func WriteSummary(dst io.Writer, report SummaryReport) error {
 	return w.Flush()
 }
 
+// summaryValue derives stable operator-facing text for summary value.
 func summaryValue(value float64, available bool) string {
 	if !available {
 		return "-"

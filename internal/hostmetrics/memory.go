@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// parseMemInfo parses and validates mem info.
 func parseMemInfo(data []byte, source string) (MemoryStatus, error) {
 	values := make(map[string]uint64)
 	for _, line := range strings.Split(string(data), "\n") {

@@ -38,6 +38,8 @@ func NewBlockLatencyVMContext(victim, suspect inventory.VM) BlockLatencyVMContex
 	return newBlockLatencyVMContext(victim, suspect, hoststorage.Resolve)
 }
 
+// newBlockLatencyVMContext constructs block latency VM context wired to the package's production
+// dependencies.
 func newBlockLatencyVMContext(victim, suspect inventory.VM, resolve storageMappingResolver) BlockLatencyVMContext {
 	victimStorage := resolve(victim.Disk)
 	suspectStorage := resolve(suspect.Disk)
@@ -52,6 +54,7 @@ func newBlockLatencyVMContext(victim, suspect inventory.VM, resolve storageMappi
 	}
 }
 
+// blockLatencyVMTarget builds block latency VM target from validated inputs.
 func blockLatencyVMTarget(vm inventory.VM, mapping hoststorage.Mapping) BlockLatencyVMTarget {
 	disk := mapping.DiskPath
 	if strings.TrimSpace(disk) == "" {
@@ -69,6 +72,7 @@ func blockLatencyVMTarget(vm inventory.VM, mapping hoststorage.Mapping) BlockLat
 	}
 }
 
+// sharedDeviceValues derives stable operator-facing text for shared device values.
 func sharedDeviceValues(left, right string) string {
 	leftValues := deviceValueSet(left)
 	var shared []string
@@ -81,6 +85,7 @@ func sharedDeviceValues(left, right string) string {
 	return strings.Join(shared, ",")
 }
 
+// deviceValueSet builds device value set from validated inputs.
 func deviceValueSet(values string) map[string]bool {
 	result := make(map[string]bool)
 	for _, value := range strings.Split(values, ",") {

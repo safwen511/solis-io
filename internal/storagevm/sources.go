@@ -29,8 +29,10 @@ type fileReader interface {
 
 type osFileReader struct{}
 
+// ReadFile reads file from its configured source.
 func (osFileReader) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
 
+// Inode returns the filesystem inode used as the stable cgroup identity.
 func (osFileReader) Inode(path string) (uint64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -49,6 +51,7 @@ type virshBlockSource interface {
 
 type execVirshBlockSource struct{}
 
+// ReadBlockStats reads block stats from its configured source.
 func (execVirshBlockSource) ReadBlockStats(ctx context.Context, vm, uri string) ([]byte, error) {
 	args := []string{}
 	if strings.TrimSpace(uri) != "" {
@@ -75,6 +78,7 @@ type qemuIOSource interface {
 
 type procQEMUIOSource struct{}
 
+// Read reads bounded source data and propagates access failures.
 func (procQEMUIOSource) Read(pid string) (qemuio.Counters, error) {
 	return qemuio.ReadProcessIO(pid)
 }
@@ -85,6 +89,7 @@ type qemuIdentitySource interface {
 
 type procQEMUIdentitySource struct{}
 
+// Validate reports whether the receiver satisfies its required invariants.
 func (procQEMUIdentitySource) Validate(mapping ebpf.VMBlockCgroupMapping) (ebpf.QEMUProcessIdentity, error) {
 	return ebpf.ValidateMappedQEMUProcess(mapping)
 }
@@ -95,6 +100,7 @@ type windowWaiter interface {
 
 type timerWindowWaiter struct{}
 
+// Wait completes wait and returns any failure to its caller.
 func (timerWindowWaiter) Wait(ctx context.Context, duration, interval time.Duration) error {
 	remaining := duration
 	for remaining > 0 {
@@ -125,6 +131,7 @@ type sysfsDeviceResolver struct {
 
 var physicalLikeDeviceName = regexp.MustCompile(`^(?:nvme[0-9]+n[0-9]+|sd[a-z]+|hd[a-z]+|vd[a-z]+|xvd[a-z]+)$`)
 
+// Resolve resolves source identities from validated inputs and reports unsupported layouts.
 func (resolver sysfsDeviceResolver) Resolve(deviceID string) HostDevice {
 	device := HostDevice{DeviceID: deviceID, LayerKind: "unknown"}
 	target, err := filepath.EvalSymlinks(filepath.Join(resolver.sysDevRoot, deviceID))

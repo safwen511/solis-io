@@ -15,6 +15,7 @@ type networkCounters struct {
 	TXBytes, TXPackets, TXErrors, TXDropped uint64
 }
 
+// parseNetDev parses and validates net dev.
 func parseNetDev(data []byte) (map[string]networkCounters, error) {
 	interfaces := make(map[string]networkCounters)
 	for lineNumber, line := range strings.Split(string(data), "\n") {
@@ -47,6 +48,7 @@ func parseNetDev(data []byte) (map[string]networkCounters, error) {
 	return interfaces, nil
 }
 
+// networkStatuses builds network statuses from validated inputs.
 func networkStatuses(previous, current map[string]networkCounters, interval time.Duration, source string) []NetworkInterfaceStatus {
 	names := make([]string, 0, len(current))
 	for name := range current {
@@ -74,6 +76,7 @@ func networkStatuses(previous, current map[string]networkCounters, interval time
 	return statuses
 }
 
+// applyNetworkRates applies network rates to the current model.
 func applyNetworkRates(status *NetworkInterfaceStatus, previous, current networkCounters, interval time.Duration) error {
 	if interval <= 0 {
 		return errors.New("network rate interval must be positive")

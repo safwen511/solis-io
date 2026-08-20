@@ -21,6 +21,7 @@ type fakeRunner struct {
 	calls   []string
 }
 
+// Run executes the receiver's bounded operation and propagates execution failures.
 func (runner *fakeRunner) Run(_ context.Context, _ guest.Target, command guest.CommandSpec) (guest.Result, error) {
 	key := command.Key()
 	runner.calls = append(runner.calls, key)
@@ -30,6 +31,7 @@ func (runner *fakeRunner) Run(_ context.Context, _ guest.Target, command guest.C
 	return guest.Result{Output: runner.outputs[key]}, nil
 }
 
+// TestParseVersion verifies parse version.
 func TestParseVersion(t *testing.T) {
 	version, err := parseVersion(`"PostgreSQL 16.4, compiled by gcc"` + "\n")
 	if err != nil {
@@ -40,6 +42,7 @@ func TestParseVersion(t *testing.T) {
 	}
 }
 
+// TestParseDatabaseCountersCSVAndOrdering verifies parse database counters csv and ordering.
 func TestParseDatabaseCountersCSVAndOrdering(t *testing.T) {
 	output := "template1,1,20,2,5,50,1\n\"customer,west\",3,100,4,10,1000,0\n"
 	databases, err := parseDatabaseCounters(output)
@@ -51,6 +54,8 @@ func TestParseDatabaseCountersCSVAndOrdering(t *testing.T) {
 	}
 }
 
+// TestParseActivityAggregatesWaitEventsWithoutQueryText verifies parse activity aggregates wait
+// events without query text.
 func TestParseActivityAggregatesWaitEventsWithoutQueryText(t *testing.T) {
 	output := "10,alice,postgres,active,Lock,transactionid,00:00:02.500\n" +
 		"11,bob,postgres,active,Lock,transactionid,00:00:03.000\n" +
@@ -71,6 +76,7 @@ func TestParseActivityAggregatesWaitEventsWithoutQueryText(t *testing.T) {
 	}
 }
 
+// TestParseExtensions verifies parse extensions.
 func TestParseExtensions(t *testing.T) {
 	extensions, err := parseExtensions("plpgsql\npg_stat_statements\n")
 	if err != nil {
@@ -81,6 +87,7 @@ func TestParseExtensions(t *testing.T) {
 	}
 }
 
+// TestParseStatementStatisticsNumericOnly verifies parse statement statistics numeric only.
 func TestParseStatementStatisticsNumericOnly(t *testing.T) {
 	entries, err := parseStatementStatistics("20,5,100.5,20.1,50\n-10,2,8.0,4.0,4\n")
 	if err != nil {
@@ -94,6 +101,8 @@ func TestParseStatementStatisticsNumericOnly(t *testing.T) {
 	}
 }
 
+// TestMissingPGStatStatementsIsSectionUnavailable verifies missing pg stat statements is section
+// unavailable.
 func TestMissingPGStatStatementsIsSectionUnavailable(t *testing.T) {
 	runner, vm, target, database := completeFixture(t, false)
 	status, err := Collect(context.Background(), runner, target, vm, database, fixedOptions())
@@ -110,6 +119,7 @@ func TestMissingPGStatStatementsIsSectionUnavailable(t *testing.T) {
 	}
 }
 
+// TestPGStatStatementsNumericCollection verifies pg stat statements numeric collection.
 func TestPGStatStatementsNumericCollection(t *testing.T) {
 	runner, vm, target, database := completeFixture(t, true)
 	status, err := Collect(context.Background(), runner, target, vm, database, fixedOptions())
@@ -121,6 +131,7 @@ func TestPGStatStatementsNumericCollection(t *testing.T) {
 	}
 }
 
+// TestPartialQueryFailureDoesNotAbortStatus verifies partial query failure does not abort status.
 func TestPartialQueryFailureDoesNotAbortStatus(t *testing.T) {
 	runner, vm, target, database := completeFixture(t, true)
 	databases, _ := guest.PostgreSQLDatabasesCommand(database.Database)
@@ -134,6 +145,8 @@ func TestPartialQueryFailureDoesNotAbortStatus(t *testing.T) {
 	}
 }
 
+// TestPostgreSQLUnavailableReturnsStructuredStatus verifies PostgreSQL unavailable returns
+// structured status.
 func TestPostgreSQLUnavailableReturnsStructuredStatus(t *testing.T) {
 	runner, vm, target, database := completeFixture(t, true)
 	for key := range runner.outputs {
@@ -148,6 +161,7 @@ func TestPostgreSQLUnavailableReturnsStructuredStatus(t *testing.T) {
 	}
 }
 
+// TestDBStatusJSONDeterministicAndPrivate verifies db status json deterministic and private.
 func TestDBStatusJSONDeterministicAndPrivate(t *testing.T) {
 	runner, vm, target, database := completeFixture(t, true)
 	status, err := Collect(context.Background(), runner, target, vm, database, fixedOptions())
@@ -175,10 +189,12 @@ func TestDBStatusJSONDeterministicAndPrivate(t *testing.T) {
 	}
 }
 
+// fixedOptions builds fixed options from validated inputs.
 func fixedOptions() Options {
 	return Options{CommandTimeout: time.Second, Now: func() time.Time { return time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) }}
 }
 
+// completeFixture builds complete fixture from validated inputs.
 func completeFixture(t *testing.T, statements bool) (*fakeRunner, inventory.VM, guest.Target, solisconfig.DatabaseObservabilityConfig) {
 	t.Helper()
 	vm := inventory.VM{Name: "a-db", Tenant: "tenant-a", Role: "db", IPPlan: "192.0.2.30"}

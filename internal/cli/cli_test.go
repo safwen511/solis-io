@@ -25,10 +25,12 @@ import (
 
 type fakeGuestRunner struct{ outputs map[string]string }
 
+// Run executes the receiver's bounded operation and propagates execution failures.
 func (runner fakeGuestRunner) Run(_ context.Context, _ guest.Target, command guest.CommandSpec) (guest.Result, error) {
 	return guest.Result{Output: runner.outputs[command.Key()]}, nil
 }
 
+// TestRunVersionHumanAndJSON verifies run version human and json.
 func TestRunVersionHumanAndJSON(t *testing.T) {
 	var human bytes.Buffer
 	if err := Run([]string{"version"}, &human, &bytes.Buffer{}); err != nil {
@@ -56,6 +58,8 @@ func TestRunVersionHumanAndJSON(t *testing.T) {
 	}
 }
 
+// TestCommandCenterBuildsOnlyFixedParseableWorkflowArguments verifies command center builds only
+// fixed parseable workflow arguments.
 func TestCommandCenterBuildsOnlyFixedParseableWorkflowArguments(t *testing.T) {
 	tests := []struct {
 		request topview.LaunchRequest
@@ -127,6 +131,8 @@ func TestCommandCenterBuildsOnlyFixedParseableWorkflowArguments(t *testing.T) {
 	}
 }
 
+// TestBoundedWorkflowWriterPreservesPrefixAndMarksTruncation verifies bounded workflow writer
+// preserves prefix and marks truncation.
 func TestBoundedWorkflowWriterPreservesPrefixAndMarksTruncation(t *testing.T) {
 	writer := newBoundedWorkflowWriter(5)
 	value := []byte("abcdefgh")
@@ -142,6 +148,8 @@ func TestBoundedWorkflowWriterPreservesPrefixAndMarksTruncation(t *testing.T) {
 	}
 }
 
+// TestRunInventoryOutsideRepositoryWithExplicitConfig verifies run inventory outside repository
+// with explicit config.
 func TestRunInventoryOutsideRepositoryWithExplicitConfig(t *testing.T) {
 	configDirectory := t.TempDir()
 	inventoryPath := filepath.Join(configDirectory, "vms.csv")
@@ -195,6 +203,7 @@ esac
 	}
 }
 
+// TestParseHostStatusJSON verifies parse host status json.
 func TestParseHostStatusJSON(t *testing.T) {
 	if err := parseHostStatusArgs([]string{"host", "status", "--json"}); err != nil {
 		t.Fatalf("parseHostStatusArgs() error = %v", err)
@@ -211,6 +220,7 @@ func TestParseHostStatusJSON(t *testing.T) {
 	}
 }
 
+// TestParseObserveSnapshot verifies parse observe snapshot.
 func TestParseObserveSnapshot(t *testing.T) {
 	options, err := parseObserveSnapshotArgs([]string{
 		"observe", "snapshot", "--victim", "a-web", "--discover-suspects",
@@ -227,6 +237,7 @@ func TestParseObserveSnapshot(t *testing.T) {
 	}
 }
 
+// TestParseObserveSnapshotDefaults verifies parse observe snapshot defaults.
 func TestParseObserveSnapshotDefaults(t *testing.T) {
 	options, err := parseObserveSnapshotArgs([]string{"observe", "snapshot", "--victim", "a-web", "--json"})
 	if err != nil {
@@ -237,6 +248,7 @@ func TestParseObserveSnapshotDefaults(t *testing.T) {
 	}
 }
 
+// TestParseEBPFVMBlockLatency verifies parse ebpfvm block latency.
 func TestParseEBPFVMBlockLatency(t *testing.T) {
 	options, err := parseEBPFVMBlockLatencyArgs([]string{
 		"ebpf", "vm-block-latency", "--victim", "a-web", "--suspect", "b-stress",
@@ -257,6 +269,8 @@ func TestParseEBPFVMBlockLatency(t *testing.T) {
 	}
 }
 
+// TestParseEBPFVMBlockLatencyExplicitBooleanValues verifies parse ebpfvm block latency explicit
+// boolean values.
 func TestParseEBPFVMBlockLatencyExplicitBooleanValues(t *testing.T) {
 	options, err := parseEBPFVMBlockLatencyArgs([]string{"ebpf", "vm-block-latency", "--all-vms=true", "--json=true"})
 	if err != nil {
@@ -267,6 +281,7 @@ func TestParseEBPFVMBlockLatencyExplicitBooleanValues(t *testing.T) {
 	}
 }
 
+// TestParseEBPFVMBlockLatencyValidation verifies parse ebpfvm block latency validation.
 func TestParseEBPFVMBlockLatencyValidation(t *testing.T) {
 	tests := []struct {
 		args []string
@@ -285,6 +300,7 @@ func TestParseEBPFVMBlockLatencyValidation(t *testing.T) {
 	}
 }
 
+// TestParseObserveSnapshotValidation verifies parse observe snapshot validation.
 func TestParseObserveSnapshotValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -306,6 +322,8 @@ func TestParseObserveSnapshotValidation(t *testing.T) {
 	}
 }
 
+// TestRunObserveSnapshotRejectsUnknownTargetsBeforeCollection verifies run observe snapshot rejects
+// unknown targets before collection.
 func TestRunObserveSnapshotRejectsUnknownTargetsBeforeCollection(t *testing.T) {
 	runtime := solisconfig.DevelopmentDefaults()
 	runtime.Settings.InventoryCSV = filepath.Join(t.TempDir(), "vms.csv")
@@ -330,6 +348,8 @@ func TestRunObserveSnapshotRejectsUnknownTargetsBeforeCollection(t *testing.T) {
 	}
 }
 
+// TestObserveWorkflowSummaryIsCompactAndIncludesAttribution verifies observe workflow summary is
+// compact and includes attribution.
 func TestObserveWorkflowSummaryIsCompactAndIncludesAttribution(t *testing.T) {
 	snapshot := observe.ObserveSnapshot{
 		ObservedAtUTC: "2026-08-14T01:30:00Z", Duration: "10s", Interval: "2s",
@@ -366,6 +386,8 @@ func TestObserveWorkflowSummaryIsCompactAndIncludesAttribution(t *testing.T) {
 	}
 }
 
+// TestSaveTopWorkflowDetailUsesPrivateAtomicOutput verifies save top workflow detail uses private
+// atomic output.
 func TestSaveTopWorkflowDetailUsesPrivateAtomicOutput(t *testing.T) {
 	root := t.TempDir()
 	detail := topview.WorkflowDetail{
@@ -401,6 +423,8 @@ func TestSaveTopWorkflowDetailUsesPrivateAtomicOutput(t *testing.T) {
 	}
 }
 
+// TestDiagnosisTargetEnrichmentDoesNotReadProcessArguments verifies diagnosis target enrichment
+// does not read process arguments.
 func TestDiagnosisTargetEnrichmentDoesNotReadProcessArguments(t *testing.T) {
 	directory := t.TempDir()
 	inventoryPath := filepath.Join(directory, "vms.csv")
@@ -438,6 +462,7 @@ esac
 	}
 }
 
+// TestParseObserveWatch verifies parse observe watch.
 func TestParseObserveWatch(t *testing.T) {
 	options, err := parseObserveWatchArgs([]string{
 		"observe", "watch", "--victim", "a-web", "--discover-suspects",
@@ -455,6 +480,7 @@ func TestParseObserveWatch(t *testing.T) {
 	}
 }
 
+// TestParseObserveWatchDefaults verifies parse observe watch defaults.
 func TestParseObserveWatchDefaults(t *testing.T) {
 	options, err := parseObserveWatchArgs([]string{"observe", "watch", "--victim", "a-web", "--json"})
 	if err != nil {
@@ -465,6 +491,7 @@ func TestParseObserveWatchDefaults(t *testing.T) {
 	}
 }
 
+// TestParseObserveWatchValidation verifies parse observe watch validation.
 func TestParseObserveWatchValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -487,6 +514,8 @@ func TestParseObserveWatchValidation(t *testing.T) {
 	}
 }
 
+// TestOpenObserveWatchOutputCreatesSanitizedJSONLFile verifies open observe watch output creates
+// sanitized jsonl file.
 func TestOpenObserveWatchOutputCreatesSanitizedJSONLFile(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "nested", "observe")
 	path, file, err := openObserveWatchOutput(directory, "tenant/a web", time.Date(2026, 8, 9, 10, 11, 12, 0, time.UTC))
@@ -504,6 +533,7 @@ func TestOpenObserveWatchOutputCreatesSanitizedJSONLFile(t *testing.T) {
 	}
 }
 
+// TestParseGuestAndServiceStatusJSON verifies parse guest and service status json.
 func TestParseGuestAndServiceStatusJSON(t *testing.T) {
 	for _, command := range []string{"guest", "service", "db"} {
 		for _, args := range [][]string{{command, "status", "--vm", "a-web", "--json"}, {command, "status", "--json", "--vm", "a-web"}} {
@@ -518,6 +548,8 @@ func TestParseGuestAndServiceStatusJSON(t *testing.T) {
 	}
 }
 
+// TestLoadDatabaseTargetRejectsUnknownAndMissingConfig verifies load database target rejects
+// unknown and missing config.
 func TestLoadDatabaseTargetRejectsUnknownAndMissingConfig(t *testing.T) {
 	database := solisconfig.DatabaseObservabilityConfig{VM: "a-db", Kind: "postgresql", Database: "postgres"}
 	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{database})
@@ -530,6 +562,8 @@ func TestLoadDatabaseTargetRejectsUnknownAndMissingConfig(t *testing.T) {
 	}
 }
 
+// TestLoadDatabaseTargetRejectsUnsupportedKind verifies load database target rejects unsupported
+// kind.
 func TestLoadDatabaseTargetRejectsUnsupportedKind(t *testing.T) {
 	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{{VM: "a-db", Kind: "mysql", Database: "postgres"}})
 	if _, _, _, err := loadDatabaseTarget(runtime, "a-db"); err == nil || !strings.Contains(err.Error(), "unsupported") {
@@ -537,6 +571,8 @@ func TestLoadDatabaseTargetRejectsUnsupportedKind(t *testing.T) {
 	}
 }
 
+// TestConfiguredDatabaseCollectionUsesFakeRunner verifies configured database collection uses fake
+// runner.
 func TestConfiguredDatabaseCollectionUsesFakeRunner(t *testing.T) {
 	database := solisconfig.DatabaseObservabilityConfig{VM: "a-db", Kind: "postgresql", Database: "postgres", CollectPGStatStatements: true}
 	runtime := testDBRuntime(t, []solisconfig.DatabaseObservabilityConfig{database})
@@ -556,6 +592,7 @@ func TestConfiguredDatabaseCollectionUsesFakeRunner(t *testing.T) {
 	}
 }
 
+// TestGuestStatusDisabled verifies guest status disabled.
 func TestGuestStatusDisabled(t *testing.T) {
 	var stdout bytes.Buffer
 	err := Run([]string{"guest", "status", "--vm", "a-web", "--json"}, &stdout, &bytes.Buffer{})
@@ -564,6 +601,7 @@ func TestGuestStatusDisabled(t *testing.T) {
 	}
 }
 
+// TestLoadGuestTargetRejectsUnknownVM verifies load guest target rejects unknown vm.
 func TestLoadGuestTargetRejectsUnknownVM(t *testing.T) {
 	runtime := testGuestRuntime(t, nil)
 	_, _, _, err := loadGuestTarget(runtime, "missing")
@@ -572,6 +610,8 @@ func TestLoadGuestTargetRejectsUnknownVM(t *testing.T) {
 	}
 }
 
+// TestServiceStatusRejectsVMWithoutConfiguredServices verifies service status rejects vm without
+// configured services.
 func TestServiceStatusRejectsVMWithoutConfiguredServices(t *testing.T) {
 	runtime := testGuestRuntime(t, nil)
 	var output bytes.Buffer
@@ -581,6 +621,8 @@ func TestServiceStatusRejectsVMWithoutConfiguredServices(t *testing.T) {
 	}
 }
 
+// TestConfiguredGuestCollectionUsesFakeRunner verifies configured guest collection uses fake
+// runner.
 func TestConfiguredGuestCollectionUsesFakeRunner(t *testing.T) {
 	runtime := testGuestRuntime(t, []solisconfig.ServiceObservabilityConfig{{ID: "web", VM: "a-web"}})
 	vm, guestConfig, refs, err := loadGuestTarget(runtime, "a-web")
@@ -599,6 +641,8 @@ func TestConfiguredGuestCollectionUsesFakeRunner(t *testing.T) {
 	}
 }
 
+// TestConfiguredServiceCollectionUsesFakeRunner verifies configured service collection uses fake
+// runner.
 func TestConfiguredServiceCollectionUsesFakeRunner(t *testing.T) {
 	services := []solisconfig.ServiceObservabilityConfig{{ID: "web", VM: "a-web", Units: []string{"nginx.service"}}}
 	runtime := testGuestRuntime(t, services)
@@ -618,6 +662,7 @@ func TestConfiguredServiceCollectionUsesFakeRunner(t *testing.T) {
 	}
 }
 
+// testGuestRuntime builds test guest runtime from validated inputs.
 func testGuestRuntime(t *testing.T, services []solisconfig.ServiceObservabilityConfig) solisconfig.Runtime {
 	t.Helper()
 	inventoryPath := filepath.Join(t.TempDir(), "vms.csv")
@@ -635,6 +680,7 @@ func testGuestRuntime(t *testing.T, services []solisconfig.ServiceObservabilityC
 	return solisconfig.Runtime{Settings: settings, Source: "test", BaseDir: t.TempDir()}
 }
 
+// testDBRuntime builds test db runtime from validated inputs.
 func testDBRuntime(t *testing.T, databases []solisconfig.DatabaseObservabilityConfig) solisconfig.Runtime {
 	t.Helper()
 	inventoryPath := filepath.Join(t.TempDir(), "vms.csv")
@@ -652,6 +698,7 @@ func testDBRuntime(t *testing.T, databases []solisconfig.DatabaseObservabilityCo
 	return solisconfig.Runtime{Settings: settings, Source: "test", BaseDir: t.TempDir()}
 }
 
+// completeCLIFakeRunner builds complete cli fake runner from validated inputs.
 func completeCLIFakeRunner() fakeGuestRunner {
 	unit, _ := guest.SystemdUnitCommand("nginx.service")
 	return fakeGuestRunner{outputs: map[string]string{
@@ -667,6 +714,7 @@ func completeCLIFakeRunner() fakeGuestRunner {
 	}}
 }
 
+// completeCLIDBFakeRunner builds complete clidb fake runner from validated inputs.
 func completeCLIDBFakeRunner(t *testing.T, database string) fakeGuestRunner {
 	t.Helper()
 	version, err := guest.PostgreSQLVersionCommand(database)
@@ -698,6 +746,8 @@ func completeCLIDBFakeRunner(t *testing.T, database string) fakeGuestRunner {
 	}}
 }
 
+// TestHostStatusOptionsRespectSchemaVersionTwoHostSettings verifies host status options respect
+// schema version two host settings.
 func TestHostStatusOptionsRespectSchemaVersionTwoHostSettings(t *testing.T) {
 	settings := solisconfig.Settings{Observability: &solisconfig.ObservabilityConfig{
 		Host: solisconfig.HostObservabilityConfig{
@@ -713,6 +763,7 @@ func TestHostStatusOptionsRespectSchemaVersionTwoHostSettings(t *testing.T) {
 	}
 }
 
+// TestRunDoctorLabModeIsExplicit verifies run doctor lab mode is explicit.
 func TestRunDoctorLabModeIsExplicit(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "solis.json")
 	if err := os.WriteFile(configPath, []byte(`{
@@ -742,6 +793,7 @@ func TestRunDoctorLabModeIsExplicit(t *testing.T) {
 	}
 }
 
+// writeExecutable renders executable in the package's stable operator-facing format.
 func writeExecutable(t *testing.T, directory, name, content string) {
 	t.Helper()
 	path := filepath.Join(directory, name)
@@ -750,6 +802,7 @@ func writeExecutable(t *testing.T, directory, name, content string) {
 	}
 }
 
+// TestParseEBPFBlockWatchArgs verifies parse ebpf block watch args.
 func TestParseEBPFBlockWatchArgs(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -781,6 +834,7 @@ func TestParseEBPFBlockWatchArgs(t *testing.T) {
 	}
 }
 
+// TestParseRequiredEBPFDuration verifies parse required ebpf duration.
 func TestParseRequiredEBPFDuration(t *testing.T) {
 	duration, err := parseRequiredEBPFDuration(
 		[]string{"ebpf", "block-count", "--duration", "10s"},
@@ -802,6 +856,7 @@ func TestParseRequiredEBPFDuration(t *testing.T) {
 	}
 }
 
+// TestParseEBPFBlockLatencyArgs verifies parse ebpf block latency args.
 func TestParseEBPFBlockLatencyArgs(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -869,6 +924,7 @@ func TestParseEBPFBlockLatencyArgs(t *testing.T) {
 	}
 }
 
+// TestParseQEMUIOWatchArgsDefaults verifies parse qemuio watch args defaults.
 func TestParseQEMUIOWatchArgsDefaults(t *testing.T) {
 	victim, suspect, duration, interval, err := parseQEMUIOWatchArgs([]string{
 		"qemu", "io-watch", "--victim", "tenant-a", "--suspect", "b-stress",
@@ -884,6 +940,8 @@ func TestParseQEMUIOWatchArgsDefaults(t *testing.T) {
 	}
 }
 
+// TestParseQEMUIOWatchArgsRejectsLongInterval verifies parse qemuio watch args rejects long
+// interval.
 func TestParseQEMUIOWatchArgsRejectsLongInterval(t *testing.T) {
 	_, _, _, _, err := parseQEMUIOWatchArgs([]string{
 		"qemu", "io-watch",
@@ -897,6 +955,7 @@ func TestParseQEMUIOWatchArgsRejectsLongInterval(t *testing.T) {
 	}
 }
 
+// TestParseQEMUIOSummaryArgsDefaults verifies parse qemuio summary args defaults.
 func TestParseQEMUIOSummaryArgsDefaults(t *testing.T) {
 	victim, suspect, duration, interval, err := parseQEMUIOSummaryArgs([]string{
 		"qemu", "io-summary", "--victim", "tenant-a", "--suspect", "b-stress",
@@ -912,6 +971,7 @@ func TestParseQEMUIOSummaryArgsDefaults(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborArgsDefaults verifies parse diagnose noisy neighbor args defaults.
 func TestParseDiagnoseNoisyNeighborArgsDefaults(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -930,6 +990,8 @@ func TestParseDiagnoseNoisyNeighborArgsDefaults(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborIncludesEBPFLatency verifies parse diagnose noisy neighbor includes
+// ebpf latency.
 func TestParseDiagnoseNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -946,6 +1008,7 @@ func TestParseDiagnoseNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	}
 }
 
+// TestDiagnoseHelpIsAFlag verifies diagnose help is a flag.
 func TestDiagnoseHelpIsAFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := Run([]string{"diagnose", "noisy-neighbor", "--help"}, &stdout, &stderr); err != nil {
@@ -959,6 +1022,7 @@ func TestDiagnoseHelpIsAFlag(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseBooleanForms verifies parse diagnose boolean forms.
 func TestParseDiagnoseBooleanForms(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -984,6 +1048,7 @@ func TestParseDiagnoseBooleanForms(t *testing.T) {
 	}
 }
 
+// TestRelocateLeadingGlobalJSONForDiagnose verifies relocate leading global json for diagnose.
 func TestRelocateLeadingGlobalJSONForDiagnose(t *testing.T) {
 	for _, flag := range []string{"--json", "--json=true"} {
 		args, err := relocateLeadingGlobalJSON([]string{
@@ -1002,6 +1067,7 @@ func TestRelocateLeadingGlobalJSONForDiagnose(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseBooleanFalseAndInvalid verifies parse diagnose boolean false and invalid.
 func TestParseDiagnoseBooleanFalseAndInvalid(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
@@ -1021,6 +1087,8 @@ func TestParseDiagnoseBooleanFalseAndInvalid(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborDiscoversSuspects verifies parse diagnose noisy neighbor discovers
+// suspects.
 func TestParseDiagnoseNoisyNeighborDiscoversSuspects(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1036,6 +1104,8 @@ func TestParseDiagnoseNoisyNeighborDiscoversSuspects(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborAllowsLiveOnlyMode verifies parse diagnose noisy neighbor allows
+// live only mode.
 func TestParseDiagnoseNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1050,6 +1120,8 @@ func TestParseDiagnoseNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborRequiresSuspectMode verifies parse diagnose noisy neighbor requires
+// suspect mode.
 func TestParseDiagnoseNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1061,6 +1133,8 @@ func TestParseDiagnoseNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborRejectsSuspectAndDiscovery verifies parse diagnose noisy neighbor
+// rejects suspect and discovery.
 func TestParseDiagnoseNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1074,6 +1148,7 @@ func TestParseDiagnoseNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborOutputPath verifies parse diagnose noisy neighbor output path.
 func TestParseDiagnoseNoisyNeighborOutputPath(t *testing.T) {
 	options, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1090,6 +1165,8 @@ func TestParseDiagnoseNoisyNeighborOutputPath(t *testing.T) {
 	}
 }
 
+// TestParseDiagnoseNoisyNeighborRejectsOutputConflict verifies parse diagnose noisy neighbor
+// rejects output conflict.
 func TestParseDiagnoseNoisyNeighborRejectsOutputConflict(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1104,6 +1181,7 @@ func TestParseDiagnoseNoisyNeighborRejectsOutputConflict(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborDefaults verifies parse capture noisy neighbor defaults.
 func TestParseCaptureNoisyNeighborDefaults(t *testing.T) {
 	options, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1126,6 +1204,8 @@ func TestParseCaptureNoisyNeighborDefaults(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborDiscoversSuspects verifies parse capture noisy neighbor discovers
+// suspects.
 func TestParseCaptureNoisyNeighborDiscoversSuspects(t *testing.T) {
 	options, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1142,6 +1222,8 @@ func TestParseCaptureNoisyNeighborDiscoversSuspects(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborAllowsLiveOnlyMode verifies parse capture noisy neighbor allows live
+// only mode.
 func TestParseCaptureNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
 	options, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1157,6 +1239,8 @@ func TestParseCaptureNoisyNeighborAllowsLiveOnlyMode(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborRequiresSuspectMode verifies parse capture noisy neighbor requires
+// suspect mode.
 func TestParseCaptureNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	_, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1169,6 +1253,8 @@ func TestParseCaptureNoisyNeighborRequiresSuspectMode(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborRejectsSuspectAndDiscovery verifies parse capture noisy neighbor
+// rejects suspect and discovery.
 func TestParseCaptureNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
 	_, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1183,6 +1269,8 @@ func TestParseCaptureNoisyNeighborRejectsSuspectAndDiscovery(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborIncludesEBPFLatency verifies parse capture noisy neighbor includes
+// ebpf latency.
 func TestParseCaptureNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	options, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1200,6 +1288,8 @@ func TestParseCaptureNoisyNeighborIncludesEBPFLatency(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborExplicitBooleanValues verifies parse capture noisy neighbor explicit
+// boolean values.
 func TestParseCaptureNoisyNeighborExplicitBooleanValues(t *testing.T) {
 	options, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor", "--victim", "a-web", "--suspect", "b-stress",
@@ -1213,6 +1303,8 @@ func TestParseCaptureNoisyNeighborExplicitBooleanValues(t *testing.T) {
 	}
 }
 
+// TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag verifies parse noisy neighbor rejects
+// duplicate ebpf latency flag.
 func TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag(t *testing.T) {
 	_, err := parseDiagnoseNoisyNeighborArgs([]string{
 		"diagnose", "noisy-neighbor",
@@ -1227,6 +1319,8 @@ func TestParseNoisyNeighborRejectsDuplicateEBPFLatencyFlag(t *testing.T) {
 	}
 }
 
+// TestParseCaptureNoisyNeighborRequiresOutputDirectory verifies parse capture noisy neighbor
+// requires output directory.
 func TestParseCaptureNoisyNeighborRequiresOutputDirectory(t *testing.T) {
 	_, err := parseCaptureNoisyNeighborArgs([]string{
 		"capture", "noisy-neighbor",
@@ -1238,6 +1332,7 @@ func TestParseCaptureNoisyNeighborRequiresOutputDirectory(t *testing.T) {
 	}
 }
 
+// TestParseWatchNoisyNeighbor verifies parse watch noisy neighbor.
 func TestParseWatchNoisyNeighbor(t *testing.T) {
 	options, err := parseWatchNoisyNeighborArgs([]string{
 		"watch", "noisy-neighbor",
@@ -1269,6 +1364,8 @@ func TestParseWatchNoisyNeighbor(t *testing.T) {
 	}
 }
 
+// TestParseWatchNoisyNeighborExplicitBooleanValues verifies parse watch noisy neighbor explicit
+// boolean values.
 func TestParseWatchNoisyNeighborExplicitBooleanValues(t *testing.T) {
 	options, err := parseWatchNoisyNeighborArgs([]string{
 		"watch", "noisy-neighbor", "--victim", "a-web", "--discover-suspects=true",
@@ -1282,6 +1379,7 @@ func TestParseWatchNoisyNeighborExplicitBooleanValues(t *testing.T) {
 	}
 }
 
+// TestParseWatchNoisyNeighborDefaults verifies parse watch noisy neighbor defaults.
 func TestParseWatchNoisyNeighborDefaults(t *testing.T) {
 	options, err := parseWatchNoisyNeighborArgs([]string{
 		"watch", "noisy-neighbor",
@@ -1299,6 +1397,8 @@ func TestParseWatchNoisyNeighborDefaults(t *testing.T) {
 	}
 }
 
+// TestParseWatchNoisyNeighborSelectorValidation verifies parse watch noisy neighbor selector
+// validation.
 func TestParseWatchNoisyNeighborSelectorValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1336,6 +1436,8 @@ func TestParseWatchNoisyNeighborSelectorValidation(t *testing.T) {
 	}
 }
 
+// TestWriteWatchCapturePathsIncludesEvidenceJSON verifies write watch capture paths includes
+// evidence json.
 func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
 	var output bytes.Buffer
 	result := capture.Result{
@@ -1357,6 +1459,7 @@ func TestWriteWatchCapturePathsIncludesEvidenceJSON(t *testing.T) {
 	}
 }
 
+// TestParseStatusArgsDefaults verifies parse status args defaults.
 func TestParseStatusArgsDefaults(t *testing.T) {
 	options, err := parseStatusArgs([]string{"status"})
 	if err != nil {
@@ -1370,6 +1473,7 @@ func TestParseStatusArgsDefaults(t *testing.T) {
 	}
 }
 
+// TestParseStatusWatchArgs verifies parse status watch args.
 func TestParseStatusWatchArgs(t *testing.T) {
 	options, err := parseStatusArgs([]string{
 		"status",
@@ -1389,6 +1493,7 @@ func TestParseStatusWatchArgs(t *testing.T) {
 	}
 }
 
+// TestParseStatusWatchRejectsJSON verifies parse status watch rejects json.
 func TestParseStatusWatchRejectsJSON(t *testing.T) {
 	_, err := parseStatusArgs([]string{"status", "--watch", "--json"})
 	want := "solis status --watch does not support --json yet"
@@ -1397,6 +1502,7 @@ func TestParseStatusWatchRejectsJSON(t *testing.T) {
 	}
 }
 
+// TestParseStatusRejectsInvalidSort verifies parse status rejects invalid sort.
 func TestParseStatusRejectsInvalidSort(t *testing.T) {
 	_, err := parseStatusArgs([]string{"status", "--watch", "--sort", "latency"})
 	if err == nil || !strings.Contains(err.Error(), "invalid --sort field \"latency\"") {
@@ -1404,6 +1510,7 @@ func TestParseStatusRejectsInvalidSort(t *testing.T) {
 	}
 }
 
+// TestParseStatusArgsJSONAndTiming verifies parse status args json and timing.
 func TestParseStatusArgsJSONAndTiming(t *testing.T) {
 	options, err := parseStatusArgs([]string{
 		"status", "--json", "--interval", "500ms", "--duration", "2s",
@@ -1416,6 +1523,7 @@ func TestParseStatusArgsJSONAndTiming(t *testing.T) {
 	}
 }
 
+// TestParseStatusArgsValidatesOptions verifies parse status args validates options.
 func TestParseStatusArgsValidatesOptions(t *testing.T) {
 	for _, test := range []struct {
 		args []string
@@ -1432,6 +1540,7 @@ func TestParseStatusArgsValidatesOptions(t *testing.T) {
 	}
 }
 
+// TestParseTopArgs verifies parse top args.
 func TestParseTopArgs(t *testing.T) {
 	options, err := parseTopArgs([]string{
 		"top",
@@ -1461,6 +1570,7 @@ func TestParseTopArgs(t *testing.T) {
 	}
 }
 
+// TestParseTopBooleanValuesAndValidation verifies parse top boolean values and validation.
 func TestParseTopBooleanValuesAndValidation(t *testing.T) {
 	options, err := parseTopArgs([]string{"top", "--include-ebpf-latency=true", "--clear=false"})
 	if err != nil {
@@ -1486,6 +1596,7 @@ func TestParseTopBooleanValuesAndValidation(t *testing.T) {
 	}
 }
 
+// TestTopHelpUsesImplementedCommandUsage verifies top help uses implemented command usage.
 func TestTopHelpUsesImplementedCommandUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := Run([]string{"top", "--help"}, &stdout, &bytes.Buffer{}); err != nil {
@@ -1496,6 +1607,7 @@ func TestTopHelpUsesImplementedCommandUsage(t *testing.T) {
 	}
 }
 
+// TestOperatorCommandExpansion verifies operator command expansion.
 func TestOperatorCommandExpansion(t *testing.T) {
 	monitor, err := expandOperatorCommand([]string{"monitor", "--sort", "ops"}, "/var/lib/solis/captures")
 	if err != nil {
@@ -1557,6 +1669,7 @@ func TestOperatorCommandExpansion(t *testing.T) {
 	}
 }
 
+// TestOperatorCommandOverridesAndValidation verifies operator command overrides and validation.
 func TestOperatorCommandOverridesAndValidation(t *testing.T) {
 	monitor, err := expandOperatorCommand([]string{
 		"monitor", "--duration", "9s", "--every", "10s", "--ui-refresh", "300ms", "--include-ebpf-latency=false",
@@ -1585,6 +1698,8 @@ func TestOperatorCommandOverridesAndValidation(t *testing.T) {
 	}
 }
 
+// TestOperatorCommandHelpAndBareNonTerminalBehavior verifies operator command help and bare non
+// terminal behavior.
 func TestOperatorCommandHelpAndBareNonTerminalBehavior(t *testing.T) {
 	for _, test := range []struct {
 		args []string
@@ -1611,6 +1726,8 @@ func TestOperatorCommandHelpAndBareNonTerminalBehavior(t *testing.T) {
 	}
 }
 
+// TestTopInventoryProjectionExcludesProcessAndCgroupInternals verifies top inventory projection
+// excludes process and cgroup internals.
 func TestTopInventoryProjectionExcludesProcessAndCgroupInternals(t *testing.T) {
 	projected := projectTopInventory([]inventory.VM{{
 		Name: "a-web", Tenant: "tenant-a", Role: "web", State: "running", Network: "tenant-a-net",
@@ -1632,6 +1749,7 @@ func TestTopInventoryProjectionExcludesProcessAndCgroupInternals(t *testing.T) {
 	}
 }
 
+// containsArguments reports whether contains arguments.
 func containsArguments(arguments, sequence []string) bool {
 	for index := 0; index+len(sequence) <= len(arguments); index++ {
 		if strings.Join(arguments[index:index+len(sequence)], "\x00") == strings.Join(sequence, "\x00") {
@@ -1641,6 +1759,7 @@ func containsArguments(arguments, sequence []string) bool {
 	return false
 }
 
+// TestParseVMStorageStatsArgs verifies parse vm storage stats args.
 func TestParseVMStorageStatsArgs(t *testing.T) {
 	options, err := parseVMStorageStatsArgs([]string{
 		"vm", "storage-stats", "--victim", "a-web", "--suspect", "b-stress", "--json",
@@ -1660,6 +1779,7 @@ func TestParseVMStorageStatsArgs(t *testing.T) {
 	}
 }
 
+// TestParseVMStorageStatsArgsValidation verifies parse vm storage stats args validation.
 func TestParseVMStorageStatsArgsValidation(t *testing.T) {
 	for _, test := range []struct {
 		args []string
@@ -1677,6 +1797,7 @@ func TestParseVMStorageStatsArgsValidation(t *testing.T) {
 	}
 }
 
+// TestSelectVMStorageStatsTargets verifies select vm storage stats targets.
 func TestSelectVMStorageStatsTargets(t *testing.T) {
 	vms := []inventory.VM{
 		{Name: "b-stress", State: "running"},
@@ -1706,6 +1827,7 @@ func TestSelectVMStorageStatsTargets(t *testing.T) {
 	}
 }
 
+// TestWriteVMStorageStatsOutputIsPrivate verifies write vm storage stats output is private.
 func TestWriteVMStorageStatsOutputIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "stats.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -1735,6 +1857,8 @@ func TestWriteVMStorageStatsOutputIsPrivate(t *testing.T) {
 	}
 }
 
+// TestWriteVMBlockLatencyOutputIsPrivateAndDeterministic verifies write vm block latency output is
+// private and deterministic.
 func TestWriteVMBlockLatencyOutputIsPrivateAndDeterministic(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "nested", "vm-block.json")
@@ -1781,6 +1905,8 @@ func TestWriteVMBlockLatencyOutputIsPrivateAndDeterministic(t *testing.T) {
 	}
 }
 
+// TestRunEBPFVMBlockLatencyWithoutOutputKeepsJSONOnStdout verifies run ebpfvm block latency without
+// output keeps json on stdout.
 func TestRunEBPFVMBlockLatencyWithoutOutputKeepsJSONOnStdout(t *testing.T) {
 	directory := t.TempDir()
 	inventoryPath := filepath.Join(directory, "vms.csv")

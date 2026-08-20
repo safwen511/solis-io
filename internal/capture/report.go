@@ -159,6 +159,8 @@ func WriteIncidentReport(dst io.Writer, inputs Inputs, evidence Evidence, timest
 	return nil
 }
 
+// writeEBPFVMAttributionEvidence renders eBPF VM attribution evidence in the package's stable
+// operator-facing format.
 func writeEBPFVMAttributionEvidence(dst io.Writer, evidence Evidence) error {
 	report := evidence.Diagnosis
 	if report.EBPFVMAttribution == nil {
@@ -213,6 +215,7 @@ func writeEBPFVMAttributionEvidence(dst io.Writer, evidence Evidence) error {
 	return err
 }
 
+// writeStorageEvidence renders storage evidence in the package's stable operator-facing format.
 func writeStorageEvidence(dst io.Writer, evidence Evidence) error {
 	shared := "-"
 	if evidence.Diagnosis.StorageTopologyAvailable {
@@ -248,6 +251,7 @@ func writeStorageEvidence(dst io.Writer, evidence Evidence) error {
 	return nil
 }
 
+// writeDiscoveryEvidence renders discovery evidence in the package's stable operator-facing format.
 func writeDiscoveryEvidence(dst io.Writer, report *discovery.Report) error {
 	if _, err := fmt.Fprintln(dst, "\n### Suspect discovery result"); err != nil {
 		return err
@@ -294,6 +298,7 @@ func writeDiscoveryEvidence(dst io.Writer, report *discovery.Report) error {
 	return nil
 }
 
+// writeQEMUEvidence renders QEMU evidence in the package's stable operator-facing format.
 func writeQEMUEvidence(dst io.Writer, evidence Evidence, suspect string) error {
 	if _, err := fmt.Fprintln(dst, "\n### QEMU writer/syscall attribution"); err != nil {
 		return err
@@ -329,6 +334,7 @@ func writeQEMUEvidence(dst io.Writer, evidence Evidence, suspect string) error {
 	return nil
 }
 
+// writeEBPFEvidence renders eBPF evidence in the package's stable operator-facing format.
 func writeEBPFEvidence(dst io.Writer, evidence ebpf.BlockLatencyEvidence) error {
 	var rendered bytes.Buffer
 	if err := ebpf.WriteBlockLatencyEvidence(&rendered, evidence); err != nil {
@@ -344,6 +350,7 @@ func writeEBPFEvidence(dst io.Writer, evidence ebpf.BlockLatencyEvidence) error 
 	return err
 }
 
+// recommendation derives stable operator-facing text for recommendation.
 func recommendation(verdict, suspect string) string {
 	if verdict == diagnose.ProbableVerdict || verdict == diagnose.LikelyLiveVerdict {
 		return fmt.Sprintf("Consider throttling, migrating, or investigating the selected suspect VM workload (%s).", markdownText(suspect))
@@ -354,6 +361,7 @@ func recommendation(verdict, suspect string) string {
 	return "Continue monitoring and review the detailed evidence files before taking action."
 }
 
+// selectedSuspect selects suspect using deterministic ordering.
 func selectedSuspect(inputs Inputs, evidence Evidence) string {
 	if evidence.Discovery != nil {
 		if evidence.Discovery.Selected == nil {
@@ -364,6 +372,7 @@ func selectedSuspect(inputs Inputs, evidence Evidence) string {
 	return valueOrDash(inputs.Suspect)
 }
 
+// availableMetric derives stable operator-facing text for available metric.
 func availableMetric(value float64, available bool) string {
 	if !available {
 		return "-"
@@ -371,10 +380,12 @@ func availableMetric(value float64, available bool) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+// markdownCell escapes text that would otherwise change a Markdown table's structure.
 func markdownCell(value string) string {
 	return strings.ReplaceAll(markdownText(value), "|", `\|`)
 }
 
+// markdownText normalizes text so it is safe to embed in the generated Markdown report.
 func markdownText(value string) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if value == "" {

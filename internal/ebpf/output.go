@@ -19,6 +19,7 @@ func WriteVMBlockLatency(dst io.Writer, result BlockLatencyResult, context Block
 	return writeBlockLatency(dst, result, &context)
 }
 
+// writeBlockLatency renders block latency in the package's stable operator-facing format.
 func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockLatencyVMContext) error {
 	if _, err := fmt.Fprintln(dst, "Solis eBPF Block Latency (experimental)"); err != nil {
 		return err
@@ -31,6 +32,8 @@ func writeBlockLatency(dst io.Writer, result BlockLatencyResult, context *BlockL
 	return writeBlockLatencyResult(dst, result)
 }
 
+// writeBlockLatencyResult renders block latency result in the package's stable operator-facing
+// format.
 func writeBlockLatencyResult(dst io.Writer, result BlockLatencyResult) error {
 	if _, err := fmt.Fprintf(
 		dst,
@@ -91,6 +94,8 @@ func LatencyHistogram(result BlockLatencyResult) []LatencyHistogramBucket {
 	return buckets
 }
 
+// writeBlockLatencyVMContext renders block latency VM context in the package's stable
+// operator-facing format.
 func writeBlockLatencyVMContext(dst io.Writer, context BlockLatencyVMContext) error {
 	if _, err := fmt.Fprintf(dst, "\nVM-aware context:\nVictim:  %s\nSuspect: %s\n\nVM storage topology:\n", valueOrDash(context.Victim.Name), valueOrDash(context.Suspect.Name)); err != nil {
 		return err
@@ -147,6 +152,7 @@ func writeBlockLatencyVMContext(dst io.Writer, context BlockLatencyVMContext) er
 	return err
 }
 
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "-" {
@@ -259,6 +265,7 @@ func WriteBlockWatch(dst io.Writer, duration time.Duration, report Report) error
 	return err
 }
 
+// writeChecks renders checks in the package's stable operator-facing format.
 func writeChecks(dst io.Writer, report Report) error {
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(w, "STATUS\tCHECK\tDETAIL"); err != nil {
@@ -272,6 +279,7 @@ func writeChecks(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// readinessText reads iness text from its configured source.
 func readinessText(report Report) string {
 	if Ready(report) {
 		return "READY"

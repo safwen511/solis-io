@@ -427,6 +427,7 @@ func BuildView(snapshot Snapshot, sortField string) (View, error) {
 	return view, nil
 }
 
+// projectDeviceOperations projects device operations into its public evidence representation.
 func projectDeviceOperations(operations []ebpf.VMBlockLatencyDeviceOperation) []DeviceOperationView {
 	projected := make([]DeviceOperationView, 0, len(operations))
 	for _, operation := range operations {
@@ -446,6 +447,7 @@ func projectDeviceOperations(operations []ebpf.VMBlockLatencyDeviceOperation) []
 	return projected
 }
 
+// safePressureReason derives stable operator-facing text for safe pressure reason.
 func safePressureReason(reason string, available bool) string {
 	if !available {
 		return AttributionUnavailable
@@ -458,6 +460,7 @@ func safePressureReason(reason string, available bool) string {
 	}
 }
 
+// normalizedVMState normalizes vm state into its canonical representation.
 func normalizedVMState(state string) string {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "running":
@@ -469,6 +472,7 @@ func normalizedVMState(state string) string {
 	}
 }
 
+// stateForVMState derives stable operator-facing text for state for VM state.
 func stateForVMState(state string) string {
 	switch normalizedVMState(state) {
 	case "running":
@@ -480,6 +484,7 @@ func stateForVMState(state string) string {
 	}
 }
 
+// statusEvidenceState derives stable operator-facing text for status evidence state.
 func statusEvidenceState(snapshot Snapshot) string {
 	if !snapshot.StatusAvailable {
 		return normalizedState(snapshot.StatusState, false)
@@ -503,6 +508,7 @@ func statusEvidenceState(snapshot Snapshot) string {
 	}
 }
 
+// buildHostView builds host view from validated inputs.
 func buildHostView(report *hostmetrics.HostStatus, unavailableState string) HostView {
 	view := HostView{Status: firstNonEmpty(unavailableState, AttributionUnavailable)}
 	if report == nil {
@@ -527,6 +533,7 @@ func buildHostView(report *hostmetrics.HostStatus, unavailableState string) Host
 	return view
 }
 
+// buildStorageViews builds storage views from validated inputs.
 func buildStorageViews(devices map[string]struct{}, report *hostmetrics.HostStatus) []StorageView {
 	byName := make(map[string]hostmetrics.DiskStatus)
 	if report != nil {
@@ -551,10 +558,12 @@ func buildStorageViews(devices map[string]struct{}, report *hostmetrics.HostStat
 	return views
 }
 
+// sectorsPerSecondToMiB builds sectors per second to mi b from validated inputs.
 func sectorsPerSecondToMiB(sectors float64) float64 {
 	return sectors * 512 / (1024 * 1024)
 }
 
+// boolState derives stable operator-facing text for bool state.
 func boolState(available bool) string {
 	if available {
 		return "available"
@@ -562,6 +571,7 @@ func boolState(available bool) string {
 	return AttributionUnavailable
 }
 
+// sortRows sorts rows into stable output order.
 func sortRows(rows []VMRow, field string) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left, right := rows[i], rows[j]
@@ -611,6 +621,7 @@ func sortRows(rows []VMRow, field string) {
 	})
 }
 
+// normalizedState normalizes state into its canonical representation.
 func normalizedState(state string, available bool) string {
 	state = strings.TrimSpace(state)
 	if state != "" {
@@ -622,6 +633,7 @@ func normalizedState(state string, available bool) string {
 	return AttributionUnavailable
 }
 
+// displayText derives stable operator-facing text for display text.
 func displayText(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -642,6 +654,7 @@ func displayText(value string) string {
 	return string(filtered)
 }
 
+// firstNonEmpty returns the first non-empty string in argument order.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -651,6 +664,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// pressureRank builds pressure rank from validated inputs.
 func pressureRank(value string) int {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case statusview.PressureHigh:

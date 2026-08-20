@@ -49,6 +49,7 @@ func LoadBlockFormats() ([]TracepointFormat, error) {
 	return loadBlockFormats(defaultEventsRoot)
 }
 
+// loadBlockFormats loads block formats from its backing source.
 func loadBlockFormats(eventsRoot string) ([]TracepointFormat, error) {
 	formats := make([]TracepointFormat, 0, 2)
 	for _, event := range []string{"block_rq_issue", "block_rq_complete"} {
@@ -115,6 +116,7 @@ func ParseTracepointFormat(src io.Reader) (TracepointFormat, error) {
 	return format, nil
 }
 
+// parseTracepointField parses and validates tracepoint field.
 func parseTracepointField(line string) (TracepointField, error) {
 	matches := formatFieldPattern.FindStringSubmatch(line)
 	if len(matches) != 5 {
@@ -135,6 +137,8 @@ func parseTracepointField(line string) (TracepointField, error) {
 	}, nil
 }
 
+// splitFieldDeclaration builds split field declaration and returns an error when validation or
+// source access fails.
 func splitFieldDeclaration(declaration string) (string, string, error) {
 	separator := strings.LastIndexAny(declaration, " \t")
 	if separator < 1 || separator == len(declaration)-1 {
@@ -164,6 +168,7 @@ func splitFieldDeclaration(declaration string) (string, string, error) {
 	return fieldType, fieldName, nil
 }
 
+// isUsefulBlockField reports whether useful block field.
 func isUsefulBlockField(name string) bool {
 	return usefulBlockFields[name]
 }

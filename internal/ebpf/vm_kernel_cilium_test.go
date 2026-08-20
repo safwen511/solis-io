@@ -23,6 +23,7 @@ type fakeVMBlockObjectLoader struct {
 	loaded    bool
 }
 
+// Load loads the requested resources and propagates validation or loader failures.
 func (loader *fakeVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, error) {
 	loader.loaded = len(object) > 0
 	return loader.resources, loader.err
@@ -44,6 +45,7 @@ type fakeVMBlockCountResources struct {
 	attachDoneCalls  int
 }
 
+// AttachIssue attaches issue and returns an owned handle for cleanup.
 func (resources *fakeVMBlockCountResources) AttachIssue() (io.Closer, error) {
 	resources.attachIssueCalls++
 	if resources.issueErr != nil {
@@ -55,6 +57,7 @@ func (resources *fakeVMBlockCountResources) AttachIssue() (io.Closer, error) {
 	return resources.issueLink, nil
 }
 
+// AttachComplete attaches complete and returns an owned handle for cleanup.
 func (resources *fakeVMBlockCountResources) AttachComplete() (io.Closer, error) {
 	resources.attachDoneCalls++
 	if resources.completeErr != nil {
@@ -66,6 +69,7 @@ func (resources *fakeVMBlockCountResources) AttachComplete() (io.Closer, error) 
 	return resources.completeLink, nil
 }
 
+// ReadStats reads stats from its configured source.
 func (resources *fakeVMBlockCountResources) ReadStats() (VMBlockKernelStats, error) {
 	return VMBlockKernelStats{
 		Counters: resources.counters, HostLatency: resources.latency,
@@ -74,6 +78,7 @@ func (resources *fakeVMBlockCountResources) ReadStats() (VMBlockKernelStats, err
 	}, resources.counterErr
 }
 
+// Close releases the resources owned by the receiver.
 func (resources *fakeVMBlockCountResources) Close() error {
 	resources.closed = true
 	return resources.closeErr
@@ -91,6 +96,7 @@ type fakeVMBlockBTFTypeFinder struct {
 	types    []any
 }
 
+// TypeByName completes type by name and returns any failure to its caller.
 func (finder *fakeVMBlockBTFTypeFinder) TypeByName(name string, target any) error {
 	finder.lookups = append(finder.lookups, name)
 	finder.types = append(finder.types, target)
@@ -109,11 +115,13 @@ func (finder *fakeVMBlockBTFTypeFinder) TypeByName(name string, target any) erro
 	return nil
 }
 
+// Close releases the resources owned by the receiver.
 func (link *fakeVMBlockLink) Close() error {
 	link.closed = true
 	return link.err
 }
 
+// fakeCiliumVMBlockSource builds fake cilium VM block source from validated inputs.
 func fakeCiliumVMBlockSource(resources vmBlockCountResources) (*ciliumVMBlockKernelSource, *fakeVMBlockObjectLoader) {
 	loader := &fakeVMBlockObjectLoader{resources: resources}
 	return &ciliumVMBlockKernelSource{
@@ -126,6 +134,8 @@ func fakeCiliumVMBlockSource(resources vmBlockCountResources) (*ciliumVMBlockKer
 	}, loader
 }
 
+// availableVMBlockBTFCapabilityReport builds available VM block BTF capability report from
+// validated inputs.
 func availableVMBlockBTFCapabilityReport() VMBlockBTFCapabilityReport {
 	report := VMBlockBTFCapabilityReport{Available: true, Status: VMBlockCapabilityAvailable}
 	for _, requirement := range RequiredVMBlockBTFCapabilities() {
@@ -137,6 +147,7 @@ func availableVMBlockBTFCapabilityReport() VMBlockBTFCapabilityReport {
 	return report
 }
 
+// TestCiliumVMBlockUnsupportedEndianness verifies cilium vm block unsupported endianness.
 func TestCiliumVMBlockUnsupportedEndianness(t *testing.T) {
 	source, _ := fakeCiliumVMBlockSource(&fakeVMBlockCountResources{})
 	source.architecture = "s390x"
@@ -149,6 +160,8 @@ func TestCiliumVMBlockUnsupportedEndianness(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockGeneratedObjectUnavailable verifies cilium vm block generated object
+// unavailable.
 func TestCiliumVMBlockGeneratedObjectUnavailable(t *testing.T) {
 	source := &ciliumVMBlockKernelSource{
 		platform:       "linux",
@@ -171,6 +184,7 @@ func TestCiliumVMBlockGeneratedObjectUnavailable(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockBTFMissing verifies cilium vm block btf missing.
 func TestCiliumVMBlockBTFMissing(t *testing.T) {
 	source, _ := fakeCiliumVMBlockSource(&fakeVMBlockCountResources{})
 	source.probeBTF = func() error { return ErrVMBlockBTFMissing }
@@ -180,6 +194,8 @@ func TestCiliumVMBlockBTFMissing(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockDeviceFilterIsRejectedWithoutRequestDereference verifies cilium vm block device
+// filter is rejected without request dereference.
 func TestCiliumVMBlockDeviceFilterIsRejectedWithoutRequestDereference(t *testing.T) {
 	source, _ := fakeCiliumVMBlockSource(&fakeVMBlockCountResources{})
 	report := CollectVMBlockLatencyReportWithKernelSource(
@@ -196,6 +212,8 @@ func TestCiliumVMBlockDeviceFilterIsRejectedWithoutRequestDereference(t *testing
 	}
 }
 
+// TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames verifies resolve vm block typed
+// tracepoints uses kernel typedef names.
 func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
 	finder := &fakeVMBlockBTFTypeFinder{typedefs: testVMBlockTypedTracepointTypedefs()}
 	prototypes, err := resolveVMBlockTypedTracepoints(finder)
@@ -228,6 +246,8 @@ func TestResolveVMBlockTypedTracepointsUsesKernelTypedefNames(t *testing.T) {
 	}
 }
 
+// TestResolveVMBlockTypedTracepointsMissingIsStructured verifies resolve vm block typed tracepoints
+// missing is structured.
 func TestResolveVMBlockTypedTracepointsMissingIsStructured(t *testing.T) {
 	finder := &fakeVMBlockBTFTypeFinder{missing: map[string]error{
 		"btf_trace_block_rq_complete": btf.ErrNotFound,
@@ -238,6 +258,8 @@ func TestResolveVMBlockTypedTracepointsMissingIsStructured(t *testing.T) {
 	}
 }
 
+// TestResolveVMBlockTypedTracepointsRejectsCallbackDataAsProgramArgument verifies resolve vm block
+// typed tracepoints rejects callback data as program argument.
 func TestResolveVMBlockTypedTracepointsRejectsCallbackDataAsProgramArgument(t *testing.T) {
 	typedefs := testVMBlockTypedTracepointTypedefs()
 	issue := typedefs["btf_trace_block_rq_issue"]
@@ -250,6 +272,8 @@ func TestResolveVMBlockTypedTracepointsRejectsCallbackDataAsProgramArgument(t *t
 	}
 }
 
+// TestVMBlockCUsesOnlyWhitelistedRequestMetadataAndOwnershipFields verifies vm block c uses only
+// whitelisted request metadata and ownership fields.
 func TestVMBlockCUsesOnlyWhitelistedRequestMetadataAndOwnershipFields(t *testing.T) {
 	source, err := os.ReadFile("bpf/vm_block_latency.bpf.c")
 	if err != nil {
@@ -299,6 +323,8 @@ func TestVMBlockCUsesOnlyWhitelistedRequestMetadataAndOwnershipFields(t *testing
 	}
 }
 
+// TestCiliumVMBlockMetadataPreflightMissingIsStructured verifies cilium vm block metadata preflight
+// missing is structured.
 func TestCiliumVMBlockMetadataPreflightMissingIsStructured(t *testing.T) {
 	source, loader := fakeCiliumVMBlockSource(&fakeVMBlockCountResources{})
 	report := availableVMBlockBTFCapabilityReport()
@@ -315,6 +341,8 @@ func TestCiliumVMBlockMetadataPreflightMissingIsStructured(t *testing.T) {
 	}
 }
 
+// testVMBlockTypedTracepointTypedefs builds test VM block typed tracepoint typedefs from validated
+// inputs.
 func testVMBlockTypedTracepointTypedefs() map[string]*btf.Typedef {
 	traceData := &btf.Pointer{Target: &btf.Void{}}
 	request := &btf.Pointer{Target: &btf.Struct{Name: "request"}}
@@ -336,6 +364,8 @@ func testVMBlockTypedTracepointTypedefs() map[string]*btf.Typedef {
 	}
 }
 
+// testVMBlockTypedTracepointPrototypes builds test VM block typed tracepoint prototypes from
+// validated inputs.
 func testVMBlockTypedTracepointPrototypes() []vmBlockTypedTracepointPrototype {
 	prototypes, err := resolveVMBlockTypedTracepoints(&fakeVMBlockBTFTypeFinder{typedefs: testVMBlockTypedTracepointTypedefs()})
 	if err != nil {
@@ -344,6 +374,8 @@ func testVMBlockTypedTracepointPrototypes() []vmBlockTypedTracepointPrototype {
 	return prototypes
 }
 
+// TestCiliumVMBlockPermissionAndVerifierErrors verifies cilium vm block permission and verifier
+// errors.
 func TestCiliumVMBlockPermissionAndVerifierErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -370,6 +402,7 @@ func TestCiliumVMBlockPermissionAndVerifierErrors(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockInvalidObjectBytes verifies cilium vm block invalid object bytes.
 func TestCiliumVMBlockInvalidObjectBytes(t *testing.T) {
 	source := &ciliumVMBlockKernelSource{
 		platform:        "linux",
@@ -388,6 +421,8 @@ func TestCiliumVMBlockInvalidObjectBytes(t *testing.T) {
 	}
 }
 
+// TestValidateVMBlockCollectionSpecRejectsStaleObject verifies validate vm block collection spec
+// rejects stale object.
 func TestValidateVMBlockCollectionSpecRejectsStaleObject(t *testing.T) {
 	spec := &ciliumebpf.CollectionSpec{
 		Programs: map[string]*ciliumebpf.ProgramSpec{
@@ -423,6 +458,8 @@ func TestValidateVMBlockCollectionSpecRejectsStaleObject(t *testing.T) {
 	}
 }
 
+// TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes verifies generated vm block map key layouts match
+// go types.
 func TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes(t *testing.T) {
 	object, err := embeddedVMBlockObject()
 	if err != nil {
@@ -449,6 +486,8 @@ func TestGeneratedVMBlockMapKeyLayoutsMatchGoTypes(t *testing.T) {
 	}
 }
 
+// TestVMBlockCgroupDeviceOperationKeyBinaryRoundTrip verifies vm block cgroup device operation key
+// binary round trip.
 func TestVMBlockCgroupDeviceOperationKeyBinaryRoundTrip(t *testing.T) {
 	want := vmBlockCgroupDeviceOperationKey{CgroupID: 42, Major: 253, Minor: 7, Operation: 1}
 	var encoded bytes.Buffer
@@ -467,6 +506,8 @@ func TestVMBlockCgroupDeviceOperationKeyBinaryRoundTrip(t *testing.T) {
 	}
 }
 
+// TestVMBlockIssueValueBinaryRoundTripConsumesObjectLayout verifies vm block issue value binary
+// round trip consumes object layout.
 func TestVMBlockIssueValueBinaryRoundTripConsumesObjectLayout(t *testing.T) {
 	want := vmBlockIssueValue{
 		TimestampNS: 42, CgroupID: 99, Major: 259, Minor: 3,
@@ -488,6 +529,7 @@ func TestVMBlockIssueValueBinaryRoundTripConsumesObjectLayout(t *testing.T) {
 	}
 }
 
+// TestVMBlockValueLayoutMismatchDiagnostics verifies vm block value layout mismatch diagnostics.
 func TestVMBlockValueLayoutMismatchDiagnostics(t *testing.T) {
 	err := &VMBlockMapLayoutError{
 		MapName: vmBlockRequestStartsMapName, Component: "value", SizeFromObject: 32, GoSize: 28,
@@ -502,6 +544,8 @@ func TestVMBlockValueLayoutMismatchDiagnostics(t *testing.T) {
 	}
 }
 
+// TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence verifies vm block map layout
+// mismatch is precise and preserves host evidence.
 func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T) {
 	latency := VMBlockKernelLatency{Count: 1, TotalNS: 2_000, MinNS: 2_000, MaxNS: 2_000, WriteOps: 1}
 	latency.Buckets[0] = 1
@@ -528,6 +572,7 @@ func TestVMBlockMapLayoutMismatchIsPreciseAndPreservesHostEvidence(t *testing.T)
 	}
 }
 
+// TestCiliumVMBlockAttachFailuresCleanUp verifies cilium vm block attach failures clean up.
 func TestCiliumVMBlockAttachFailuresCleanUp(t *testing.T) {
 	t.Run("issue attach", func(t *testing.T) {
 		resources := &fakeVMBlockCountResources{issueErr: errors.New("issue attach failed")}
@@ -577,6 +622,8 @@ func TestCiliumVMBlockAttachFailuresCleanUp(t *testing.T) {
 	})
 }
 
+// TestCiliumVMBlockCleanupFailuresAreStructured verifies cilium vm block cleanup failures are
+// structured.
 func TestCiliumVMBlockCleanupFailuresAreStructured(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -622,6 +669,8 @@ func TestCiliumVMBlockCleanupFailuresAreStructured(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockCleanupDiagnosticsAreBounded verifies cilium vm block cleanup diagnostics are
+// bounded.
 func TestCiliumVMBlockCleanupDiagnosticsAreBounded(t *testing.T) {
 	resources := &fakeVMBlockCountResources{closeErr: errors.New(strings.Repeat("cleanup-log", maxVMBlockVerifierLogBytes))}
 	source, _ := fakeCiliumVMBlockSource(resources)
@@ -636,6 +685,8 @@ func TestCiliumVMBlockCleanupDiagnosticsAreBounded(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockSuccessfulAttributedLatencyCollection verifies cilium vm block successful
+// attributed latency collection.
 func TestCiliumVMBlockSuccessfulAttributedLatencyCollection(t *testing.T) {
 	latency := VMBlockKernelLatency{
 		Count: 3, TotalNS: uint64(6 * time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(3 * time.Millisecond),
@@ -715,6 +766,8 @@ func TestCiliumVMBlockSuccessfulAttributedLatencyCollection(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockExactAndUnmappedCgroupAttribution verifies cilium vm block exact and unmapped
+// cgroup attribution.
 func TestCiliumVMBlockExactAndUnmappedCgroupAttribution(t *testing.T) {
 	hostLatency := VMBlockKernelLatency{
 		Count: 4, TotalNS: uint64(10 * time.Millisecond), MinNS: uint64(time.Millisecond), MaxNS: uint64(4 * time.Millisecond),
@@ -764,6 +817,8 @@ func TestCiliumVMBlockExactAndUnmappedCgroupAttribution(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockMissingOwnershipCountersRemainUnattributed verifies cilium vm block missing
+// ownership counters remain unattributed.
 func TestCiliumVMBlockMissingOwnershipCountersRemainUnattributed(t *testing.T) {
 	latency := VMBlockKernelLatency{Count: 2, TotalNS: 2_000, MinNS: 1_000, MaxNS: 1_000, UnknownOps: 2}
 	latency.Buckets[0] = 2
@@ -783,6 +838,8 @@ func TestCiliumVMBlockMissingOwnershipCountersRemainUnattributed(t *testing.T) {
 	}
 }
 
+// TestRuntimeVMBlockAttributionQualityThresholds verifies runtime vm block attribution quality
+// thresholds.
 func TestRuntimeVMBlockAttributionQualityThresholds(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -809,6 +866,8 @@ func TestRuntimeVMBlockAttributionQualityThresholds(t *testing.T) {
 	}
 }
 
+// TestCiliumVMBlockHostOperationClassesAndUnavailableDevice verifies cilium vm block host operation
+// classes and unavailable device.
 func TestCiliumVMBlockHostOperationClassesAndUnavailableDevice(t *testing.T) {
 	latency := VMBlockKernelLatency{
 		Count: 5, TotalNS: 5_000, MinNS: 1_000, MaxNS: 1_000,
@@ -836,6 +895,7 @@ func TestCiliumVMBlockHostOperationClassesAndUnavailableDevice(t *testing.T) {
 	}
 }
 
+// TestMergeVMBlockPerCPULatency verifies merge vm block per cpu latency.
 func TestMergeVMBlockPerCPULatency(t *testing.T) {
 	first := vmBlockLatencyValues{Count: 2, TotalNS: 500, MinNS: 100, MaxNS: 400}
 	first.Buckets[0] = 2
@@ -847,6 +907,7 @@ func TestMergeVMBlockPerCPULatency(t *testing.T) {
 	}
 }
 
+// TestVMBlockOperationClassification verifies vm block operation classification.
 func TestVMBlockOperationClassification(t *testing.T) {
 	tests := []struct {
 		value uint32
@@ -865,6 +926,7 @@ func TestVMBlockOperationClassification(t *testing.T) {
 	}
 }
 
+// collectCountOnlyTestReport collects count only test report from the configured evidence sources.
 func collectCountOnlyTestReport(source VMBlockKernelSource, mappings []VMBlockCgroupMapping) VMBlockLatencyReport {
 	return CollectVMBlockLatencyReportWithKernelSource(
 		context.Background(),

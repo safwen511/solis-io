@@ -32,6 +32,7 @@ func Write(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// writeSection renders section in the package's stable operator-facing format.
 func writeSection(dst io.Writer, title string, checks []Check) {
 	fmt.Fprintln(dst, title)
 	fmt.Fprintln(dst, "STATUS\tCHECK\tDETAIL\tREMEDIATION")
@@ -48,6 +49,7 @@ func writeSection(dst io.Writer, title string, checks []Check) {
 	fmt.Fprintln(dst)
 }
 
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

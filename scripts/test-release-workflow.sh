@@ -7,6 +7,7 @@ readonly fixture_version="v9.9.9-experimental"
 readonly fixture_package="solis-${fixture_version}-linux-amd64"
 readonly fixture_archive="${fixture_package}.tar.gz"
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
@@ -17,6 +18,7 @@ for command in awk cmp find git go grep jq mktemp rm sha256sum sort stat tar; do
 done
 
 test_root="$(mktemp -d /tmp/solis-release-workflow-test-XXXXXXXX)"
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM

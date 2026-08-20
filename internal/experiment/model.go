@@ -55,6 +55,7 @@ func CalculateImpact(report Report) (Impact, error) {
 	}, nil
 }
 
+// percentageChange builds percentage change from validated inputs.
 func percentageChange(baseline, difference float64) float64 {
 	return difference / baseline * 100
 }

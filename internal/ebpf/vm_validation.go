@@ -282,6 +282,7 @@ func DeltaVirshBlockStats(vm string, before, after []VirshBlockCounters) ([]Virs
 	return deltas, nil
 }
 
+// validMajorMinor reports whether valid major minor.
 func validMajorMinor(value string) bool {
 	major, minor, ok := strings.Cut(value, ":")
 	if !ok || major == "" || minor == "" {
@@ -292,6 +293,7 @@ func validMajorMinor(value string) bool {
 	return majorErr == nil && minorErr == nil
 }
 
+// validationCounterDelta reports whether ation counter delta.
 func validationCounterDelta(before, after uint64) (uint64, bool) {
 	if after < before {
 		return 0, true
@@ -299,6 +301,7 @@ func validationCounterDelta(before, after uint64) (uint64, bool) {
 	return after - before, false
 }
 
+// indexCgroupIOCounters indexes cgroup I/O counters by its stable identity.
 func indexCgroupIOCounters(rows []CgroupIOCounters) (map[string]CgroupIOCounters, error) {
 	indexed := make(map[string]CgroupIOCounters, len(rows))
 	for _, row := range rows {
@@ -313,6 +316,7 @@ func indexCgroupIOCounters(rows []CgroupIOCounters) (map[string]CgroupIOCounters
 	return indexed, nil
 }
 
+// indexVirshBlockCounters indexes virsh block counters by its stable identity.
 func indexVirshBlockCounters(rows []VirshBlockCounters) (map[string]VirshBlockCounters, error) {
 	indexed := make(map[string]VirshBlockCounters, len(rows))
 	for _, row := range rows {
@@ -328,6 +332,7 @@ func indexVirshBlockCounters(rows []VirshBlockCounters) (map[string]VirshBlockCo
 	return indexed, nil
 }
 
+// unionSortedKeys builds union sorted keys from validated inputs.
 func unionSortedKeys[T any](left, right map[string]T) []string {
 	keys := make([]string, 0, len(left)+len(right))
 	seen := make(map[string]bool, len(left)+len(right))
@@ -345,6 +350,7 @@ func unionSortedKeys[T any](left, right map[string]T) []string {
 	return keys
 }
 
+// firstNonEmpty returns the first non-empty string in argument order.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {

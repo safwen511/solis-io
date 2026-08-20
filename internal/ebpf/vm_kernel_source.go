@@ -100,6 +100,8 @@ type VMBlockVerifierError struct {
 	Err       error
 }
 
+// NewVMBlockVerifierError constructs VM block verifier error wired to the package's production
+// dependencies.
 func NewVMBlockVerifierError(operation, verifierLog string, err error) *VMBlockVerifierError {
 	return &VMBlockVerifierError{
 		Operation: strings.TrimSpace(operation),
@@ -108,6 +110,7 @@ func NewVMBlockVerifierError(operation, verifierLog string, err error) *VMBlockV
 	}
 }
 
+// Error returns the human-readable error description.
 func (err *VMBlockVerifierError) Error() string {
 	if err == nil {
 		return ""
@@ -125,6 +128,7 @@ func (err *VMBlockVerifierError) Error() string {
 	return message
 }
 
+// Unwrap exposes the underlying error for standard error-chain inspection.
 func (err *VMBlockVerifierError) Unwrap() error {
 	if err == nil {
 		return nil
@@ -132,6 +136,7 @@ func (err *VMBlockVerifierError) Unwrap() error {
 	return err.Err
 }
 
+// boundVMBlockDiagnostic trims and bounds kernel diagnostics before exposing them in reports.
 func boundVMBlockDiagnostic(value string, maximum int) string {
 	value = strings.TrimSpace(value)
 	if maximum <= 0 || len(value) <= maximum {
@@ -150,6 +155,7 @@ func boundVMBlockDiagnostic(value string, maximum int) string {
 // this source remains useful for explicit deferred-feature tests.
 type experimentalVMBlockKernelSource struct{}
 
+// Preflight checks prerequisites without loading or attaching an eBPF program.
 func (experimentalVMBlockKernelSource) Preflight(context.Context) (VMBlockKernelPreflight, error) {
 	return VMBlockKernelPreflight{
 		Available: false,
@@ -158,6 +164,7 @@ func (experimentalVMBlockKernelSource) Preflight(context.Context) (VMBlockKernel
 	}, ErrVMBlockLatencyNotImplemented
 }
 
+// Prepare allocates a collector session but leaves lifecycle start and cleanup to the caller.
 func (experimentalVMBlockKernelSource) Prepare(context.Context, VMBlockLatencyCollectOptions, []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	return nil, ErrVMBlockLatencyNotImplemented
 }
@@ -169,10 +176,13 @@ type eventSourceKernelAdapter struct {
 	source VMBlockEventSource
 }
 
+// newEventSourceKernelAdapter constructs event source kernel adapter wired to the package's
+// production dependencies.
 func newEventSourceKernelAdapter(source VMBlockEventSource) VMBlockKernelSource {
 	return eventSourceKernelAdapter{source: source}
 }
 
+// Preflight checks prerequisites without loading or attaching an eBPF program.
 func (source eventSourceKernelAdapter) Preflight(context.Context) (VMBlockKernelPreflight, error) {
 	if source.source == nil {
 		return VMBlockKernelPreflight{}, ErrVMBlockLatencyNotImplemented
@@ -180,6 +190,7 @@ func (source eventSourceKernelAdapter) Preflight(context.Context) (VMBlockKernel
 	return VMBlockKernelPreflight{Available: true, Status: "available"}, nil
 }
 
+// Prepare allocates a collector session but leaves lifecycle start and cleanup to the caller.
 func (source eventSourceKernelAdapter) Prepare(context.Context, VMBlockLatencyCollectOptions, []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	if source.source == nil {
 		return nil, ErrVMBlockLatencyNotImplemented
@@ -192,11 +203,13 @@ type eventSourceKernelSession struct {
 	started bool
 }
 
+// Start marks the deterministic test event session ready for collection.
 func (session *eventSourceKernelSession) Start(context.Context) error {
 	session.started = true
 	return nil
 }
 
+// Collect delegates to the injected event source only after Start succeeds.
 func (session *eventSourceKernelSession) Collect(ctx context.Context, duration time.Duration, consume func(VMBlockEvent) error) error {
 	if !session.started {
 		return errors.New("per-VM eBPF test event session is not started")
@@ -204,6 +217,7 @@ func (session *eventSourceKernelSession) Collect(ctx context.Context, duration t
 	return session.source.Collect(ctx, duration, consume)
 }
 
+// Stats returns the session's bounded aggregate counters and collection metadata.
 func (*eventSourceKernelSession) Stats() VMBlockKernelStats {
 	return VMBlockKernelStats{
 		CollectionMode:       "test_event_stream",
@@ -211,9 +225,14 @@ func (*eventSourceKernelSession) Stats() VMBlockKernelStats {
 		AttributionAvailable: true,
 	}
 }
-func (*eventSourceKernelSession) Stop() error  { return nil }
+
+// Stop ends the deterministic adapter session without synthesizing events.
+func (*eventSourceKernelSession) Stop() error { return nil }
+
+// Close releases the resources owned by the receiver.
 func (*eventSourceKernelSession) Close() error { return nil }
 
+// runVMBlockKernelSource enforces preflight, prepare, start, collect, stop, and close ordering.
 func runVMBlockKernelSource(
 	ctx context.Context,
 	source VMBlockKernelSource,
@@ -255,6 +274,8 @@ func runVMBlockKernelSource(
 	return stats, preflight, errors.Join(collectErr, stopErr)
 }
 
+// classifyVMBlockLifecycleError maps VM block lifecycle error to the package's stable public status
+// categories.
 func classifyVMBlockLifecycleError(status, operation string, err error) error {
 	if err == nil {
 		return nil
@@ -275,6 +296,7 @@ func classifyVMBlockLifecycleError(status, operation string, err error) error {
 	return &VMBlockKernelStageError{Status: status, Stage: "collection", Operation: operation, Err: err}
 }
 
+// classifyVMBlockCleanupError preserves successful collection while surfacing cleanup diagnostics.
 func classifyVMBlockCleanupError(operation string, err error) error {
 	if err == nil {
 		return nil

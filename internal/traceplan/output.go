@@ -95,6 +95,7 @@ func Write(dst io.Writer, plan Plan) error {
 	return w.Flush()
 }
 
+// storageTargets builds storage targets from validated inputs.
 func storageTargets(plan Plan) []inventory.VM {
 	targets := append([]inventory.VM(nil), plan.VictimTargets...)
 	for _, vm := range targets {
@@ -105,10 +106,12 @@ func storageTargets(plan Plan) []inventory.VM {
 	return append(targets, plan.SuspectTarget)
 }
 
+// writeTargetHeader renders target header in the package's stable operator-facing format.
 func writeTargetHeader(w io.Writer) {
 	fmt.Fprintln(w, "NAME\tTENANT\tROLE\tPLAN_IP\tLEASE_IP\tQEMU_PID\tDISK\tNOTE")
 }
 
+// writeTarget renders target in the package's stable operator-facing format.
 func writeTarget(w io.Writer, vm inventory.VM, note string) {
 	fmt.Fprintf(
 		w,
@@ -124,6 +127,7 @@ func writeTarget(w io.Writer, vm inventory.VM, note string) {
 	)
 }
 
+// writeRows renders rows in the package's stable operator-facing format.
 func writeRows(w io.Writer, rows [][2]string) {
 	fmt.Fprintln(w, "ITEM / SIGNAL\tPURPOSE / CLASSIFICATION")
 	for _, row := range rows {
@@ -131,6 +135,7 @@ func writeRows(w io.Writer, rows [][2]string) {
 	}
 }
 
+// victimNote derives stable operator-facing text for victim note.
 func victimNote(vm inventory.VM, victimIsTenant bool) string {
 	if !victimIsTenant {
 		return "selected victim VM"
@@ -146,6 +151,7 @@ func victimNote(vm inventory.VM, victimIsTenant bool) string {
 	}
 }
 
+// emptyDash replaces empty text with a dash so table columns remain explicit.
 func emptyDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

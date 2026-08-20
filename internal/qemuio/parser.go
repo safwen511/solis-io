@@ -69,6 +69,7 @@ func Parse(r io.Reader) (Counters, error) {
 	}, nil
 }
 
+// isProcIOField reports whether proc io field.
 func isProcIOField(name string) bool {
 	for _, candidate := range procIOFields {
 		if name == candidate {
@@ -78,6 +79,7 @@ func isProcIOField(name string) bool {
 	return false
 }
 
+// readProcessIO reads process io from its configured source.
 func readProcessIO(pid string) (Counters, error) {
 	return readProcessIOFrom(pid, defaultProcPath)
 }
@@ -92,6 +94,7 @@ func IsPermissionDenied(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "permission denied reading ")
 }
 
+// readProcessIOFrom reads process io from from its configured source.
 func readProcessIOFrom(pid, procPath string) (Counters, error) {
 	pid = strings.TrimSpace(pid)
 	if pid == "" || pid == "-" {
@@ -112,6 +115,7 @@ func readProcessIOFrom(pid, procPath string) (Counters, error) {
 	return counters, nil
 }
 
+// formatProcessIOReadError formats process io read error using the stable output contract.
 func formatProcessIOReadError(path string, err error) error {
 	if errors.Is(err, os.ErrPermission) {
 		return fmt.Errorf("permission denied reading %s; try running with sudo", path)

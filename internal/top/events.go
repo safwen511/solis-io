@@ -25,6 +25,7 @@ type eventTracker struct {
 	events      []MonitorEvent
 }
 
+// Update builds update from validated inputs.
 func (tracker *eventTracker) Update(view View) []MonitorEvent {
 	if !tracker.initialized {
 		tracker.add(view.ObservedAtUTC, "info", "host", "monitoring window collected")
@@ -94,6 +95,7 @@ func (tracker *eventTracker) Update(view View) []MonitorEvent {
 	return tracker.snapshot()
 }
 
+// safeVMState derives stable operator-facing text for safe VM state.
 func safeVMState(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "running", "shut off", "shutoff", "stopped", "paused", "pmsuspended", "crashed", "blocked":
@@ -103,6 +105,7 @@ func safeVMState(value string) string {
 	}
 }
 
+// addAttributionState adds attribution state to the current aggregate.
 func (tracker *eventTracker) addAttributionState(view View) {
 	attribution := view.Attribution
 	switch {
@@ -120,6 +123,7 @@ func (tracker *eventTracker) addAttributionState(view View) {
 	}
 }
 
+// add performs add as part of the package workflow.
 func (tracker *eventTracker) add(observed time.Time, severity, subject, message string) {
 	tracker.events = append(tracker.events, MonitorEvent{
 		ObservedAtUTC: observed.UTC(),
@@ -132,15 +136,18 @@ func (tracker *eventTracker) add(observed time.Time, severity, subject, message 
 	}
 }
 
+// snapshot builds snapshot from validated inputs.
 func (tracker *eventTracker) snapshot() []MonitorEvent {
 	return append([]MonitorEvent(nil), tracker.events...)
 }
 
+// attributionState derives stable operator-facing text for attribution state.
 func attributionState(view AttributionView) string {
 	return fmt.Sprintf("%t:%t:%s:%s", view.Requested, view.CollectorAvailable,
 		safeEventState(view.Quality), safeEventState(view.Status))
 }
 
+// dominantAttributedVM builds dominant attributed VM from validated inputs.
 func dominantAttributedVM(view View) (VMRow, bool) {
 	if !view.Attribution.AttributionAvailable {
 		return VMRow{}, false
@@ -160,12 +167,14 @@ func dominantAttributedVM(view View) (VMRow, bool) {
 	return dominant, found
 }
 
+// rowsByName builds rows by name from validated inputs.
 func rowsByName(rows []VMRow) []VMRow {
 	ordered := append([]VMRow(nil), rows...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
 	return ordered
 }
 
+// safeEventState derives stable operator-facing text for safe event state.
 func safeEventState(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "available", "degraded", "unavailable", "not_requested", "no_attributed_events",

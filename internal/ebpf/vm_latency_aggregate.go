@@ -170,6 +170,8 @@ type vmBlockEventAggregator struct {
 	filter               string
 }
 
+// newVMBlockEventAggregator constructs VM block event aggregator wired to the package's production
+// dependencies.
 func newVMBlockEventAggregator(report *VMBlockLatencyReport, mappings []VMBlockCgroupMapping, deviceFilter string) (*vmBlockEventAggregator, error) {
 	index, err := IndexVMCgroupMappings(mappings)
 	if err != nil {
@@ -186,6 +188,7 @@ func newVMBlockEventAggregator(report *VMBlockLatencyReport, mappings []VMBlockC
 	}, nil
 }
 
+// consume completes consume and returns any failure to its caller.
 func (aggregator *vmBlockEventAggregator) consume(event VMBlockEvent) error {
 	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
 	case "issue":
@@ -198,6 +201,7 @@ func (aggregator *vmBlockEventAggregator) consume(event VMBlockEvent) error {
 	return nil
 }
 
+// issue records one sanitized issue event, replacing duplicate correlations explicitly.
 func (aggregator *vmBlockEventAggregator) issue(event VMBlockEvent) {
 	unattributed := &aggregator.report.Unattributed
 	if event.UnsupportedRequest || event.RequestPointer == 0 || event.TimestampNS == 0 {
@@ -240,6 +244,7 @@ func (aggregator *vmBlockEventAggregator) issue(event VMBlockEvent) {
 	}
 }
 
+// complete closes one request correlation and records latency only when an issue exists.
 func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 	unattributed := &aggregator.report.Unattributed
 	issue, ok := aggregator.issues[event.RequestPointer]
@@ -296,6 +301,7 @@ func (aggregator *vmBlockEventAggregator) complete(event VMBlockEvent) {
 	}
 }
 
+// recordKernelStats records kernel stats in the bounded aggregate.
 func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelStats) {
 	if stats.CollectionMode != "" {
 		aggregator.report.CollectionMode = stats.CollectionMode
@@ -338,6 +344,7 @@ func (aggregator *vmBlockEventAggregator) recordKernelStats(stats VMBlockKernelS
 	aggregator.report.Unattributed.MapFull = saturatingAdd(aggregator.report.Unattributed.MapFull, kernelMapFull)
 }
 
+// recordKernelCgroupOperation records kernel cgroup operation in the bounded aggregate.
 func (aggregator *vmBlockEventAggregator) recordKernelCgroupOperation(operation VMBlockKernelCgroupDeviceOperation) {
 	count := operation.Latency.Count
 	if count == 0 {
@@ -381,6 +388,7 @@ func (aggregator *vmBlockEventAggregator) recordKernelCgroupOperation(operation 
 	}
 }
 
+// finish counts correlations still open at the observation-window boundary.
 func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 	for _, issue := range aggregator.issues {
 		if !issue.filteredOut {
@@ -470,6 +478,8 @@ func (aggregator *vmBlockEventAggregator) finish(collectionAvailable bool) {
 	}
 }
 
+// newVMBlockLatencyReport constructs VM block latency report wired to the package's production
+// dependencies.
 func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VMBlockCgroupMapping) VMBlockLatencyReport {
 	observedAt := options.ObservedAt.UTC()
 	if observedAt.IsZero() {
@@ -533,6 +543,7 @@ func newVMBlockLatencyReport(options VMBlockLatencyCollectOptions, mappings []VM
 	return report
 }
 
+// mappingAvailabilityStatus derives a stable status from inventory and runtime mapping evidence.
 func mappingAvailabilityStatus(quality string) string {
 	switch quality {
 	case "cgroup_v2_inode_partial":
@@ -542,6 +553,7 @@ func mappingAvailabilityStatus(quality string) string {
 	}
 }
 
+// vmBlockCollectorError builds VM block collector error from validated inputs.
 func vmBlockCollectorError(err error, euid int) (string, string) {
 	var verifierError *VMBlockVerifierError
 	var capabilityError *VMBlockCapabilityError
@@ -573,6 +585,7 @@ func vmBlockCollectorError(err error, euid int) (string, string) {
 	}
 }
 
+// vmBlockEffectiveUID builds VM block effective UID from validated inputs.
 func vmBlockEffectiveUID(options VMBlockLatencyCollectOptions) int {
 	if options.effectiveUID != nil {
 		return options.effectiveUID()
@@ -580,6 +593,7 @@ func vmBlockEffectiveUID(options VMBlockLatencyCollectOptions) int {
 	return defaultVMBlockDiagnosticConfig().GetEUID()
 }
 
+// vmBlockDiagnostics builds VM block diagnostics from validated inputs.
 func vmBlockDiagnostics(options VMBlockLatencyCollectOptions, stage string, euid int, err error) VMBlockRuntimeDiagnostics {
 	if options.diagnosticProbe != nil {
 		diagnostics := options.diagnosticProbe(stage, euid, err)
@@ -594,6 +608,7 @@ func vmBlockDiagnostics(options VMBlockLatencyCollectOptions, stage string, euid
 	return collectVMBlockRuntimeDiagnostics(config, stage, err)
 }
 
+// vmBlockErrorStage derives stable operator-facing text for VM block error stage.
 func vmBlockErrorStage(err error) string {
 	if stage := primaryVMBlockStageError(err); stage != nil {
 		return firstNonEmpty(strings.TrimSpace(stage.Stage), "unknown")
@@ -612,6 +627,7 @@ func vmBlockErrorStage(err error) string {
 	return "unknown"
 }
 
+// primaryVMBlockStageError builds primary VM block stage error from validated inputs.
 func primaryVMBlockStageError(err error) *VMBlockKernelStageError {
 	stages := vmBlockStageErrors(err)
 	for _, stage := range stages {
@@ -625,6 +641,7 @@ func primaryVMBlockStageError(err error) *VMBlockKernelStageError {
 	return nil
 }
 
+// vmBlockStageErrors builds VM block stage errors from validated inputs.
 func vmBlockStageErrors(err error) []*VMBlockKernelStageError {
 	var stages []*VMBlockKernelStageError
 	var visit func(error)
@@ -650,6 +667,7 @@ func vmBlockStageErrors(err error) []*VMBlockKernelStageError {
 	return stages
 }
 
+// vmBlockCleanupWarning derives stable operator-facing text for VM block cleanup warning.
 func vmBlockCleanupWarning(err error) string {
 	values := make([]string, 0)
 	for _, stage := range vmBlockStageErrors(err) {
@@ -664,6 +682,7 @@ func vmBlockCleanupWarning(err error) string {
 	return boundVMBlockDiagnostic(strings.Join(values, "; "), maxVMBlockVerifierLogBytes)
 }
 
+// normalizeBlockOperation normalizes block operation into its canonical representation.
 func normalizeBlockOperation(operation string) string {
 	operation = strings.ToLower(strings.TrimSpace(operation))
 	switch operation {
@@ -680,6 +699,7 @@ func normalizeBlockOperation(operation string) string {
 	}
 }
 
+// deviceOperationSummaries builds device operation summaries from validated inputs.
 func deviceOperationSummaries(values map[vmDeviceOperationKey]*boundedVMBlockLatencyHistogram) []VMBlockLatencyDeviceOperation {
 	keys := make([]vmDeviceOperationKey, 0, len(values))
 	for key := range values {
@@ -698,6 +718,7 @@ func deviceOperationSummaries(values map[vmDeviceOperationKey]*boundedVMBlockLat
 	return result
 }
 
+// blockOperationOrder builds block operation order from validated inputs.
 func blockOperationOrder(operation string) int {
 	switch operation {
 	case "read":
@@ -713,10 +734,12 @@ func blockOperationOrder(operation string) int {
 	}
 }
 
+// emptyVMBlockLatencyBuckets builds empty VM block latency buckets from validated inputs.
 func emptyVMBlockLatencyBuckets() []VMBlockLatencyHistogramBucket {
 	return (boundedVMBlockLatencyHistogram{}).publicBuckets()
 }
 
+// mapKeys maps keys into its corresponding evidence identity.
 func mapKeys(values map[string]bool) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
@@ -726,6 +749,7 @@ func mapKeys(values map[string]bool) []string {
 	return result
 }
 
+// runtimeVMBlockAttributionQuality applies conservative miss-rate thresholds to runtime evidence.
 func runtimeVMBlockAttributionQuality(summary VMBlockAttributionSummary) string {
 	if summary.AttributedOps == 0 || summary.MatchedVMCount == 0 {
 		return "unavailable"

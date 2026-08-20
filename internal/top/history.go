@@ -21,6 +21,7 @@ type vmHistoryTracker struct {
 	samples map[string][]VMInvestigationSample
 }
 
+// Update performs update as part of the package workflow.
 func (tracker *vmHistoryTracker) Update(view View) {
 	if tracker.samples == nil {
 		tracker.samples = make(map[string][]VMInvestigationSample)
@@ -47,6 +48,7 @@ func (tracker *vmHistoryTracker) Update(view View) {
 	}
 }
 
+// ForVM builds for VM from validated inputs.
 func (tracker *vmHistoryTracker) ForVM(name string) []VMInvestigationSample {
 	if tracker == nil || tracker.samples == nil {
 		return nil

@@ -37,6 +37,7 @@ func BuildVMCgroupMappings(vms []inventory.VM) ([]VMBlockCgroupMapping, error) {
 	return buildVMCgroupMappings(vms, defaultCgroupRoot, defaultProcRoot)
 }
 
+// buildVMCgroupMappings accepts only cgroup IDs tied to the current validated QEMU process identity.
 func buildVMCgroupMappings(vms []inventory.VM, cgroupRoot, procRoot string) ([]VMBlockCgroupMapping, error) {
 	mappings := make([]VMBlockCgroupMapping, 0, len(vms))
 	for _, vm := range vms {
@@ -157,6 +158,7 @@ func ValidateMappedQEMUProcess(mapping VMBlockCgroupMapping) (QEMUProcessIdentit
 	return validateMappedQEMUProcess(mapping, defaultProcRoot)
 }
 
+// validateMappedQEMUProcess validates mapped qemu process against its required contract.
 func validateMappedQEMUProcess(mapping VMBlockCgroupMapping, procRoot string) (QEMUProcessIdentity, error) {
 	if mapping.QEMUPID <= 0 {
 		return QEMUProcessIdentity{}, errors.New("QEMU PID is unavailable")
@@ -223,6 +225,7 @@ func IndexVMCgroupMappings(mappings []VMBlockCgroupMapping) (map[uint64]int, err
 	return index, nil
 }
 
+// parseUnifiedCgroupPath parses and validates unified cgroup path.
 func parseUnifiedCgroupPath(data string) (string, error) {
 	scanner := bufio.NewScanner(strings.NewReader(data))
 	for scanner.Scan() {
@@ -243,6 +246,7 @@ func parseUnifiedCgroupPath(data string) (string, error) {
 	return "", errors.New("unified cgroup v2 path not found")
 }
 
+// cleanCgroupPath accepts absolute normalized cgroup paths and rejects traversal or control bytes.
 func cleanCgroupPath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || !strings.HasPrefix(path, "/") {
@@ -260,6 +264,8 @@ func cleanCgroupPath(path string) (string, error) {
 	return cleaned, nil
 }
 
+// relatedLibvirtCgroupPaths builds related libvirt cgroup paths and returns an error when
+// validation or source access fails.
 func relatedLibvirtCgroupPaths(cgroupRoot, primary string) ([]string, error) {
 	primary, err := cleanCgroupPath(primary)
 	if err != nil {
@@ -304,6 +310,8 @@ func relatedLibvirtCgroupPaths(cgroupRoot, primary string) ([]string, error) {
 	return sortedUniqueStrings(paths), err
 }
 
+// libvirtMachineScopeFromPath builds libvirt machine scope from path and returns an error when
+// validation or source access fails.
 func libvirtMachineScopeFromPath(path string) (string, error) {
 	path, err := cleanCgroupPath(path)
 	if err != nil {
@@ -318,6 +326,7 @@ func libvirtMachineScopeFromPath(path string) (string, error) {
 	return "", errors.New("libvirt QEMU machine scope not found")
 }
 
+// readSafeProcessName reads only /proc/PID/comm; it never reads cmdline or environ.
 func readSafeProcessName(procRoot string, pid int) (string, error) {
 	processRoot := filepath.Join(procRoot, strconv.Itoa(pid))
 	status, statusErr := os.ReadFile(filepath.Join(processRoot, "status"))
@@ -341,6 +350,7 @@ func readSafeProcessName(procRoot string, pid int) (string, error) {
 	return "", errors.New("process name unavailable")
 }
 
+// readProcessStartTime reads process start time from its configured source.
 func readProcessStartTime(procRoot string, pid int) (uint64, error) {
 	data, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "stat"))
 	if err != nil {
@@ -364,6 +374,7 @@ func readProcessStartTime(procRoot string, pid int) (uint64, error) {
 	return value, nil
 }
 
+// parseProcessStatusName parses and validates process status name.
 func parseProcessStatusName(data string) string {
 	scanner := bufio.NewScanner(strings.NewReader(data))
 	for scanner.Scan() {
@@ -375,11 +386,13 @@ func parseProcessStatusName(data string) string {
 	return ""
 }
 
+// isQEMUProcessName reports whether qemu process name.
 func isQEMUProcessName(name string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
 	return strings.HasPrefix(name, "qemu-system-") || name == "qemu-system" || name == "qemu-kvm"
 }
 
+// isLibvirtQEMUScope reports whether libvirt qemu scope.
 func isLibvirtQEMUScope(component string) bool {
 	component = strings.TrimSpace(component)
 	if !strings.HasPrefix(component, "machine-qemu") || !strings.HasSuffix(component, ".scope") {
@@ -389,6 +402,7 @@ func isLibvirtQEMUScope(component string) bool {
 	return middle != ""
 }
 
+// containsExactString reports whether contains exact string.
 func containsExactString(values []string, wanted string) bool {
 	for _, value := range values {
 		if filepath.Clean(value) == filepath.Clean(wanted) {
@@ -398,6 +412,7 @@ func containsExactString(values []string, wanted string) bool {
 	return false
 }
 
+// cgroupInode returns the cgroup-v2 directory inode used for exact kernfs-ID matching.
 func cgroupInode(cgroupRoot, path string) (uint64, error) {
 	diskPath, err := rootedCgroupPath(cgroupRoot, path)
 	if err != nil {
@@ -414,6 +429,8 @@ func cgroupInode(cgroupRoot, path string) (uint64, error) {
 	return stat.Ino, nil
 }
 
+// rootedCgroupPath builds rooted cgroup path and returns an error when validation or source access
+// fails.
 func rootedCgroupPath(cgroupRoot, path string) (string, error) {
 	cleaned, err := cleanCgroupPath(path)
 	if err != nil {
@@ -428,6 +445,7 @@ func rootedCgroupPath(cgroupRoot, path string) (string, error) {
 	return joined, nil
 }
 
+// sortedUniqueStrings sorts strings and removes duplicates for deterministic output.
 func sortedUniqueStrings(values []string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(values))
@@ -443,6 +461,7 @@ func sortedUniqueStrings(values []string) []string {
 	return result
 }
 
+// sortedUniqueUint64 sorts uint64 values and removes duplicates for deterministic output.
 func sortedUniqueUint64(values []uint64) []uint64 {
 	seen := make(map[uint64]bool)
 	result := make([]uint64, 0, len(values))

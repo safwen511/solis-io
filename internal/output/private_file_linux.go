@@ -17,6 +17,8 @@ import (
 
 const privateOutputMode = 0o600
 
+// writePrivateAtomicFile renders a 0600 file through a same-parent temporary and atomic rename.
+// It refuses symlink parents, symlink targets, and non-regular existing targets.
 func writePrivateAtomicFile(path string, render func(io.Writer) error) (err error) {
 	if path == "" {
 		return errors.New("output path is empty")
@@ -99,6 +101,7 @@ func writePrivateAtomicFile(path string, render func(io.Writer) error) (err erro
 	return nil
 }
 
+// openDirectoryNoSymlinks walks and pins an existing parent directory with openat and O_NOFOLLOW.
 func openDirectoryNoSymlinks(parent string) (int, error) {
 	currentFD, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -138,6 +141,7 @@ func openDirectoryNoSymlinks(parent string) (int, error) {
 	return currentFD, nil
 }
 
+// rejectUnsafeOutputTargetAt permits an absent or regular target and rejects every other file type.
 func rejectUnsafeOutputTargetAt(parentFD int, path, base string) error {
 	var stat unix.Stat_t
 	err := unix.Fstatat(parentFD, base, &stat, unix.AT_SYMLINK_NOFOLLOW)
@@ -157,6 +161,7 @@ func rejectUnsafeOutputTargetAt(parentFD int, path, base string) error {
 	}
 }
 
+// createPrivateTemporaryAt allocates a random 0600 file relative to the pinned parent descriptor.
 func createPrivateTemporaryAt(parentFD int) (string, int, error) {
 	for attempt := 0; attempt < 128; attempt++ {
 		var random [16]byte

@@ -9,6 +9,7 @@ import (
 
 const inventoryHeader = "name,tenant,network,ip,memory_mb,vcpus,disk_gb,role\n"
 
+// TestLoadFromConfigStrictValidation verifies load from config strict validation.
 func TestLoadFromConfigStrictValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -35,6 +36,8 @@ func TestLoadFromConfigStrictValidation(t *testing.T) {
 	}
 }
 
+// TestLoadFromConfigSupportsRequiredHeadersInDifferentOrder verifies load from config supports
+// required headers in different order.
 func TestLoadFromConfigSupportsRequiredHeadersInDifferentOrder(t *testing.T) {
 	path := writeInventory(t, "role,name,disk_gb,vcpus,memory_mb,ip,network,tenant\nweb,a-web,10,1,1024,192.168.1.2,tenant-a-net,tenant-a\n")
 	vms, err := LoadFromConfig(path)
@@ -46,6 +49,7 @@ func TestLoadFromConfigSupportsRequiredHeadersInDifferentOrder(t *testing.T) {
 	}
 }
 
+// writeInventory renders inventory in the package's stable operator-facing format.
 func writeInventory(t *testing.T, data string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vms.csv")
@@ -55,6 +59,7 @@ func writeInventory(t *testing.T, data string) string {
 	return path
 }
 
+// validInventoryRow reports whether inventory row.
 func validInventoryRow(name string) string {
 	return name + ",tenant-a,tenant-a-net,192.168.1.2,1024,1,10,web\n"
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestVirshCommandIncludesConfiguredURI verifies virsh command includes configured uri.
 func TestVirshCommandIncludesConfiguredURI(t *testing.T) {
 	command := virshCommand("qemu:///system", "domstate", "a-web")
 	want := []string{"virsh", "-c", "qemu:///system", "domstate", "a-web"}
@@ -16,6 +17,7 @@ func TestVirshCommandIncludesConfiguredURI(t *testing.T) {
 	}
 }
 
+// TestVirshCommandPreservesLegacyDefault verifies virsh command preserves legacy default.
 func TestVirshCommandPreservesLegacyDefault(t *testing.T) {
 	command := virshCommand("", "domstate", "a-web")
 	want := []string{"virsh", "domstate", "a-web"}
@@ -24,6 +26,7 @@ func TestVirshCommandPreservesLegacyDefault(t *testing.T) {
 	}
 }
 
+// TestEnrichCanSkipQEMUProcessArguments verifies enrich can skip qemu process arguments.
 func TestEnrichCanSkipQEMUProcessArguments(t *testing.T) {
 	directory := t.TempDir()
 	marker := filepath.Join(directory, "ps-called")
@@ -46,6 +49,7 @@ esac
 	}
 }
 
+// writeTestExecutable renders test executable in the package's stable operator-facing format.
 func writeTestExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {

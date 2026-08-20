@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestBuildMetadataDefaults verifies build metadata defaults.
 func TestBuildMetadataDefaults(t *testing.T) {
 	if Version != "dev" || GitCommit != "unknown" || BuildTime != "unknown" {
 		t.Fatalf("build defaults = %q, %q, %q", Version, GitCommit, BuildTime)
@@ -18,6 +19,7 @@ func TestBuildMetadataDefaults(t *testing.T) {
 	}
 }
 
+// TestWriteHuman verifies write human.
 func TestWriteHuman(t *testing.T) {
 	info := Info{Version: "1.2.3", GitCommit: "abc123", BuildTime: "2026-08-09T22:00:00Z", GoVersion: "go1.test", Platform: "linux/amd64"}
 	var output bytes.Buffer
@@ -30,6 +32,7 @@ func TestWriteHuman(t *testing.T) {
 	}
 }
 
+// TestWriteJSONDeterministic verifies write json deterministic.
 func TestWriteJSONDeterministic(t *testing.T) {
 	info := Info{Version: "1.2.3", GitCommit: "abc123", BuildTime: "time", GoVersion: "go1.test", Platform: "linux/amd64"}
 	var first, second bytes.Buffer

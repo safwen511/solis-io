@@ -51,6 +51,7 @@ func WriteIncidentTimeline(dst io.Writer, timeline IncidentTimeline) error {
 	return writeJSON(dst, timeline)
 }
 
+// writeJSON renders JSON in the package's stable operator-facing format.
 func writeJSON(dst io.Writer, value any) error {
 	encoder := json.NewEncoder(dst)
 	encoder.SetEscapeHTML(false)
@@ -58,6 +59,7 @@ func writeJSON(dst io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
+// validatePrivacy validates privacy against its required contract.
 func validatePrivacy(privacy PrivacyFlags) error {
 	if privacy.ProcessArgumentsCollected || privacy.EnvironmentCollected ||
 		privacy.GuestFilesCollected || privacy.QueryTextCollected ||
@@ -68,6 +70,7 @@ func validatePrivacy(privacy PrivacyFlags) error {
 	return nil
 }
 
+// normalizeGuestStatus normalizes guest status into its canonical representation.
 func normalizeGuestStatus(status *GuestStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
 	status.Filesystems = append([]FilesystemStatus(nil), status.Filesystems...)
@@ -106,6 +109,7 @@ func normalizeGuestStatus(status *GuestStatus) {
 	})
 }
 
+// normalizeDBStatus normalizes db status into its canonical representation.
 func normalizeDBStatus(status *DBStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
 	status.Databases = append([]DatabaseCounters(nil), status.Databases...)
@@ -140,6 +144,7 @@ func normalizeDBStatus(status *DBStatus) {
 	})
 }
 
+// normalizeServiceStatus normalizes service status into its canonical representation.
 func normalizeServiceStatus(status *ServiceStatus) {
 	status.SchemaVersion = normalizedSchema(status.SchemaVersion)
 	status.Units = append([]SystemdUnitStatus(nil), status.Units...)
@@ -161,6 +166,7 @@ func normalizeServiceStatus(status *ServiceStatus) {
 	})
 }
 
+// sortListeningPorts sorts listening ports into stable output order.
 func sortListeningPorts(ports []ListeningPort) {
 	sort.Slice(ports, func(i, j int) bool {
 		left, right := ports[i], ports[j]
@@ -177,6 +183,7 @@ func sortListeningPorts(ports []ListeningPort) {
 	})
 }
 
+// normalizeIncidentTimeline normalizes incident timeline into its canonical representation.
 func normalizeIncidentTimeline(timeline *IncidentTimeline) {
 	timeline.SchemaVersion = normalizedSchema(timeline.SchemaVersion)
 	timeline.Events = append([]TimelineEvent(nil), timeline.Events...)
@@ -208,6 +215,7 @@ func normalizeIncidentTimeline(timeline *IncidentTimeline) {
 	sort.Strings(timeline.EvidenceRefs)
 }
 
+// normalizedSchema normalizes schema into its canonical representation.
 func normalizedSchema(schema string) string {
 	if schema == "" {
 		return SchemaVersion

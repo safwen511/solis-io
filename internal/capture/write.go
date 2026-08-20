@@ -113,6 +113,7 @@ func Write(inputs Inputs, evidence Evidence, now time.Time) (Result, error) {
 	return writeBundle(directory, filepath.Base(directory), now, artifacts)
 }
 
+// captureDirectoryName records directory name in the private evidence bundle.
 func captureDirectoryName(now time.Time, victim, suspect string) string {
 	return fmt.Sprintf(
 		"capture-%s-%s-%s",
@@ -199,6 +200,7 @@ func WriteMetadata(dst io.Writer, inputs Inputs, timestamp string) error {
 	return nil
 }
 
+// captureVMAttributionReport records VM attribution report in the private evidence bundle.
 func captureVMAttributionReport(inputs Inputs, evidence Evidence, now time.Time) ebpf.VMBlockLatencyReport {
 	if evidence.EBPFVMAttribution != nil {
 		return *evidence.EBPFVMAttribution
@@ -231,6 +233,7 @@ func captureVMAttributionReport(inputs Inputs, evidence Evidence, now time.Time)
 	}
 }
 
+// writeObserveSnapshot renders observe snapshot in the package's stable operator-facing format.
 func writeObserveSnapshot(dst io.Writer, inputs Inputs, evidence Evidence, now time.Time) error {
 	snapshot := evidence.ObserveSnapshot
 	reason := strings.TrimSpace(evidence.ObserveError)
@@ -260,6 +263,8 @@ func writeObserveSnapshot(dst io.Writer, inputs Inputs, evidence Evidence, now t
 	return err
 }
 
+// writeLiveOnlyExperimentPlaceholder renders live only experiment placeholder in the package's
+// stable operator-facing format.
 func writeLiveOnlyExperimentPlaceholder(dst io.Writer) error {
 	_, err := fmt.Fprintln(
 		dst,
@@ -270,6 +275,8 @@ func writeLiveOnlyExperimentPlaceholder(dst io.Writer) error {
 	return err
 }
 
+// writeLiveOnlyIncidentPlaceholder renders live only incident placeholder in the package's stable
+// operator-facing format.
 func writeLiveOnlyIncidentPlaceholder(dst io.Writer) error {
 	_, err := fmt.Fprintln(
 		dst,
@@ -281,6 +288,7 @@ func writeLiveOnlyIncidentPlaceholder(dst io.Writer) error {
 	return err
 }
 
+// captureMode records mode in the private evidence bundle.
 func captureMode(inputs Inputs) string {
 	if inputs.CaptureMode == "discover-suspects" {
 		return "discover-suspects"
@@ -288,6 +296,7 @@ func captureMode(inputs Inputs) string {
 	return "pairwise"
 }
 
+// captureEvidenceMode records evidence mode in the private evidence bundle.
 func captureEvidenceMode(inputs Inputs) string {
 	if strings.TrimSpace(inputs.ReportDirectory) == "" {
 		return "live-only"
@@ -295,6 +304,7 @@ func captureEvidenceMode(inputs Inputs) string {
 	return "report-backed"
 }
 
+// yesNo formats a boolean as yes or no for human-readable reports.
 func yesNo(value bool) string {
 	if value {
 		return "yes"
@@ -302,6 +312,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -310,6 +321,7 @@ func valueOrDash(value string) string {
 	return value
 }
 
+// writeArtifact renders artifact in the package's stable operator-facing format.
 func writeArtifact(path string, render func(io.Writer) error) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -333,6 +345,7 @@ func writeArtifact(path string, render func(io.Writer) error) error {
 	return nil
 }
 
+// writeBundle renders bundle in the package's stable operator-facing format.
 func writeBundle(finalDirectory, captureID string, createdAt time.Time, artifacts []artifact) (result Result, err error) {
 	seenNames := make(map[string]struct{}, len(artifacts))
 	for _, item := range artifacts {
@@ -408,6 +421,7 @@ func writeBundle(finalDirectory, captureID string, createdAt time.Time, artifact
 	return result, nil
 }
 
+// syncDirectory completes sync directory and returns any failure to its caller.
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

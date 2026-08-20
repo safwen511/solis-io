@@ -11,6 +11,7 @@ import (
 	"github.com/safwen511/solis-io/internal/observability"
 )
 
+// parseSingleLine parses and validates single line.
 func parseSingleLine(output, field string) (string, error) {
 	value := strings.TrimSpace(output)
 	if value == "" || strings.ContainsAny(value, "\r\n\x00") {
@@ -19,6 +20,7 @@ func parseSingleLine(output, field string) (string, error) {
 	return value, nil
 }
 
+// parseUptime parses and validates uptime.
 func parseUptime(output string) (float64, error) {
 	fields := strings.Fields(output)
 	if len(fields) == 0 {
@@ -31,6 +33,7 @@ func parseUptime(output string) (float64, error) {
 	return value, nil
 }
 
+// parseLoad parses and validates load.
 func parseLoad(output string) (observability.GuestCPUStatus, error) {
 	fields := strings.Fields(output)
 	if len(fields) < 3 {
@@ -47,6 +50,7 @@ func parseLoad(output string) (observability.GuestCPUStatus, error) {
 	return observability.GuestCPUStatus{Load1: values[0], Load5: values[1], Load15: values[2]}, nil
 }
 
+// parseMemory parses and validates memory.
 func parseMemory(output string) (observability.GuestMemoryStatus, error) {
 	values := make(map[string]uint64)
 	for _, line := range strings.Split(output, "\n") {
@@ -79,6 +83,7 @@ func parseMemory(output string) (observability.GuestMemoryStatus, error) {
 	}, nil
 }
 
+// parseFilesystems parses and validates filesystems.
 func parseFilesystems(output string) ([]observability.FilesystemStatus, error) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) < 2 {
@@ -108,6 +113,7 @@ func parseFilesystems(output string) ([]observability.FilesystemStatus, error) {
 	return filesystems, nil
 }
 
+// parseNetworkAddresses parses and validates network addresses.
 func parseNetworkAddresses(output string) map[string]string {
 	addresses := make(map[string]string)
 	for _, line := range strings.Split(output, "\n") {
@@ -127,6 +133,7 @@ func parseNetworkAddresses(output string) map[string]string {
 	return addresses
 }
 
+// parseNetworkCounters parses and validates network counters.
 func parseNetworkCounters(output string) (map[string]observability.NetworkStatus, error) {
 	counters := make(map[string]observability.NetworkStatus)
 	for _, line := range strings.Split(output, "\n") {
@@ -163,6 +170,7 @@ func parseNetworkCounters(output string) (map[string]observability.NetworkStatus
 	return counters, nil
 }
 
+// mergeNetwork merges network while preserving explicit availability.
 func mergeNetwork(addresses map[string]string, counters map[string]observability.NetworkStatus) []observability.NetworkStatus {
 	names := make(map[string]struct{}, len(addresses)+len(counters))
 	for name := range addresses {
@@ -182,6 +190,7 @@ func mergeNetwork(addresses map[string]string, counters map[string]observability
 	return result
 }
 
+// parseProcessPressure parses and validates process pressure.
 func parseProcessPressure(output string) ([]observability.ProcessPressure, error) {
 	processes := make([]observability.ProcessPressure, 0)
 	for _, line := range strings.Split(output, "\n") {
@@ -217,6 +226,7 @@ func parseProcessPressure(output string) ([]observability.ProcessPressure, error
 	return processes, nil
 }
 
+// parseListeningPorts parses and validates listening ports.
 func parseListeningPorts(output string) ([]observability.ListeningPort, error) {
 	ports := make([]observability.ListeningPort, 0)
 	seen := make(map[string]struct{})
@@ -264,6 +274,7 @@ func ParseListeningPorts(output string) ([]observability.ListeningPort, error) {
 	return parseListeningPorts(output)
 }
 
+// splitEndpoint builds split endpoint from validated inputs.
 func splitEndpoint(value string) (string, int, bool) {
 	separator := strings.LastIndexByte(value, ':')
 	if separator < 0 {
@@ -280,6 +291,7 @@ func splitEndpoint(value string) (string, int, bool) {
 	return address, port, true
 }
 
+// parseSSProcess parses and validates ss process.
 func parseSSProcess(line string) string {
 	marker := `users:(("`
 	start := strings.Index(line, marker)
@@ -331,6 +343,7 @@ func ParseSystemdUnit(output string) (observability.SystemdUnitStatus, error) {
 	}, nil
 }
 
+// parseOptionalInt parses and validates optional int.
 func parseOptionalInt(value string) (int, error) {
 	if value == "" {
 		return 0, nil
@@ -338,6 +351,7 @@ func parseOptionalInt(value string) (int, error) {
 	return strconv.Atoi(value)
 }
 
+// parseOptionalUint parses and validates optional uint.
 func parseOptionalUint(value string) (uint64, error) {
 	if value == "" {
 		return 0, nil

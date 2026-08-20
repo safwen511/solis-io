@@ -68,10 +68,12 @@ func Watch(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) e
 	return nil
 }
 
+// watchLayerSamples builds watch layer samples from validated inputs.
 func watchLayerSamples(targets []VMTarget) []layerSample {
 	return watchLayerSamplesWith(targets, hoststorage.NormalizeBlockDevice, readDeviceStats)
 }
 
+// watchLayerSamplesWith builds watch layer samples with from validated inputs.
 func watchLayerSamplesWith(
 	targets []VMTarget,
 	normalize func(string) string,
@@ -121,6 +123,7 @@ func watchLayerSamplesWith(
 	return samples
 }
 
+// writeWatchHeader renders watch header in the package's stable operator-facing format.
 func writeWatchHeader(dst io.Writer, snapshot Snapshot, duration, interval time.Duration) error {
 	if _, err := fmt.Fprintln(dst, "Storage Watch"); err != nil {
 		return err
@@ -159,6 +162,7 @@ func writeWatchHeader(dst io.Writer, snapshot Snapshot, duration, interval time.
 	return err
 }
 
+// writeWatchDelta renders watch delta in the package's stable operator-facing format.
 func writeWatchDelta(dst io.Writer, delta DeviceDelta) error {
 	_, err := fmt.Fprintf(
 		dst,
@@ -178,6 +182,7 @@ func writeWatchDelta(dst io.Writer, delta DeviceDelta) error {
 	return err
 }
 
+// percentText formats a measured percentage for stable human-readable output.
 func percentText(rate Rate) string {
 	if !rate.Available {
 		return "-"
@@ -185,6 +190,7 @@ func percentText(rate Rate) string {
 	return fmt.Sprintf("%.2f%%", rate.Value)
 }
 
+// rateText formats a measured rate for stable human-readable output.
 func rateText(rate Rate) string {
 	if !rate.Available {
 		return "-"

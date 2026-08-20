@@ -19,6 +19,7 @@ func WriteJSON(dst io.Writer, report VMStorageStatsReport) error {
 	return encoder.Encode(report)
 }
 
+// privacyCollected reports whether privacy collected.
 func privacyCollected(report VMStorageStatsReport) bool {
 	p := report.Privacy
 	return p.ProcessArgumentsCollected || p.EnvironmentCollected || p.GuestFilesCollected ||
@@ -26,6 +27,7 @@ func privacyCollected(report VMStorageStatsReport) bool {
 		p.ResponseBodyCollected || p.SecretsCollected
 }
 
+// normalizeReport normalizes report into its canonical representation.
 func normalizeReport(report VMStorageStatsReport) VMStorageStatsReport {
 	if report.SchemaVersion == "" {
 		report.SchemaVersion = SchemaVersion
@@ -89,6 +91,7 @@ func normalizeReport(report VMStorageStatsReport) VMStorageStatsReport {
 	return report
 }
 
+// nonNilStrings builds non nil strings from validated inputs.
 func nonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -96,6 +99,7 @@ func nonNilStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
 
+// sortedUnique sorts values and removes duplicates for deterministic output.
 func sortedUnique(values []string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(values))

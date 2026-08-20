@@ -113,6 +113,7 @@ func ApplyEBPFVMAttribution(snapshot *ObserveSnapshot, report *ebpf.VMBlockLaten
 	finalizeQuality(snapshot)
 }
 
+// removeEvidenceSection removes evidence section from the owned collection.
 func removeEvidenceSection(snapshot *ObserveSnapshot, section string) {
 	qualities := snapshot.EvidenceQuality.Sections[:0]
 	for _, value := range snapshot.EvidenceQuality.Sections {

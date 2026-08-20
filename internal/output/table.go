@@ -62,6 +62,7 @@ func VMDetail(dst io.Writer, vm inventory.VM, verbose bool) error {
 	return w.Flush()
 }
 
+// qemuExecutable derives stable operator-facing text for QEMU executable.
 func qemuExecutable(cmdline string) string {
 	fields := strings.Fields(cmdline)
 	if len(fields) == 0 {
@@ -71,6 +72,7 @@ func qemuExecutable(cmdline string) string {
 	return fields[0]
 }
 
+// qemuDiskBackend derives stable operator-facing text for QEMU disk backend.
 func qemuDiskBackend(vm inventory.VM) string {
 	if strings.TrimSpace(vm.Disk) != "" {
 		return vm.Disk
@@ -101,6 +103,7 @@ func qemuDiskBackend(vm inventory.VM) string {
 	return backend
 }
 
+// isDiskImage reports whether disk image.
 func isDiskImage(path string) bool {
 	path = strings.ToLower(path)
 	return strings.HasSuffix(path, ".qcow2") ||
@@ -108,6 +111,7 @@ func isDiskImage(path string) bool {
 		strings.HasSuffix(path, ".img")
 }
 
+// yesNo formats a boolean as yes or no for human-readable reports.
 func yesNo(value bool) string {
 	if value {
 		return "yes"
@@ -116,6 +120,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
+// emptyDash replaces empty text with a dash so table columns remain explicit.
 func emptyDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

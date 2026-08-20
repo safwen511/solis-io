@@ -78,6 +78,7 @@ func Run(ctx context.Context, dst io.Writer, source Source, options Options) err
 	}
 }
 
+// validateOptions validates options against its required contract.
 func validateOptions(source Source, options Options) error {
 	if source == nil {
 		return errors.New("top source is required")

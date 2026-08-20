@@ -33,6 +33,7 @@ func EnrichWithOptions(vms []VM, options EnrichOptions) []VM {
 	return vms
 }
 
+// domainState derives stable operator-facing text for domain state.
 func domainState(name, uri string) string {
 	out, err := virshCommand(uri, "domstate", name).CombinedOutput()
 	if err != nil {
@@ -42,6 +43,7 @@ func domainState(name, uri string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// leaseIP derives stable operator-facing text for lease ip.
 func leaseIP(name, uri string) string {
 	out, err := virshCommand(uri, "domifaddr", name, "--source", "lease").CombinedOutput()
 	if err != nil {
@@ -59,6 +61,7 @@ func leaseIP(name, uri string) string {
 	return ""
 }
 
+// diskPath derives stable operator-facing text for disk path.
 func diskPath(name, uri string) string {
 	out, err := virshCommand(uri, "domblklist", name, "--details").CombinedOutput()
 	if err != nil {
@@ -75,6 +78,7 @@ func diskPath(name, uri string) string {
 	return ""
 }
 
+// virshCommand builds virsh command from validated inputs.
 func virshCommand(uri string, args ...string) *exec.Cmd {
 	if strings.TrimSpace(uri) != "" {
 		args = append([]string{"-c", strings.TrimSpace(uri)}, args...)

@@ -189,6 +189,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// runVersion executes the version workflow.
 func runVersion(args []string, w io.Writer) error {
 	info := version.BuildInfo()
 	switch {
@@ -237,6 +238,7 @@ const observeUsage = "usage: solis observe snapshot|watch [options]"
 const observeSnapshotUsage = "usage: solis observe snapshot --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] --json"
 const observeWatchUsage = "usage: solis observe watch --victim <vm> [--suspect <vm> | --discover-suspects] [--duration <duration>] [--interval <duration>] [--every <duration>] [--iterations <n>] [--include-guest] [--include-services] [--include-db] [--include-ebpf-latency] [--output-dir <dir>] --json"
 
+// booleanFlag builds boolean flag and returns an error when validation or source access fails.
 func booleanFlag(token, name string) (value, matched bool, err error) {
 	if token == name {
 		return true, true, nil
@@ -252,6 +254,7 @@ func booleanFlag(token, name string) (value, matched bool, err error) {
 	return parsed, true, nil
 }
 
+// setBooleanOption sets boolean option after validating the supplied value.
 func setBooleanOption(token, name, usage string, seen, target *bool) (bool, error) {
 	value, matched, err := booleanFlag(token, name)
 	if err != nil {
@@ -268,6 +271,7 @@ func setBooleanOption(token, name, usage string, seen, target *bool) (bool, erro
 	return true, nil
 }
 
+// setKnownBooleanOption sets known boolean option after validating the supplied value.
 func setKnownBooleanOption(token, usage string, seen map[string]bool, targets map[string]*bool) (bool, error) {
 	name := token
 	if separator := strings.IndexByte(name, '='); separator >= 0 {
@@ -292,6 +296,8 @@ func setKnownBooleanOption(token, usage string, seen map[string]bool, targets ma
 	return true, nil
 }
 
+// stripHelpFlags builds strip help flags and returns an error when validation or source access
+// fails.
 func stripHelpFlags(args []string) ([]string, bool, error) {
 	filtered := make([]string, 0, len(args))
 	requested := false
@@ -314,6 +320,8 @@ func stripHelpFlags(args []string) ([]string, bool, error) {
 	return filtered, requested, nil
 }
 
+// relocateLeadingGlobalJSON builds relocate leading global JSON and returns an error when
+// validation or source access fails.
 func relocateLeadingGlobalJSON(args []string) ([]string, error) {
 	if len(args) == 0 {
 		return args, nil
@@ -336,6 +344,7 @@ func relocateLeadingGlobalJSON(args []string) ([]string, error) {
 	return append(relocated, "--json="+strconv.FormatBool(value)), nil
 }
 
+// usageForCommand derives stable operator-facing text for usage for command.
 func usageForCommand(args []string) string {
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
@@ -386,11 +395,13 @@ func usageForCommand(args []string) string {
 	return strings.TrimSpace(builder.String())
 }
 
+// interactiveTopAvailable requires both stdin and stdout to be terminals before enabling raw mode.
 func interactiveTopAvailable(stdout io.Writer) bool {
 	output, ok := stdout.(*os.File)
 	return ok && topview.IsTerminal(os.Stdin) && topview.IsTerminal(output)
 }
 
+// expandOperatorCommand maps short operator verbs to fixed, parseable Solis argument vectors.
 func expandOperatorCommand(args []string, captureOutputRoot string) ([]string, error) {
 	if len(args) == 0 {
 		return nil, errors.New("operator command is required")
@@ -421,6 +432,7 @@ func expandOperatorCommand(args []string, captureOutputRoot string) ([]string, e
 	}
 }
 
+// expandTargetOperatorCommand expands victim/suspect shortcuts without invoking a shell.
 func expandTargetOperatorCommand(args []string, command, defaultOutputDirectory, usage string) ([]string, error) {
 	if len(args) < 2 || strings.HasPrefix(args[1], "-") || strings.TrimSpace(args[1]) == "" {
 		return nil, errors.New(usage)
@@ -454,6 +466,7 @@ func expandTargetOperatorCommand(args []string, command, defaultOutputDirectory,
 	return append(expanded, remainder...), nil
 }
 
+// hasOption recognizes both bare and equals-style forms of one CLI option.
 func hasOption(args []string, name string) bool {
 	for _, argument := range args {
 		if argument == name || strings.HasPrefix(argument, name+"=") {
@@ -562,6 +575,7 @@ type observeWatchOptions struct {
 	OutputDirectory string
 }
 
+// parseObserveSnapshotArgs parses and validates observe snapshot args.
 func parseObserveSnapshotArgs(args []string) (observeSnapshotOptions, error) {
 	options := observeSnapshotOptions{Duration: 10 * time.Second, Interval: 2 * time.Second}
 	if len(args) < 2 || args[0] != "observe" || args[1] != "snapshot" {
@@ -627,6 +641,7 @@ func parseObserveSnapshotArgs(args []string) (observeSnapshotOptions, error) {
 	return options, nil
 }
 
+// parseObserveWatchArgs parses and validates observe watch args.
 func parseObserveWatchArgs(args []string) (observeWatchOptions, error) {
 	options := observeWatchOptions{
 		observeSnapshotOptions: observeSnapshotOptions{Duration: 10 * time.Second, Interval: 2 * time.Second},
@@ -709,6 +724,7 @@ func parseObserveWatchArgs(args []string) (observeWatchOptions, error) {
 	return options, nil
 }
 
+// parseHostStatusArgs parses and validates host status args.
 func parseHostStatusArgs(args []string) error {
 	if len(args) != 3 || args[0] != "host" || args[1] != "status" {
 		return errors.New(hostStatusUsage)
@@ -720,6 +736,7 @@ func parseHostStatusArgs(args []string) error {
 	return nil
 }
 
+// parseVMJSONStatusArgs parses and validates vmjson status args.
 func parseVMJSONStatusArgs(args []string, command string) (string, error) {
 	usage := guestStatusUsage
 	if command == "service" {
@@ -758,6 +775,7 @@ func parseVMJSONStatusArgs(args []string, command string) (string, error) {
 	return name, nil
 }
 
+// parseStatusArgs parses and validates status args.
 func parseStatusArgs(args []string) (statusOptions, error) {
 	options := statusOptions{
 		Duration: 3 * time.Second,
@@ -857,6 +875,7 @@ func parseStatusArgs(args []string) (statusOptions, error) {
 	return options, nil
 }
 
+// parseTopArgs parses and validates top args.
 func parseTopArgs(args []string) (topOptions, error) {
 	options := topOptions{
 		Duration: 3 * time.Second,
@@ -958,6 +977,7 @@ func parseTopArgs(args []string) (topOptions, error) {
 	return options, nil
 }
 
+// parseIncidentExplainArgs parses and validates incident explain args.
 func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	if len(args) < 3 || args[1] != "explain" || strings.HasPrefix(args[2], "--") {
 		return "", "", "", errors.New(incidentExplainUsage)
@@ -972,6 +992,7 @@ func parseIncidentExplainArgs(args []string) (string, string, string, error) {
 	return reportDir, victim, suspect, nil
 }
 
+// parseEBPFBlockWatchArgs parses and validates ebpf block watch args.
 func parseEBPFBlockWatchArgs(args []string) (time.Duration, error) {
 	if len(args) < 2 || args[0] != "ebpf" || args[1] != "block-watch" {
 		return 0, errors.New(ebpfBlockWatchUsage)
@@ -989,6 +1010,7 @@ func parseEBPFBlockWatchArgs(args []string) (time.Duration, error) {
 	return duration, nil
 }
 
+// parseRequiredEBPFDuration parses and validates required ebpf duration.
 func parseRequiredEBPFDuration(args []string, command, usage string) (time.Duration, error) {
 	if len(args) != 4 || args[0] != "ebpf" || args[1] != command || args[2] != "--duration" {
 		return 0, errors.New(usage)
@@ -1000,6 +1022,7 @@ func parseRequiredEBPFDuration(args []string, command, usage string) (time.Durat
 	return duration, nil
 }
 
+// parseEBPFBlockLatencyArgs parses and validates ebpf block latency args.
 func parseEBPFBlockLatencyArgs(args []string) (ebpfBlockLatencyOptions, error) {
 	if len(args) < 2 || args[0] != "ebpf" || args[1] != "block-latency" {
 		return ebpfBlockLatencyOptions{}, errors.New(ebpfBlockLatencyUsage)
@@ -1042,6 +1065,7 @@ func parseEBPFBlockLatencyArgs(args []string) (ebpfBlockLatencyOptions, error) {
 	return options, nil
 }
 
+// parseEBPFVMBlockLatencyArgs parses and validates ebpfvm block latency args.
 func parseEBPFVMBlockLatencyArgs(args []string) (ebpfVMBlockLatencyOptions, error) {
 	if len(args) < 2 || args[0] != "ebpf" || args[1] != "vm-block-latency" {
 		return ebpfVMBlockLatencyOptions{}, errors.New(ebpfVMBlockLatencyUsage)
@@ -1127,6 +1151,7 @@ func parseEBPFVMBlockLatencyArgs(args []string) (ebpfVMBlockLatencyOptions, erro
 	return options, nil
 }
 
+// parseVMStorageStatsArgs parses and validates vm storage stats args.
 func parseVMStorageStatsArgs(args []string) (vmStorageStatsOptions, error) {
 	if len(args) < 2 || args[0] != "vm" || args[1] != "storage-stats" {
 		return vmStorageStatsOptions{}, errors.New(vmStorageStatsUsage)
@@ -1195,6 +1220,7 @@ func parseVMStorageStatsArgs(args []string) (vmStorageStatsOptions, error) {
 	return options, nil
 }
 
+// validBlockDeviceName reports whether valid block device name.
 func validBlockDeviceName(value string) bool {
 	if value == "" || strings.Contains(value, "/") || value == "." || value == ".." {
 		return false
@@ -1208,6 +1234,7 @@ func validBlockDeviceName(value string) bool {
 	return true
 }
 
+// parseTracePlanArgs parses and validates trace plan args.
 func parseTracePlanArgs(args []string) (string, string, error) {
 	if len(args) < 2 || args[1] != "plan" {
 		return "", "", errors.New(tracePlanUsage)
@@ -1216,6 +1243,7 @@ func parseTracePlanArgs(args []string) (string, string, error) {
 	return parseVictimSuspectOptions(args, 2, tracePlanUsage)
 }
 
+// parseStorageSnapshotArgs parses and validates storage snapshot args.
 func parseStorageSnapshotArgs(args []string) (string, string, error) {
 	if len(args) < 2 || args[1] != "snapshot" {
 		return "", "", errors.New(storageSnapshotUsage)
@@ -1224,6 +1252,7 @@ func parseStorageSnapshotArgs(args []string) (string, string, error) {
 	return parseVictimSuspectOptions(args, 2, storageSnapshotUsage)
 }
 
+// parseStorageWatchArgs parses and validates storage watch args.
 func parseStorageWatchArgs(args []string) (string, string, time.Duration, time.Duration, error) {
 	if len(args) < 2 || args[1] != "watch" {
 		return "", "", 0, 0, errors.New(storageWatchUsage)
@@ -1231,6 +1260,7 @@ func parseStorageWatchArgs(args []string) (string, string, time.Duration, time.D
 	return parseTimedWatchOptions(args, 2, storageWatchUsage, "storage watch")
 }
 
+// parseQEMUIOWatchArgs parses and validates qemuio watch args.
 func parseQEMUIOWatchArgs(args []string) (string, string, time.Duration, time.Duration, error) {
 	if len(args) < 2 || args[1] != "io-watch" {
 		return "", "", 0, 0, errors.New(qemuIOWatchUsage)
@@ -1238,6 +1268,7 @@ func parseQEMUIOWatchArgs(args []string) (string, string, time.Duration, time.Du
 	return parseTimedWatchOptions(args, 2, qemuIOWatchUsage, "qemu io-watch")
 }
 
+// parseQEMUIOSummaryArgs parses and validates qemuio summary args.
 func parseQEMUIOSummaryArgs(args []string) (string, string, time.Duration, time.Duration, error) {
 	if len(args) < 2 || args[1] != "io-summary" {
 		return "", "", 0, 0, errors.New(qemuIOSummaryUsage)
@@ -1245,6 +1276,7 @@ func parseQEMUIOSummaryArgs(args []string) (string, string, time.Duration, time.
 	return parseTimedWatchOptions(args, 2, qemuIOSummaryUsage, "qemu io-summary")
 }
 
+// parseTimedWatchOptions parses and validates timed watch options.
 func parseTimedWatchOptions(args []string, start int, usage, commandName string) (string, string, time.Duration, time.Duration, error) {
 	options, err := parseTimedTargetOptions(
 		args,
@@ -1265,6 +1297,7 @@ func parseTimedWatchOptions(args []string, start int, usage, commandName string)
 	return options.Victim, options.Suspect, options.Duration, options.Interval, nil
 }
 
+// parseDiagnoseNoisyNeighborArgs parses and validates diagnose noisy neighbor args.
 func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 	if len(args) < 2 || args[1] != "noisy-neighbor" {
 		return timedTargetOptions{}, errors.New(diagnoseNoisyNeighborUsage)
@@ -1284,6 +1317,7 @@ func parseDiagnoseNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 	)
 }
 
+// parseCaptureNoisyNeighborArgs parses and validates capture noisy neighbor args.
 func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 	if len(args) < 2 || args[1] != "noisy-neighbor" {
 		return timedTargetOptions{}, errors.New(captureNoisyNeighborUsage)
@@ -1313,10 +1347,13 @@ func parseCaptureNoisyNeighborArgs(args []string) (timedTargetOptions, error) {
 	return options, nil
 }
 
+// parseWatchNoisyNeighborArgs parses and validates watch noisy neighbor args.
 func parseWatchNoisyNeighborArgs(args []string) (watchNoisyNeighborOptions, error) {
 	return parseWatchNoisyNeighborArgsWithDefault(args, solisconfig.DevelopmentDefaults().Settings.CaptureOutputRoot)
 }
 
+// parseWatchNoisyNeighborArgsWithDefault parses and validates watch noisy neighbor args with
+// default.
 func parseWatchNoisyNeighborArgsWithDefault(args []string, outputDirectory string) (watchNoisyNeighborOptions, error) {
 	if len(args) < 2 || args[1] != "noisy-neighbor" {
 		return watchNoisyNeighborOptions{}, errors.New(watchNoisyNeighborUsage)
@@ -1419,6 +1456,7 @@ func parseWatchNoisyNeighborArgsWithDefault(args []string, outputDirectory strin
 	return options, nil
 }
 
+// parseTimedTargetOptions parses and validates timed target options.
 func parseTimedTargetOptions(
 	args []string,
 	start int,
@@ -1556,6 +1594,7 @@ func parseTimedTargetOptions(
 	return options, nil
 }
 
+// parseVictimSuspectOptions parses and validates victim suspect options.
 func parseVictimSuspectOptions(args []string, start int, usage string) (string, string, error) {
 	var victim, suspect string
 	for i := start; i < len(args); {
@@ -1592,6 +1631,7 @@ func parseVictimSuspectOptions(args []string, start int, usage string) (string, 
 	return victim, suspect, nil
 }
 
+// runTracePlan executes the trace plan workflow.
 func runTracePlan(runtimeConfig solisconfig.Runtime, victim, suspect string, w io.Writer) error {
 	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
@@ -1612,6 +1652,7 @@ func runTracePlan(runtimeConfig solisconfig.Runtime, victim, suspect string, w i
 	return nil
 }
 
+// runStorageSnapshot executes the storage snapshot workflow.
 func runStorageSnapshot(runtimeConfig solisconfig.Runtime, victim, suspect string, w io.Writer) error {
 	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
@@ -1631,6 +1672,7 @@ func runStorageSnapshot(runtimeConfig solisconfig.Runtime, victim, suspect strin
 	return nil
 }
 
+// runStorageCommand executes the storage command workflow.
 func runStorageCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: solis storage snapshot|watch [options]")
@@ -1654,6 +1696,7 @@ func runStorageCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Wr
 	}
 }
 
+// runStorageWatch executes the storage watch workflow.
 func runStorageWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
 	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
@@ -1673,6 +1716,7 @@ func runStorageWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, 
 	return nil
 }
 
+// runQEMUCommand executes the qemu command workflow.
 func runQEMUCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: solis qemu io-watch|io-summary [options]")
@@ -1696,6 +1740,7 @@ func runQEMUCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Write
 	}
 }
 
+// runQEMUIOWatch executes the qemuio watch workflow.
 func runQEMUIOWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
 	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
@@ -1714,6 +1759,7 @@ func runQEMUIOWatch(runtimeConfig solisconfig.Runtime, victim, suspect string, d
 	return nil
 }
 
+// runQEMUIOSummary executes the qemuio summary workflow.
 func runQEMUIOSummary(runtimeConfig solisconfig.Runtime, victim, suspect string, duration, interval time.Duration, w io.Writer) error {
 	plan, err := loadEnrichedTargetPlan(runtimeConfig, victim, suspect)
 	if err != nil {
@@ -1736,6 +1782,7 @@ func runQEMUIOSummary(runtimeConfig solisconfig.Runtime, victim, suspect string,
 	return nil
 }
 
+// runDiagnoseCommand executes the diagnose command workflow.
 func runDiagnoseCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	options, err := parseDiagnoseNoisyNeighborArgs(args)
 	if err != nil {
@@ -1756,6 +1803,7 @@ type noisyNeighborEvidence struct {
 	Diagnosis         diagnose.Report
 }
 
+// runNoisyNeighborDiagnosis executes the noisy neighbor diagnosis workflow.
 func runNoisyNeighborDiagnosis(runtimeConfig solisconfig.Runtime, options timedTargetOptions, w io.Writer) error {
 	var report diagnose.Report
 	var err error
@@ -1786,6 +1834,7 @@ func runNoisyNeighborDiagnosis(runtimeConfig solisconfig.Runtime, options timedT
 	return nil
 }
 
+// runCaptureCommand executes the capture command workflow.
 func runCaptureCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	options, err := parseCaptureNoisyNeighborArgs(args)
 	if err != nil {
@@ -1820,6 +1869,8 @@ func runCaptureCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Wr
 	return nil
 }
 
+// writeNoisyNeighborCapture renders noisy neighbor capture in the package's stable operator-facing
+// format.
 func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedTargetOptions, evidence noisyNeighborEvidence, now time.Time) (capture.Result, error) {
 	mode := "pairwise"
 	if options.DiscoverSuspects {
@@ -1870,6 +1921,7 @@ func writeNoisyNeighborCapture(runtimeConfig solisconfig.Runtime, options timedT
 	)
 }
 
+// runWatchCommand executes the watch command workflow.
 func runWatchCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	options, err := parseWatchNoisyNeighborArgsWithDefault(args, runtimeConfig.Settings.CaptureOutputRoot)
 	if err != nil {
@@ -1889,6 +1941,7 @@ func runWatchCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writ
 	return nil
 }
 
+// runNoisyNeighborWatch executes the noisy neighbor watch workflow.
 func runNoisyNeighborWatch(ctx context.Context, runtimeConfig solisconfig.Runtime, options watchNoisyNeighborOptions, w io.Writer, stats *watcher.FinalSummary) error {
 	if err := writeWatchHeader(w, options); err != nil {
 		return err
@@ -1985,6 +2038,8 @@ func runNoisyNeighborWatch(ctx context.Context, runtimeConfig solisconfig.Runtim
 	}
 }
 
+// writeWatchCapturePaths renders watch capture paths in the package's stable operator-facing
+// format.
 func writeWatchCapturePaths(w io.Writer, result capture.Result) error {
 	if _, err := fmt.Fprintf(w, "Capture directory: %s\n", result.Directory); err != nil {
 		return err
@@ -2004,6 +2059,7 @@ func writeWatchCapturePaths(w io.Writer, result capture.Result) error {
 	return nil
 }
 
+// writeWatchHeader renders watch header in the package's stable operator-facing format.
 func writeWatchHeader(w io.Writer, options watchNoisyNeighborOptions) error {
 	mode := "pairwise"
 	if options.DiscoverSuspects {
@@ -2026,6 +2082,7 @@ func writeWatchHeader(w io.Writer, options watchNoisyNeighborOptions) error {
 	return err
 }
 
+// watchSamplingInterval builds watch sampling interval from validated inputs.
 func watchSamplingInterval(window time.Duration) time.Duration {
 	const defaultInterval = 2 * time.Second
 	if window < defaultInterval {
@@ -2034,6 +2091,8 @@ func watchSamplingInterval(window time.Duration) time.Duration {
 	return defaultInterval
 }
 
+// collectNoisyNeighborEvidence collects noisy neighbor evidence from the configured evidence
+// sources.
 func collectNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options timedTargetOptions) (noisyNeighborEvidence, error) {
 	experimentReport, experimentAvailable, err := loadOptionalExperimentReport(options.ReportDirectory)
 	if err != nil {
@@ -2121,6 +2180,8 @@ func collectNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options tim
 	}, nil
 }
 
+// collectDiscoveredNoisyNeighborEvidence collects discovered noisy neighbor evidence from the
+// configured evidence sources.
 func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, options timedTargetOptions) (noisyNeighborEvidence, error) {
 	experimentReport, experimentAvailable, err := loadOptionalExperimentReport(options.ReportDirectory)
 	if err != nil {
@@ -2246,6 +2307,7 @@ func collectDiscoveredNoisyNeighborEvidence(runtimeConfig solisconfig.Runtime, o
 	}, nil
 }
 
+// loadOptionalExperimentReport loads optional experiment report from its backing source.
 func loadOptionalExperimentReport(path string) (experiment.Report, bool, error) {
 	if strings.TrimSpace(path) == "" {
 		return experiment.Report{}, false, nil
@@ -2257,6 +2319,7 @@ func loadOptionalExperimentReport(path string) (experiment.Report, bool, error) 
 	return report, true, nil
 }
 
+// newDiagnosisReport constructs diagnosis report wired to the package's production dependencies.
 func newDiagnosisReport(
 	inputs diagnose.Inputs,
 	experimentReport experiment.Report,
@@ -2270,6 +2333,7 @@ func newDiagnosisReport(
 	return diagnose.NewReport(inputs, experimentReport, storageSnapshot, qemuReport)
 }
 
+// startBlockLatencyCollection starts block latency collection and returns its initial state.
 func startBlockLatencyCollection(enabled bool, duration time.Duration) <-chan blockLatencyCollectionResult {
 	if !enabled {
 		return nil
@@ -2282,6 +2346,7 @@ func startBlockLatencyCollection(enabled bool, duration time.Duration) <-chan bl
 	return results
 }
 
+// finishBlockLatencyCollection finalizes block latency collection and records its terminal state.
 func finishBlockLatencyCollection(results <-chan blockLatencyCollectionResult, context *ebpf.BlockLatencyVMContext) *ebpf.BlockLatencyEvidence {
 	if results == nil {
 		return nil
@@ -2304,6 +2369,7 @@ type vmBlockLatencyCollectionResult struct {
 	err    error
 }
 
+// startVMBlockLatencyCollection starts vm block latency collection and returns its initial state.
 func startVMBlockLatencyCollection(enabled bool, duration, interval time.Duration, targets []inventory.VM) <-chan vmBlockLatencyCollectionResult {
 	if !enabled {
 		return nil
@@ -2324,6 +2390,8 @@ func startVMBlockLatencyCollection(enabled bool, duration, interval time.Duratio
 	return results
 }
 
+// finishVMBlockLatencyCollection finalizes vm block latency collection and records its terminal
+// state.
 func finishVMBlockLatencyCollection(results <-chan vmBlockLatencyCollectionResult, duration, interval time.Duration) *ebpf.VMBlockLatencyReport {
 	if results == nil {
 		return nil
@@ -2361,6 +2429,7 @@ func finishVMBlockLatencyCollection(results <-chan vmBlockLatencyCollectionResul
 	return &report
 }
 
+// loadEnrichedTargetPlan loads enriched target plan from its backing source.
 func loadEnrichedTargetPlan(runtimeConfig solisconfig.Runtime, victim, suspect string) (traceplan.Plan, error) {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -2386,6 +2455,7 @@ func loadEnrichedTargetPlan(runtimeConfig solisconfig.Runtime, victim, suspect s
 	return plan, nil
 }
 
+// runIncidentExplanation executes the incident explanation workflow.
 func runIncidentExplanation(reportDir, victim, suspect string, w io.Writer) error {
 	report, err := experiment.Load(reportDir)
 	if err != nil {
@@ -2403,6 +2473,7 @@ func runIncidentExplanation(reportDir, victim, suspect string, w io.Writer) erro
 	return nil
 }
 
+// runExperimentSummary executes the experiment summary workflow.
 func runExperimentSummary(reportDir string, w io.Writer) error {
 	report, err := experiment.Load(reportDir)
 	if err != nil {
@@ -2416,6 +2487,7 @@ func runExperimentSummary(reportDir string, w io.Writer) error {
 	return nil
 }
 
+// runInventory executes the inventory workflow.
 func runInventory(runtimeConfig solisconfig.Runtime, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -2425,6 +2497,7 @@ func runInventory(runtimeConfig solisconfig.Runtime, w io.Writer) error {
 	return output.InventoryTable(w, inventory.EnrichWithOptions(vms, inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI}))
 }
 
+// runStatus executes the status workflow.
 func runStatus(runtimeConfig solisconfig.Runtime, options statusOptions, w io.Writer) error {
 	if options.Watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -2458,6 +2531,7 @@ func runStatus(runtimeConfig solisconfig.Runtime, options statusOptions, w io.Wr
 	return nil
 }
 
+// collectStatus collects status from the configured evidence sources.
 func collectStatus(runtimeConfig solisconfig.Runtime, options statusOptions) (statusview.Report, error) {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -2475,6 +2549,7 @@ func collectStatus(runtimeConfig solisconfig.Runtime, options statusOptions) (st
 	return report, nil
 }
 
+// runStatusWatch executes the status watch workflow.
 func runStatusWatch(ctx context.Context, runtimeConfig solisconfig.Runtime, options statusOptions, w io.Writer, summary *statusview.WatchSummary) error {
 	nextStart := time.Now()
 	for {
@@ -2545,6 +2620,7 @@ type topHostCollectionResult struct {
 	err    error
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (source liveTopSource) Collect(ctx context.Context, request topview.CollectRequest) (topview.Snapshot, error) {
 	select {
 	case <-ctx.Done():
@@ -2652,6 +2728,7 @@ func (source liveTopSource) Collect(ctx context.Context, request topview.Collect
 	return snapshot, nil
 }
 
+// projectTopInventory projects top inventory into its public evidence representation.
 func projectTopInventory(vms []inventory.VM) []topview.InventoryVM {
 	projected := make([]topview.InventoryVM, 0, len(vms))
 	for _, vm := range vms {
@@ -2672,6 +2749,7 @@ func projectTopInventory(vms []inventory.VM) []topview.InventoryVM {
 	return projected
 }
 
+// runTop executes the top workflow.
 func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -2723,6 +2801,7 @@ func runTop(runtimeConfig solisconfig.Runtime, options topOptions, w io.Writer) 
 	return nil
 }
 
+// topLaunchArgs builds top launch args and returns an error when validation or source access fails.
 func topLaunchArgs(request topview.LaunchRequest, captureOutputRoot string) ([]string, error) {
 	vm := strings.TrimSpace(request.VM)
 	requireVM := func() error {
@@ -2778,10 +2857,13 @@ type boundedWorkflowWriter struct {
 	truncated bool
 }
 
+// newBoundedWorkflowWriter constructs bounded workflow writer wired to the package's production
+// dependencies.
 func newBoundedWorkflowWriter(limit int) *boundedWorkflowWriter {
 	return &boundedWorkflowWriter{remaining: limit}
 }
 
+// Write writes the value to its configured destination and propagates write failures.
 func (writer *boundedWorkflowWriter) Write(value []byte) (int, error) {
 	written := len(value)
 	if writer.remaining <= 0 {
@@ -2798,6 +2880,7 @@ func (writer *boundedWorkflowWriter) Write(value []byte) (int, error) {
 	return written, nil
 }
 
+// String returns the stable textual representation of the value.
 func (writer *boundedWorkflowWriter) String() string {
 	result := writer.contents.String()
 	if writer.truncated {
@@ -2806,6 +2889,7 @@ func (writer *boundedWorkflowWriter) String() string {
 	return result
 }
 
+// runTopWorkflow executes the top workflow.
 func runTopWorkflow(ctx context.Context, runtimeConfig solisconfig.Runtime, request topview.LaunchRequest) (topview.WorkflowResult, error) {
 	args, err := topLaunchArgs(request, runtimeConfig.Settings.CaptureOutputRoot)
 	if err != nil {
@@ -2888,6 +2972,7 @@ func runTopWorkflow(ctx context.Context, runtimeConfig solisconfig.Runtime, requ
 	return topview.WorkflowResult{Output: w.String(), Detail: detail}, runErr
 }
 
+// terminalColorEnabled reports whether terminal color enabled.
 func terminalColorEnabled() bool {
 	if _, disabled := os.LookupEnv("NO_COLOR"); disabled {
 		return false
@@ -2895,6 +2980,7 @@ func terminalColorEnabled() bool {
 	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
 }
 
+// saveTopWorkflowDetail persists top workflow detail through the package's output boundary.
 func saveTopWorkflowDetail(root string, detail topview.WorkflowDetail) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -2917,6 +3003,8 @@ func saveTopWorkflowDetail(root string, detail topview.WorkflowDetail) (string, 
 	return path, nil
 }
 
+// writeObserveWorkflowSummary renders observe workflow summary in the package's stable
+// operator-facing format.
 func writeObserveWorkflowSummary(w io.Writer, snapshot observe.ObserveSnapshot) error {
 	suspect := strings.TrimSpace(snapshot.SelectedSuspect)
 	if suspect == "" {
@@ -2961,6 +3049,7 @@ func writeObserveWorkflowSummary(w io.Writer, snapshot observe.ObserveSnapshot) 
 	return err
 }
 
+// runDoctor executes the doctor workflow.
 func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	lab := false
 	if len(args) == 2 && args[1] == "--lab" {
@@ -2984,6 +3073,7 @@ func runDoctor(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) er
 	return nil
 }
 
+// runEBPFCommand executes the ebpf command workflow.
 func runEBPFCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Writer) error {
 	if len(args) < 2 {
 		return errors.New(ebpfUsage)
@@ -3073,6 +3163,7 @@ func runEBPFCommand(runtimeConfig solisconfig.Runtime, args []string, w io.Write
 	}
 }
 
+// runEBPFVMBlockLatency executes the ebpfvm block latency workflow.
 func runEBPFVMBlockLatency(runtimeConfig solisconfig.Runtime, options ebpfVMBlockLatencyOptions, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -3101,6 +3192,7 @@ func runEBPFVMBlockLatency(runtimeConfig solisconfig.Runtime, options ebpfVMBloc
 	return nil
 }
 
+// runVMStorageStats executes the vm storage stats workflow.
 func runVMStorageStats(runtimeConfig solisconfig.Runtime, options vmStorageStatsOptions, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -3133,6 +3225,7 @@ func runVMStorageStats(runtimeConfig solisconfig.Runtime, options vmStorageStats
 	return nil
 }
 
+// selectVMStorageStatsTargets selects vm storage stats targets using deterministic ordering.
 func selectVMStorageStatsTargets(vms []inventory.VM, options vmStorageStatsOptions) ([]inventory.VM, error) {
 	requested := []string{}
 	if options.Victim != "" {
@@ -3166,16 +3259,21 @@ func selectVMStorageStatsTargets(vms []inventory.VM, options vmStorageStatsOptio
 	return targets, nil
 }
 
+// writeVMStorageStatsOutput renders VM storage stats output in the package's stable operator-facing
+// format.
 func writeVMStorageStatsOutput(path string, report storagevm.VMStorageStatsReport) error {
 	return storagevm.WriteJSONFile(path, report)
 }
 
+// writeVMBlockLatencyOutput renders VM block latency output in the package's stable operator-facing
+// format.
 func writeVMBlockLatencyOutput(path string, report ebpf.VMBlockLatencyReport) error {
 	return output.WritePrivateAtomicFile(path, func(writer io.Writer) error {
 		return ebpf.WriteVMBlockLatencyJSON(writer, report)
 	})
 }
 
+// selectVMBlockLatencyTargets selects vm block latency targets using deterministic ordering.
 func selectVMBlockLatencyTargets(vms []inventory.VM, options ebpfVMBlockLatencyOptions) ([]inventory.VM, error) {
 	requested := []string{}
 	if options.Victim != "" {
@@ -3206,6 +3304,7 @@ func selectVMBlockLatencyTargets(vms []inventory.VM, options ebpfVMBlockLatencyO
 	return targets, nil
 }
 
+// runInspect executes the inspect workflow.
 func runInspect(runtimeConfig solisconfig.Runtime, name string, verbose bool, w io.Writer) error {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -3221,6 +3320,7 @@ func runInspect(runtimeConfig solisconfig.Runtime, name string, verbose bool, w 
 	return output.VMDetail(w, *vm, verbose)
 }
 
+// runHostStatus executes the host status workflow.
 func runHostStatus(runtimeConfig solisconfig.Runtime, w io.Writer) error {
 	options, err := hostStatusOptions(runtimeConfig.Settings)
 	if err != nil {
@@ -3236,6 +3336,7 @@ func runHostStatus(runtimeConfig solisconfig.Runtime, w io.Writer) error {
 	return nil
 }
 
+// runGuestStatus executes the guest status workflow.
 func runGuestStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
 	vm, guestConfig, serviceRefs, err := loadGuestTarget(runtimeConfig, name)
 	if err != nil {
@@ -3252,6 +3353,7 @@ func runGuestStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer)
 	return runGuestStatusWithRunner(context.Background(), *vm, guestConfig, serviceRefs, runner, w)
 }
 
+// runGuestStatusWithRunner executes the guest status with runner workflow.
 func runGuestStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, serviceRefs []string, runner guest.Runner, w io.Writer) error {
 	target, err := guest.TargetForVM(vm, guestConfig.User)
 	if err != nil {
@@ -3269,6 +3371,7 @@ func runGuestStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig 
 	return nil
 }
 
+// runServiceStatus executes the service status workflow.
 func runServiceStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
 	vm, guestConfig, _, err := loadGuestTarget(runtimeConfig, name)
 	if err != nil {
@@ -3289,6 +3392,7 @@ func runServiceStatus(runtimeConfig solisconfig.Runtime, name string, w io.Write
 	return runServiceStatusWithRunner(context.Background(), *vm, guestConfig, services, runner, w)
 }
 
+// runServiceStatusWithRunner executes the service status with runner workflow.
 func runServiceStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, services []solisconfig.ServiceObservabilityConfig, runner guest.Runner, w io.Writer) error {
 	target, err := guest.TargetForVM(vm, guestConfig.User)
 	if err != nil {
@@ -3310,6 +3414,7 @@ func runServiceStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfi
 	return nil
 }
 
+// runDBStatus executes the db status workflow.
 func runDBStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) error {
 	vm, guestConfig, database, err := loadDatabaseTarget(runtimeConfig, name)
 	if err != nil {
@@ -3329,6 +3434,7 @@ func runDBStatus(runtimeConfig solisconfig.Runtime, name string, w io.Writer) er
 	return runDBStatusWithRunner(context.Background(), *vm, guestConfig, database, runner, w)
 }
 
+// runDBStatusWithRunner executes the db status with runner workflow.
 func runDBStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig solisconfig.GuestObservabilityConfig, database solisconfig.DatabaseObservabilityConfig, runner guest.Runner, w io.Writer) error {
 	target, err := guest.TargetForVM(vm, guestConfig.User)
 	if err != nil {
@@ -3344,6 +3450,7 @@ func runDBStatusWithRunner(ctx context.Context, vm inventory.VM, guestConfig sol
 	return nil
 }
 
+// runObserveSnapshot executes the observe snapshot workflow.
 func runObserveSnapshot(runtimeConfig solisconfig.Runtime, options observeSnapshotOptions, w io.Writer) error {
 	snapshot, err := collectObserveSnapshot(context.Background(), runtimeConfig, options)
 	if err != nil {
@@ -3355,6 +3462,7 @@ func runObserveSnapshot(runtimeConfig solisconfig.Runtime, options observeSnapsh
 	return nil
 }
 
+// collectObserveSnapshot collects observe snapshot from the configured evidence sources.
 func collectObserveSnapshot(ctx context.Context, runtimeConfig solisconfig.Runtime, options observeSnapshotOptions) (observe.ObserveSnapshot, error) {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -3476,6 +3584,7 @@ func collectObserveSnapshot(ctx context.Context, runtimeConfig solisconfig.Runti
 	return snapshot, nil
 }
 
+// runObserveWatch executes the observe watch workflow.
 func runObserveWatch(runtimeConfig solisconfig.Runtime, options observeWatchOptions, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -3511,6 +3620,7 @@ func runObserveWatch(runtimeConfig solisconfig.Runtime, options observeWatchOpti
 	return nil
 }
 
+// openObserveWatchOutput opens observe watch output after validating its source.
 func openObserveWatchOutput(directory, victim string, now time.Time) (string, *os.File, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", nil, fmt.Errorf("create observe watch output directory %q: %w", directory, err)
@@ -3524,6 +3634,8 @@ func openObserveWatchOutput(directory, victim string, now time.Time) (string, *o
 	return path, file, nil
 }
 
+// observeGuestRunner builds observe guest runner and returns an error when validation or source
+// access fails.
 func observeGuestRunner(configuration solisconfig.GuestObservabilityConfig) (guest.Runner, error) {
 	if strings.TrimSpace(configuration.Transport) != "ssh" {
 		return nil, errors.New("observability guest SSH transport is not configured")
@@ -3538,10 +3650,13 @@ func observeGuestRunner(configuration solisconfig.GuestObservabilityConfig) (gue
 	return guest.NewSSHRunner(guest.SSHOptions{ConnectTimeout: timeout, KnownHosts: configuration.KnownHosts})
 }
 
+// privacySafeEnrichOptions builds privacy safe enrich options from validated inputs.
 func privacySafeEnrichOptions(runtimeConfig solisconfig.Runtime) inventory.EnrichOptions {
 	return inventory.EnrichOptions{LibvirtURI: runtimeConfig.Settings.LibvirtURI, SkipQEMUProcessArguments: true}
 }
 
+// configuredGuestTimeout builds configured guest timeout and returns an error when validation or
+// source access fails.
 func configuredGuestTimeout(configuration solisconfig.GuestObservabilityConfig) (time.Duration, error) {
 	timeout, err := time.ParseDuration(strings.TrimSpace(configuration.ConnectTimeout))
 	if err != nil || timeout <= 0 {
@@ -3550,6 +3665,7 @@ func configuredGuestTimeout(configuration solisconfig.GuestObservabilityConfig) 
 	return timeout, nil
 }
 
+// configuredServiceRefs builds configured service refs from validated inputs.
 func configuredServiceRefs(services []solisconfig.ServiceObservabilityConfig, name string) []string {
 	configured := configuredServicesForVM(services, name)
 	refs := make([]string, 0, len(configured))
@@ -3564,6 +3680,8 @@ func configuredServiceRefs(services []solisconfig.ServiceObservabilityConfig, na
 	return refs
 }
 
+// configuredDatabaseForVM builds configured database for VM and returns an error when validation or
+// source access fails.
 func configuredDatabaseForVM(databases []solisconfig.DatabaseObservabilityConfig, name string) (solisconfig.DatabaseObservabilityConfig, error) {
 	configured := make([]solisconfig.DatabaseObservabilityConfig, 0, 1)
 	for _, database := range databases {
@@ -3583,6 +3701,7 @@ func configuredDatabaseForVM(databases []solisconfig.DatabaseObservabilityConfig
 	return configured[0], nil
 }
 
+// loadDatabaseTarget loads database target from its backing source.
 func loadDatabaseTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, solisconfig.DatabaseObservabilityConfig, error) {
 	vms, err := inventory.LoadFromConfig(runtimeConfig.Settings.InventoryCSV)
 	if err != nil {
@@ -3618,6 +3737,7 @@ func loadDatabaseTarget(runtimeConfig solisconfig.Runtime, name string) (*invent
 	return vm, observabilityConfig.Guest, configured[0], nil
 }
 
+// loadGuestTarget loads guest target from its backing source.
 func loadGuestTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory.VM, solisconfig.GuestObservabilityConfig, []string, error) {
 	observabilityConfig := runtimeConfig.Settings.EffectiveObservability()
 	if !observabilityConfig.Guest.Enabled {
@@ -3651,6 +3771,7 @@ func loadGuestTarget(runtimeConfig solisconfig.Runtime, name string) (*inventory
 	return vm, observabilityConfig.Guest, refs, nil
 }
 
+// configuredServicesForVM builds configured services for VM from validated inputs.
 func configuredServicesForVM(services []solisconfig.ServiceObservabilityConfig, name string) []solisconfig.ServiceObservabilityConfig {
 	selected := make([]solisconfig.ServiceObservabilityConfig, 0)
 	for _, service := range services {
@@ -3671,6 +3792,8 @@ func configuredServicesForVM(services []solisconfig.ServiceObservabilityConfig, 
 	return selected
 }
 
+// hostStatusOptions builds host status options and returns an error when validation or source
+// access fails.
 func hostStatusOptions(settings solisconfig.Settings) (hostmetrics.Options, error) {
 	options := hostmetrics.DefaultOptions()
 	if settings.Observability == nil {
@@ -3690,6 +3813,7 @@ func hostStatusOptions(settings solisconfig.Settings) (hostmetrics.Options, erro
 	return options, nil
 }
 
+// printUsage prints usage using the command's human-readable contract.
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Solis I/O
 

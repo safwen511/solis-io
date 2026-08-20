@@ -19,6 +19,7 @@ type intervalSample struct {
 	Err      error
 }
 
+// validateWindow validates window against its required contract.
 func validateWindow(duration, interval time.Duration) error {
 	if duration <= 0 {
 		return fmt.Errorf("duration must be greater than zero")
@@ -32,6 +33,7 @@ func validateWindow(duration, interval time.Duration) error {
 	return nil
 }
 
+// sampleIntervals samples intervals for the configured observation interval.
 func sampleIntervals(plan Plan, duration, interval time.Duration, consume func(intervalSample) error) error {
 	previous := make([]processSample, len(plan.Targets))
 	for i, target := range plan.Targets {
@@ -67,11 +69,14 @@ func sampleIntervals(plan Plan, duration, interval time.Duration, consume func(i
 	return nil
 }
 
+// sampleProcess samples process for the configured observation interval.
 func sampleProcess(pid string) processSample {
 	counters, err := readProcessIO(pid)
 	return processSample{Counters: counters, ReadAt: time.Now(), Err: err}
 }
 
+// ratesForSamples builds rates for samples and returns an error when validation or source access
+// fails.
 func ratesForSamples(previous, current processSample) (Rates, error) {
 	if current.Err != nil {
 		return Rates{}, current.Err

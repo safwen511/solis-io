@@ -19,6 +19,7 @@ func WriteHuman(dst io.Writer, report Report) error {
 	return writeWarnings(dst, report)
 }
 
+// writeVMTable renders VM table in the package's stable operator-facing format.
 func writeVMTable(dst io.Writer, report Report) error {
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(w, "VM\tTENANT\tROLE\tSTATE\tIP\tQEMU_PID\tQCOW2_DISK\tPHYSICAL_DISK\tAVG_WRITE_MIB/S\tAVG_SYSCW/S\tPRESSURE"); err != nil {
@@ -49,6 +50,7 @@ func writeVMTable(dst io.Writer, report Report) error {
 	return nil
 }
 
+// writeWarnings renders warnings in the package's stable operator-facing format.
 func writeWarnings(dst io.Writer, report Report) error {
 	var warnings []VMStatus
 	for _, vm := range report.VMs {
@@ -78,6 +80,7 @@ func WriteJSON(dst io.Writer, report Report) error {
 	return encoder.Encode(report)
 }
 
+// metric formats an available measurement or an explicit unavailable marker.
 func metric(value float64, available bool) string {
 	if !available {
 		return "-"

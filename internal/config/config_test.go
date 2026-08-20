@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestResolveUsesDevelopmentDefaults verifies resolve uses development defaults.
 func TestResolveUsesDevelopmentDefaults(t *testing.T) {
 	runtime, args, err := Resolve([]string{"inventory"}, "")
 	if err != nil {
@@ -20,6 +21,7 @@ func TestResolveUsesDevelopmentDefaults(t *testing.T) {
 	}
 }
 
+// TestResolveLoadsFlagBeforeOrAfterCommand verifies resolve loads flag before or after command.
 func TestResolveLoadsFlagBeforeOrAfterCommand(t *testing.T) {
 	path := writeConfig(t, validConfigJSON("inventory.csv"))
 	for _, args := range [][]string{
@@ -36,6 +38,7 @@ func TestResolveLoadsFlagBeforeOrAfterCommand(t *testing.T) {
 	}
 }
 
+// TestResolveLoadsEnvironmentAndFlagWins verifies resolve loads environment and flag wins.
 func TestResolveLoadsEnvironmentAndFlagWins(t *testing.T) {
 	environmentPath := writeNamedConfig(t, "environment.json", validConfigJSON("environment.csv"))
 	flagPath := writeNamedConfig(t, "flag.json", validConfigJSON("flag.csv"))
@@ -57,6 +60,8 @@ func TestResolveLoadsEnvironmentAndFlagWins(t *testing.T) {
 	}
 }
 
+// TestResolveUsesInstalledDefaultAfterFlagAndEnvironment verifies resolve uses installed default
+// after flag and environment.
 func TestResolveUsesInstalledDefaultAfterFlagAndEnvironment(t *testing.T) {
 	installedPath := writeNamedConfig(t, "installed.json", validConfigJSON("installed.csv"))
 	environmentPath := writeNamedConfig(t, "environment.json", validConfigJSON("environment.csv"))
@@ -81,6 +86,7 @@ func TestResolveUsesInstalledDefaultAfterFlagAndEnvironment(t *testing.T) {
 	}
 }
 
+// TestLoadReportsUsefulErrors verifies load reports useful errors.
 func TestLoadReportsUsefulErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -102,6 +108,7 @@ func TestLoadReportsUsefulErrors(t *testing.T) {
 	}
 }
 
+// TestLoadPreservesSchemaVersionOne verifies load preserves schema version one.
 func TestLoadPreservesSchemaVersionOne(t *testing.T) {
 	runtime, err := Load(writeConfig(t, validConfigJSON("inventory.csv")))
 	if err != nil {
@@ -112,6 +119,7 @@ func TestLoadPreservesSchemaVersionOne(t *testing.T) {
 	}
 }
 
+// TestLoadSchemaVersionTwoObservability verifies load schema version two observability.
 func TestLoadSchemaVersionTwoObservability(t *testing.T) {
 	path := writeConfig(t, validConfigV2JSON("inventory.csv"))
 	runtime, err := Load(path)
@@ -137,6 +145,8 @@ func TestLoadSchemaVersionTwoObservability(t *testing.T) {
 	}
 }
 
+// TestSchemaVersionTwoObservabilityDefaultsDisabled verifies schema version two observability
+// defaults disabled.
 func TestSchemaVersionTwoObservabilityDefaultsDisabled(t *testing.T) {
 	data := strings.Replace(validConfigJSON("inventory.csv"), `"schema_version":"1"`, `"schema_version":"2"`, 1)
 	runtime, err := Load(writeConfig(t, data))
@@ -152,6 +162,8 @@ func TestSchemaVersionTwoObservabilityDefaultsDisabled(t *testing.T) {
 	}
 }
 
+// TestValidateObservabilityRejectsUnsafeValues verifies validate observability rejects unsafe
+// values.
 func TestValidateObservabilityRejectsUnsafeValues(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -235,6 +247,8 @@ func TestValidateObservabilityRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsInlineCredentialsAndUnsafeCollectorFields verifies load rejects inline credentials
+// and unsafe collector fields.
 func TestLoadRejectsInlineCredentialsAndUnsafeCollectorFields(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -259,6 +273,7 @@ func TestLoadRejectsInlineCredentialsAndUnsafeCollectorFields(t *testing.T) {
 	}
 }
 
+// TestValidateWithInventoryRejectsUnknownVM verifies validate with inventory rejects unknown vm.
 func TestValidateWithInventoryRejectsUnknownVM(t *testing.T) {
 	settings := validSchema2Settings()
 	if err := ValidateWithInventory(settings, []string{"a-web", "a-db"}); err != nil {
@@ -271,6 +286,7 @@ func TestValidateWithInventoryRejectsUnknownVM(t *testing.T) {
 	}
 }
 
+// TestSchemaVersionOneRejectsObservability verifies schema version one rejects observability.
 func TestSchemaVersionOneRejectsObservability(t *testing.T) {
 	settings := validSchema2Settings()
 	settings.SchemaVersion = SchemaVersion
@@ -280,6 +296,7 @@ func TestSchemaVersionOneRejectsObservability(t *testing.T) {
 	}
 }
 
+// TestLoadMissingFile verifies load missing file.
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "missing.json"))
 	if err == nil || !strings.Contains(err.Error(), "open Solis config") {
@@ -287,11 +304,13 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
+// writeConfig renders config in the package's stable operator-facing format.
 func writeConfig(t *testing.T, data string) string {
 	t.Helper()
 	return writeNamedConfig(t, "solis.json", data)
 }
 
+// writeNamedConfig renders named config in the package's stable operator-facing format.
 func writeNamedConfig(t *testing.T, name, data string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -305,10 +324,12 @@ func writeNamedConfig(t *testing.T, name, data string) string {
 	return absPath
 }
 
+// validConfigJSON reports whether config JSON.
 func validConfigJSON(inventory string) string {
 	return `{"schema_version":"1","inventory_csv":"` + inventory + `","capture_output_root":"captures","default_report_dir":"reports/default","libvirt_uri":"qemu:///system","thresholds":{"write_mib_per_sec":10,"write_syscalls_per_sec":10000,"dominance_ratio":2}}`
 }
 
+// validConfigV2JSON reports whether config v2 JSON.
 func validConfigV2JSON(inventory string) string {
 	return `{
   "schema_version":"2",
@@ -326,6 +347,7 @@ func validConfigV2JSON(inventory string) string {
 }`
 }
 
+// validSchema2Settings reports whether schema2 settings.
 func validSchema2Settings() Settings {
 	return Settings{
 		SchemaVersion:     SchemaVersion2,

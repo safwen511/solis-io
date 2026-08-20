@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestParseProcIO verifies parse proc io.
 func TestParseProcIO(t *testing.T) {
 	input := `rchar: 101
 wchar: 202
@@ -38,6 +39,7 @@ cancelled_write_bytes: 707
 	}
 }
 
+// TestParseProcIOReportsMissingField verifies parse proc io reports missing field.
 func TestParseProcIOReportsMissingField(t *testing.T) {
 	_, err := Parse(strings.NewReader("rchar: 1\n"))
 	if err == nil || !strings.Contains(err.Error(), "missing proc io fields") {
@@ -45,6 +47,7 @@ func TestParseProcIOReportsMissingField(t *testing.T) {
 	}
 }
 
+// TestCalculateDelta verifies calculate delta.
 func TestCalculateDelta(t *testing.T) {
 	previous := Counters{
 		Syscr:      10,
@@ -74,6 +77,7 @@ func TestCalculateDelta(t *testing.T) {
 	}
 }
 
+// TestCalculateDeltaRejectsCounterReset verifies calculate delta rejects counter reset.
 func TestCalculateDeltaRejectsCounterReset(t *testing.T) {
 	_, err := CalculateDelta(Counters{ReadBytes: 2}, Counters{ReadBytes: 1}, time.Second)
 	if err == nil || !strings.Contains(err.Error(), "read_bytes counter decreased") {
@@ -81,6 +85,7 @@ func TestCalculateDeltaRejectsCounterReset(t *testing.T) {
 	}
 }
 
+// TestNewPlanSortsAndCombinesTargets verifies new plan sorts and combines targets.
 func TestNewPlanSortsAndCombinesTargets(t *testing.T) {
 	victims := []inventory.VM{{Name: "a-web"}, {Name: "a-db"}}
 	plan := NewPlan("tenant-a", "a-web", victims, victims[0])
@@ -95,6 +100,7 @@ func TestNewPlanSortsAndCombinesTargets(t *testing.T) {
 	}
 }
 
+// TestPermissionDeniedReadError verifies permission denied read error.
 func TestPermissionDeniedReadError(t *testing.T) {
 	path := "/proc/123/io"
 	err := formatProcessIOReadError(path, &os.PathError{Op: "open", Path: path, Err: os.ErrPermission})
@@ -104,6 +110,7 @@ func TestPermissionDeniedReadError(t *testing.T) {
 	}
 }
 
+// TestWriteWatchRowRendersPermissionDenied verifies write watch row renders permission denied.
 func TestWriteWatchRowRendersPermissionDenied(t *testing.T) {
 	var output bytes.Buffer
 	target := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db", QEMUPID: "123"}}

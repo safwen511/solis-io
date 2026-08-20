@@ -60,6 +60,7 @@ type qemuResult struct {
 
 type optionalResult struct{ snapshot ObserveSnapshot }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func Collect(ctx context.Context, request Request, vms []inventory.VM, dependencies Dependencies) (ObserveSnapshot, error) {
 	if strings.TrimSpace(request.Victim) == "" {
 		return ObserveSnapshot{}, errors.New("victim is required")
@@ -217,6 +218,7 @@ func Collect(ctx context.Context, request Request, vms []inventory.VM, dependenc
 	return snapshot, nil
 }
 
+// startTargetOptionals starts target optionals and returns its initial state.
 func startTargetOptionals(ctx context.Context, prefix string, vm inventory.VM, request Request, windowID string, dependencies Dependencies) <-chan optionalResult {
 	result := make(chan optionalResult, 1)
 	go func() {
@@ -227,6 +229,7 @@ func startTargetOptionals(ctx context.Context, prefix string, vm inventory.VM, r
 	return result
 }
 
+// mergeOptionalResult merges optional result while preserving explicit availability.
 func mergeOptionalResult(snapshot *ObserveSnapshot, result optionalResult) {
 	partial := result.snapshot
 	if partial.VictimGuestStatus != nil {
@@ -251,6 +254,7 @@ func mergeOptionalResult(snapshot *ObserveSnapshot, result optionalResult) {
 	snapshot.UnavailableSections = append(snapshot.UnavailableSections, partial.UnavailableSections...)
 }
 
+// collectTargetOptionals collects target optionals from the configured evidence sources.
 func collectTargetOptionals(ctx context.Context, prefix string, vm inventory.VM, request Request, windowID string, dependencies Dependencies, snapshot *ObserveSnapshot) {
 	guestName, serviceName, dbName := prefix+"_guest_status", prefix+"_service_status", prefix+"_db_status"
 	if !request.GuestEnabled {
@@ -307,6 +311,7 @@ func collectTargetOptionals(ctx context.Context, prefix string, vm inventory.VM,
 	}
 }
 
+// allRunningPlan builds all running plan from validated inputs.
 func allRunningPlan(vms []inventory.VM) qemuio.Plan {
 	plan := qemuio.Plan{VictimSelector: "observe-status"}
 	for _, vm := range vms {
@@ -318,6 +323,7 @@ func allRunningPlan(vms []inventory.VM) qemuio.Plan {
 	return plan
 }
 
+// unavailableQEMUReport builds unavailable QEMU report from validated inputs.
 func unavailableQEMUReport(plan qemuio.Plan, duration, interval time.Duration, err error) qemuio.SummaryReport {
 	report := qemuio.SummaryReport{Plan: plan, Duration: duration, Interval: interval}
 	for _, target := range plan.Targets {
@@ -326,6 +332,7 @@ func unavailableQEMUReport(plan qemuio.Plan, duration, interval time.Duration, e
 	return report
 }
 
+// buildVMStatus builds vm status from validated inputs.
 func buildVMStatus(vms []inventory.VM, report qemuio.SummaryReport, duration, interval time.Duration, resolve func(string) hoststorage.Mapping) statusview.Report {
 	byName := make(map[string]qemuio.VMSummary, len(report.VMs))
 	for _, summary := range report.VMs {
@@ -338,6 +345,7 @@ func buildVMStatus(vms []inventory.VM, report qemuio.SummaryReport, duration, in
 	return statusview.NewReportWithThresholds(duration, interval, samples, report.Thresholds)
 }
 
+// qemuForTargets builds QEMU for targets from validated inputs.
 func qemuForTargets(base qemuio.SummaryReport, victim inventory.VM, suspect *inventory.VM) qemuio.SummaryReport {
 	plan := qemuio.Plan{VictimSelector: victim.Name, Targets: []qemuio.Target{{TargetType: "victim", VM: victim}}}
 	if suspect != nil {
@@ -347,6 +355,7 @@ func qemuForTargets(base qemuio.SummaryReport, victim inventory.VM, suspect *inv
 	return qemuio.SummaryForPlan(base, plan)
 }
 
+// sanitizeQEMU sanitizes qemu for safe output.
 func sanitizeQEMU(report qemuio.SummaryReport) QEMUEvidence {
 	evidence := QEMUEvidence{
 		VMs: []QEMUVM{}, VictimAverageWriteMiBS: report.VictimAverageWriteMiBPerSecond,
@@ -375,6 +384,7 @@ func sanitizeQEMU(report qemuio.SummaryReport) QEMUEvidence {
 	return evidence
 }
 
+// discoveryEvidence builds discovery evidence from validated inputs.
 func discoveryEvidence(report discovery.Report) DiscoveryEvidence {
 	evidence := DiscoveryEvidence{Enabled: true, Available: true, Victim: report.Victim.Name, VictimPhysicalDisk: valueOrDash(report.VictimStorage.PhysicalDisk), SelectedSuspect: "-", SelectionReason: report.SelectionReason, Candidates: []DiscoveryCandidate{}}
 	if report.Selected != nil {
@@ -388,6 +398,7 @@ func discoveryEvidence(report discovery.Report) DiscoveryEvidence {
 	return evidence
 }
 
+// buildStorage builds storage from validated inputs.
 func buildStorage(victim inventory.VM, suspect *inventory.VM, resolve func(string) hoststorage.Mapping) StorageTopology {
 	victimMapping := resolve(victim.Disk)
 	topology := StorageTopology{Available: mappingAvailable(victimMapping), PhysicalDisk: valueOrDash(victimMapping.PhysicalDisk), Targets: []StorageTarget{storageTarget("victim", victim, victimMapping)}}
@@ -400,10 +411,12 @@ func buildStorage(victim inventory.VM, suspect *inventory.VM, resolve func(strin
 	return topology
 }
 
+// storageTarget builds storage target from validated inputs.
 func storageTarget(kind string, vm inventory.VM, mapping hoststorage.Mapping) StorageTarget {
 	return StorageTarget{TargetType: kind, VM: vm.Name, Disk: valueOrDash(firstNonEmpty(mapping.DiskPath, vm.Disk)), Mountpoint: valueOrDash(mapping.Mountpoint), SourceDevice: valueOrDash(mapping.SourceDevice), ParentDevice: valueOrDash(mapping.ParentDevice), PhysicalDisk: valueOrDash(mapping.PhysicalDisk)}
 }
 
+// targetFromVM builds target from VM from validated inputs.
 func targetFromVM(vm inventory.VM) Target {
 	pid, _ := strconv.Atoi(strings.TrimSpace(vm.QEMUPID))
 	ip := vm.IPLease
@@ -413,10 +426,13 @@ func targetFromVM(vm inventory.VM) Target {
 	return Target{Name: vm.Name, Tenant: vm.Tenant, Role: vm.Role, State: valueOrDash(vm.State), IP: valueOrDash(ip), QEMUPID: pid, Disk: valueOrDash(vm.Disk)}
 }
 
+// positivePID reports whether positive pid.
 func positivePID(value string) bool {
 	pid, err := strconv.Atoi(strings.TrimSpace(value))
 	return err == nil && pid > 0
 }
+
+// suspectMode derives stable operator-facing text for suspect mode.
 func suspectMode(request Request) string {
 	if request.DiscoverSuspects {
 		return "discover-suspects"
@@ -426,6 +442,8 @@ func suspectMode(request Request) string {
 	}
 	return "victim-only"
 }
+
+// stateForAvailability builds state for availability from validated inputs.
 func stateForAvailability(value observability.Availability) EvidenceState {
 	if value.Available && value.Error != "" {
 		return EvidencePartial
@@ -435,16 +453,24 @@ func stateForAvailability(value observability.Availability) EvidenceState {
 	}
 	return EvidenceUnavailable
 }
+
+// mappingAvailable maps mapping available into its corresponding evidence identity.
 func mappingAvailable(mapping hoststorage.Mapping) bool {
 	return strings.TrimSpace(mapping.PhysicalDisk) != "" && strings.TrimSpace(mapping.PhysicalDisk) != "-"
 }
+
+// valueOrDefault returns the trimmed value or the supplied fallback when it is empty.
 func valueOrDefault(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
 	}
 	return value
 }
+
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string { return valueOrDefault(value, "-") }
+
+// firstNonEmpty returns the first non-empty string in argument order.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -453,13 +479,19 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// oneLine collapses whitespace so diagnostic text cannot break line-oriented output.
 func oneLine(value string) string { return strings.Join(strings.Fields(value), " ") }
+
+// errorString derives stable operator-facing text for error string.
 func errorString(err error) string {
 	if err == nil {
 		return ""
 	}
 	return oneLine(err.Error())
 }
+
+// vmReportPartial reports whether vm report partial.
 func vmReportPartial(report statusview.Report) bool {
 	for _, vm := range report.VMs {
 		if !vm.IOAvailable {
@@ -468,6 +500,8 @@ func vmReportPartial(report statusview.Report) bool {
 	}
 	return false
 }
+
+// qemuAvailabilityError derives stable operator-facing text for QEMU availability error.
 func qemuAvailabilityError(report qemuio.SummaryReport) string {
 	var values []string
 	for _, vm := range report.VMs {
@@ -477,6 +511,8 @@ func qemuAvailabilityError(report qemuio.SummaryReport) string {
 	}
 	return strings.Join(values, "; ")
 }
+
+// storageError derives stable operator-facing text for storage error.
 func storageError(topology StorageTopology) string {
 	if topology.Available {
 		return ""
@@ -484,6 +520,7 @@ func storageError(topology StorageTopology) string {
 	return "physical storage mapping unavailable for one or more targets"
 }
 
+// sharedPhysicalDisk builds shared physical disk from validated inputs.
 func sharedPhysicalDisk(left, right string) (bool, string) {
 	leftSet := make(map[string]bool)
 	for _, item := range strings.Split(left, ",") {

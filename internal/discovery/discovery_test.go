@@ -8,6 +8,8 @@ import (
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
+// TestResolveExcludesVictimAndFiltersSharedPhysicalDisk verifies resolve excludes victim and
+// filters shared physical disk.
 func TestResolveExcludesVictimAndFiltersSharedPhysicalDisk(t *testing.T) {
 	vms := []inventory.VM{
 		{Name: "a-web", State: "running", QEMUPID: "100", Disk: "/images/a-web.qcow2"},
@@ -42,6 +44,7 @@ func TestResolveExcludesVictimAndFiltersSharedPhysicalDisk(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSelectsCandidateByWriteBytes verifies analyze selects candidate by write bytes.
 func TestAnalyzeSelectsCandidateByWriteBytes(t *testing.T) {
 	targets := testTargets()
 	report := Analyze(targets, testSamples(
@@ -57,6 +60,8 @@ func TestAnalyzeSelectsCandidateByWriteBytes(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSelectsCandidateBySyscallFallback verifies analyze selects candidate by syscall
+// fallback.
 func TestAnalyzeSelectsCandidateBySyscallFallback(t *testing.T) {
 	targets := testTargets()
 	report := Analyze(targets, testSamples(
@@ -72,6 +77,8 @@ func TestAnalyzeSelectsCandidateBySyscallFallback(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSelectsNoSuspectWhenCandidatesAreIdle verifies analyze selects no suspect when
+// candidates are idle.
 func TestAnalyzeSelectsNoSuspectWhenCandidatesAreIdle(t *testing.T) {
 	targets := testTargets()
 	report := Analyze(targets, testSamples(
@@ -87,6 +94,7 @@ func TestAnalyzeSelectsNoSuspectWhenCandidatesAreIdle(t *testing.T) {
 	}
 }
 
+// testTargets builds test targets from validated inputs.
 func testTargets() Targets {
 	return Targets{
 		Victim:        inventory.VM{Name: "a-web"},
@@ -98,6 +106,7 @@ func testTargets() Targets {
 	}
 }
 
+// testSamples builds test samples from validated inputs.
 func testSamples(victim, first, second qemuio.VMSummary) qemuio.SummaryReport {
 	victim.Target = qemuio.Target{TargetType: "victim", VM: inventory.VM{Name: "a-web"}}
 	first.Target = qemuio.Target{TargetType: "candidate", VM: inventory.VM{Name: "a-db"}}

@@ -21,6 +21,7 @@ type Probes struct {
 	CommandOutput func(string, ...string) ([]byte, error)
 }
 
+// effectiveProbes builds effective probes from validated inputs.
 func effectiveProbes(custom *Probes) Probes {
 	probes := Probes{}
 	if custom != nil {

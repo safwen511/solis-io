@@ -11,6 +11,7 @@ type cpuCounters struct {
 	User, Nice, System, Idle, IOWait, IRQ, SoftIRQ, Steal uint64
 }
 
+// parseProcStat parses and validates proc stat.
 func parseProcStat(data []byte) (cpuCounters, error) {
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)
@@ -36,6 +37,7 @@ func parseProcStat(data []byte) (cpuCounters, error) {
 	return cpuCounters{}, errors.New("aggregate cpu line not found")
 }
 
+// calculateCPU calculates cpu from the supplied measurements.
 func calculateCPU(previous, current cpuCounters, source string) (CPUStatus, error) {
 	before := []uint64{previous.User, previous.Nice, previous.System, previous.Idle, previous.IOWait, previous.IRQ, previous.SoftIRQ, previous.Steal}
 	after := []uint64{current.User, current.Nice, current.System, current.Idle, current.IOWait, current.IRQ, current.SoftIRQ, current.Steal}

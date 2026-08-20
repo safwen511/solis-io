@@ -25,6 +25,7 @@ type fakeRunner struct {
 	errors  map[string]error
 }
 
+// Run executes the receiver's bounded operation and propagates execution failures.
 func (runner fakeRunner) Run(_ context.Context, _ guest.Target, command guest.CommandSpec) (guest.Result, error) {
 	if err := runner.errors[command.Key()]; err != nil {
 		return guest.Result{}, err
@@ -32,6 +33,8 @@ func (runner fakeRunner) Run(_ context.Context, _ guest.Target, command guest.Co
 	return guest.Result{Output: runner.outputs[command.Key()]}, nil
 }
 
+// TestSystemdParserCollectsOnlyAllowlistedFields verifies systemd parser collects only allowlisted
+// fields.
 func TestSystemdParserCollectsOnlyAllowlistedFields(t *testing.T) {
 	status, err := guest.ParseSystemdUnit("Id=nginx.service\nActiveState=active\nSubState=running\nMainPID=42\nNRestarts=3\nExecMainStartTimestamp=Sun 2026-08-09\nEnvironment=SECRET=value\nExecStart=/bin/nginx --token secret\n")
 	if err != nil {
@@ -51,6 +54,8 @@ func TestSystemdParserCollectsOnlyAllowlistedFields(t *testing.T) {
 	}
 }
 
+// TestHealthCheckRecordsStatusLatencyAndNoBody verifies health check records status latency and no
+// body.
 func TestHealthCheckRecordsStatusLatencyAndNoBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -78,6 +83,7 @@ func TestHealthCheckRecordsStatusLatencyAndNoBody(t *testing.T) {
 	}
 }
 
+// TestHealthCheckDoesNotFollowRedirect verifies health check does not follow redirect.
 func TestHealthCheckDoesNotFollowRedirect(t *testing.T) {
 	var redirected atomic.Int32
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { redirected.Add(1); w.WriteHeader(http.StatusOK) }))
@@ -99,6 +105,7 @@ func TestHealthCheckDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
+// TestCollectPartialUnitFailure verifies collect partial unit failure.
 func TestCollectPartialUnitFailure(t *testing.T) {
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
 	target, _ := guest.TargetForVM(vm, "flint")
@@ -113,6 +120,8 @@ func TestCollectPartialUnitFailure(t *testing.T) {
 	}
 }
 
+// TestServiceWithNoUnitsAndNoConfiguredServices verifies service with no units and no configured
+// services.
 func TestServiceWithNoUnitsAndNoConfiguredServices(t *testing.T) {
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
 	target, _ := guest.TargetForVM(vm, "flint")
@@ -133,6 +142,8 @@ func TestServiceWithNoUnitsAndNoConfiguredServices(t *testing.T) {
 	}
 }
 
+// TestServiceStatusJSONDeterministicAndPrivate verifies service status json deterministic and
+// private.
 func TestServiceStatusJSONDeterministicAndPrivate(t *testing.T) {
 	report := Report{Services: []observability.ServiceStatus{
 		{Name: "z", Units: []observability.SystemdUnitStatus{{ID: "z.service"}}},
@@ -156,6 +167,7 @@ func TestServiceStatusJSONDeterministicAndPrivate(t *testing.T) {
 	}
 }
 
+// serverAddress builds server address from validated inputs.
 func serverAddress(t *testing.T, rawURL string) (string, int) {
 	t.Helper()
 	host, portValue, err := net.SplitHostPort(strings.TrimPrefix(rawURL, "http://"))

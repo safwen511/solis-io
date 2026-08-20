@@ -74,6 +74,7 @@ type VMBlockCapabilityError struct {
 	Err    error
 }
 
+// Error returns the human-readable error description.
 func (err *VMBlockCapabilityError) Error() string {
 	if err == nil {
 		return ""
@@ -84,6 +85,7 @@ func (err *VMBlockCapabilityError) Error() string {
 	return err.Name
 }
 
+// Unwrap exposes the underlying error for standard error-chain inspection.
 func (err *VMBlockCapabilityError) Unwrap() error {
 	if err == nil {
 		return nil
@@ -176,6 +178,8 @@ func ResolveVMBlockBTFCapabilities(ctx context.Context, resolver VMBlockBTFCapab
 	return report
 }
 
+// classifyVMBlockCapabilityError maps VM block capability error to the package's stable public
+// status categories.
 func classifyVMBlockCapabilityError(requirement VMBlockBTFCapabilityRequirement, err error) (string, string) {
 	var capabilityError *VMBlockCapabilityError
 	if errors.As(err, &capabilityError) && capabilityError.Status != "" {
@@ -190,6 +194,8 @@ func classifyVMBlockCapabilityError(requirement VMBlockBTFCapabilityRequirement,
 	return VMBlockCapabilityOptionalMemberMissing, err.Error()
 }
 
+// normalizeVMBlockCapabilityReport normalizes vm block capability report into its canonical
+// representation.
 func normalizeVMBlockCapabilityReport(report *VMBlockBTFCapabilityReport) {
 	sort.Slice(report.Capabilities, func(i, j int) bool {
 		if report.Capabilities[i].Name != report.Capabilities[j].Name {

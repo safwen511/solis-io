@@ -10,6 +10,7 @@ readonly system_config_directory="/etc/solis"
 readonly system_config_path="${system_config_directory}/config.json"
 readonly config_package="github.com/safwen511/solis-io/internal/config"
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: scripts/install-dev-command.sh [--replace]
@@ -24,6 +25,7 @@ and configuration installed by an earlier run.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
@@ -57,6 +59,7 @@ config_temporary="$(mktemp /tmp/solis-config.XXXXXXXX)"
 binary_install_temporary=""
 config_install_temporary=""
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM

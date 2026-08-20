@@ -19,6 +19,7 @@ func WriteVMBlockLatencyJSON(dst io.Writer, report VMBlockLatencyReport) error {
 	return encoder.Encode(report)
 }
 
+// privacyCollected reports whether privacy collected.
 func privacyCollected(report VMBlockLatencyReport) bool {
 	privacy := report.Privacy
 	return privacy.ProcessArgumentsCollected || privacy.EnvironmentCollected ||
@@ -27,6 +28,8 @@ func privacyCollected(report VMBlockLatencyReport) bool {
 		privacy.ResponseBodyCollected || privacy.SecretsCollected
 }
 
+// normalizeVMBlockLatencyReport normalizes vm block latency report into its canonical
+// representation.
 func normalizeVMBlockLatencyReport(report VMBlockLatencyReport) VMBlockLatencyReport {
 	if report.SchemaVersion == "" {
 		report.SchemaVersion = vmBlockLatencySchemaVersion

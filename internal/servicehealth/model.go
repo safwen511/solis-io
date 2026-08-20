@@ -21,6 +21,7 @@ type Report struct {
 	Privacy       observability.PrivacyFlags    `json:"privacy"`
 }
 
+// WriteJSON renders JSON in the package's stable operator-facing format.
 func WriteJSON(dst io.Writer, report Report) error {
 	if !privacySafe(report.Privacy) {
 		return errors.New("service status cannot record payload, secret, environment, process-argument, guest-file, query-text, or table-data collection")
@@ -80,6 +81,7 @@ func WriteJSON(dst io.Writer, report Report) error {
 	return encoder.Encode(report)
 }
 
+// privacySafe reports whether privacy safe.
 func privacySafe(flags observability.PrivacyFlags) bool {
 	return !flags.ProcessArgumentsCollected && !flags.EnvironmentCollected &&
 		!flags.GuestFilesCollected && !flags.QueryTextCollected && !flags.TableDataCollected &&

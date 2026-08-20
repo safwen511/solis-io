@@ -17,6 +17,8 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestVMBlockEventJSONNeverExposesRequestPointer verifies vm block event json never exposes request
+// pointer.
 func TestVMBlockEventJSONNeverExposesRequestPointer(t *testing.T) {
 	data, err := json.Marshal(VMBlockEvent{
 		Kind: "issue", RequestPointer: 0xfeedbeef, TimestampNS: 1, CgroupID: 2,
@@ -34,6 +36,7 @@ type fakeVMBlockEventSource struct {
 	err    error
 }
 
+// Collect completes collect and returns any failure to its caller.
 func (source fakeVMBlockEventSource) Collect(_ context.Context, _ time.Duration, consume func(VMBlockEvent) error) error {
 	for _, event := range source.events {
 		if err := consume(event); err != nil {
@@ -43,6 +46,7 @@ func (source fakeVMBlockEventSource) Collect(_ context.Context, _ time.Duration,
 	return source.err
 }
 
+// TestVMBlockLatencyFakeEventAggregation verifies vm block latency fake event aggregation.
 func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{
 		{Name: "a-web", Tenant: "tenant-a", Role: "web", QEMUPID: 101, Disk: "/images/a-web.qcow2", PrimaryPath: "/machine/a/libvirt/emulator", PrimaryID: 11, CgroupIDs: []uint64{10, 11}, MappingQuality: "cgroup_v2_inode_tree"},
@@ -79,6 +83,8 @@ func TestVMBlockLatencyFakeEventAggregation(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyBoundedHistogramStatistics verifies vm block latency bounded histogram
+// statistics.
 func TestVMBlockLatencyBoundedHistogramStatistics(t *testing.T) {
 	var histogram boundedVMBlockLatencyHistogram
 	for _, latency := range []time.Duration{50 * time.Microsecond, 100 * time.Microsecond, 750 * time.Microsecond, 4 * time.Millisecond, 2 * time.Second} {
@@ -94,6 +100,7 @@ func TestVMBlockLatencyBoundedHistogramStatistics(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyUnattributedCounters verifies vm block latency unattributed counters.
 func TestVMBlockLatencyUnattributedCounters(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{{Name: "a-web", PrimaryID: 11, CgroupIDs: []uint64{11}}}
 	events := []VMBlockEvent{
@@ -119,6 +126,8 @@ func TestVMBlockLatencyUnattributedCounters(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyDeviceFilterUsesIssueMetadata verifies vm block latency device filter uses
+// issue metadata.
 func TestVMBlockLatencyDeviceFilterUsesIssueMetadata(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{{Name: "a-web", PrimaryID: 11, CgroupIDs: []uint64{11}, MappingQuality: "cgroup_v2_inode_tree"}}
 	events := []VMBlockEvent{
@@ -138,6 +147,8 @@ func TestVMBlockLatencyDeviceFilterUsesIssueMetadata(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyCountsPendingAtWindowEnd verifies vm block latency counts pending at window
+// end.
 func TestVMBlockLatencyCountsPendingAtWindowEnd(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{{Name: "a-web", PrimaryID: 11, CgroupIDs: []uint64{11}, MappingQuality: "cgroup_v2_inode_tree"}}
 	report := CollectVMBlockLatencyReportWithSource(context.Background(), VMBlockLatencyCollectOptions{
@@ -153,6 +164,8 @@ func TestVMBlockLatencyCountsPendingAtWindowEnd(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyPermissionAndUnsupportedStatuses verifies vm block latency permission and
+// unsupported statuses.
 func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	options := VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second, effectiveUID: func() int { return 1000 }}
 	permission := CollectVMBlockLatencyReportWithSource(context.Background(), options, nil, fakeVMBlockEventSource{err: syscall.EPERM})
@@ -186,6 +199,7 @@ func TestVMBlockLatencyPermissionAndUnsupportedStatuses(t *testing.T) {
 	}
 }
 
+// histogramCount builds histogram count from validated inputs.
 func histogramCount(buckets []VMBlockLatencyHistogramBucket) uint64 {
 	var count uint64
 	for _, bucket := range buckets {
@@ -194,6 +208,8 @@ func histogramCount(buckets []VMBlockLatencyHistogramBucket) uint64 {
 	return count
 }
 
+// TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable verifies vm block latency
+// preserves mapping quality when attribution unavailable.
 func TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{
 		{Name: "a-web", MappingQuality: "cgroup_v2_inode_tree", PrimaryID: 11, CgroupIDs: []uint64{11}},
@@ -216,6 +232,8 @@ func TestVMBlockLatencyPreservesMappingQualityWhenAttributionUnavailable(t *test
 	}
 }
 
+// missingObjectVMBlockKernelSource builds missing object VM block kernel source from validated
+// inputs.
 func missingObjectVMBlockKernelSource() VMBlockKernelSource {
 	return &ciliumVMBlockKernelSource{
 		platform:       "linux",
@@ -225,6 +243,8 @@ func missingObjectVMBlockKernelSource() VMBlockKernelSource {
 	}
 }
 
+// TestVMBlockLatencyDeterministicPrivacySafeJSON verifies vm block latency deterministic privacy
+// safe json.
 func TestVMBlockLatencyDeterministicPrivacySafeJSON(t *testing.T) {
 	report := newVMBlockLatencyReport(VMBlockLatencyCollectOptions{
 		Duration: time.Second, Interval: time.Second, ObservedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
@@ -256,6 +276,7 @@ func TestVMBlockLatencyDeterministicPrivacySafeJSON(t *testing.T) {
 	}
 }
 
+// TestBuildVMCgroupMappings verifies build vm cgroup mappings.
 func TestBuildVMCgroupMappings(t *testing.T) {
 	cgroupRoot := t.TempDir()
 	procRoot := t.TempDir()
@@ -283,6 +304,8 @@ func TestBuildVMCgroupMappings(t *testing.T) {
 	}
 }
 
+// TestBuildVMCgroupMappingsRejectsUnsafePIDIdentity verifies build vm cgroup mappings rejects
+// unsafe pid identity.
 func TestBuildVMCgroupMappingsRejectsUnsafePIDIdentity(t *testing.T) {
 	cgroupRoot := t.TempDir()
 	procRoot := t.TempDir()
@@ -321,6 +344,8 @@ func TestBuildVMCgroupMappingsRejectsUnsafePIDIdentity(t *testing.T) {
 	}
 }
 
+// TestBuildVMCgroupMappingsUsesOnlySafeProcMetadata verifies build vm cgroup mappings uses only
+// safe proc metadata.
 func TestBuildVMCgroupMappingsUsesOnlySafeProcMetadata(t *testing.T) {
 	cgroupRoot := t.TempDir()
 	procRoot := t.TempDir()
@@ -341,6 +366,8 @@ func TestBuildVMCgroupMappingsUsesOnlySafeProcMetadata(t *testing.T) {
 	}
 }
 
+// TestValidateMappedQEMUProcessUsesSafeStableIdentity verifies validate mapped qemu process uses
+// safe stable identity.
 func TestValidateMappedQEMUProcessUsesSafeStableIdentity(t *testing.T) {
 	procRoot := t.TempDir()
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
@@ -385,6 +412,7 @@ func TestValidateMappedQEMUProcessUsesSafeStableIdentity(t *testing.T) {
 	}
 }
 
+// TestCgroupMappingRejectsDuplicateOwner verifies cgroup mapping rejects duplicate owner.
 func TestCgroupMappingRejectsDuplicateOwner(t *testing.T) {
 	_, err := IndexVMCgroupMappings([]VMBlockCgroupMapping{{Name: "a", CgroupIDs: []uint64{10}}, {Name: "b", CgroupIDs: []uint64{10}}})
 	if err == nil || !strings.Contains(err.Error(), "maps to both") {
@@ -392,12 +420,14 @@ func TestCgroupMappingRejectsDuplicateOwner(t *testing.T) {
 	}
 }
 
+// TestCgroupMappingRejectsEscapingPath verifies cgroup mapping rejects escaping path.
 func TestCgroupMappingRejectsEscapingPath(t *testing.T) {
 	if _, err := cleanCgroupPath("/machine.slice/../outside"); err == nil {
 		t.Fatal("expected unsafe cgroup path error")
 	}
 }
 
+// TestCgroupIOStatParsingAndLayeredDeltas verifies cgroup io stat parsing and layered deltas.
 func TestCgroupIOStatParsingAndLayeredDeltas(t *testing.T) {
 	before, err := ParseCgroupIOStat("259:0 rbytes=100 wbytes=200 rios=2 wios=3\n252:1 rbytes=100 wbytes=200 rios=2 wios=3\n")
 	if err != nil {
@@ -421,6 +451,8 @@ func TestCgroupIOStatParsingAndLayeredDeltas(t *testing.T) {
 	}
 }
 
+// TestCgroupIOStatDeltaStatesAndDuplicateRejection verifies cgroup io stat delta states and
+// duplicate rejection.
 func TestCgroupIOStatDeltaStatesAndDuplicateRejection(t *testing.T) {
 	before := []CgroupIOCounters{
 		{Device: "8:0", ReadBytes: 100, WriteBytes: 200},
@@ -454,6 +486,7 @@ func TestCgroupIOStatDeltaStatesAndDuplicateRejection(t *testing.T) {
 	}
 }
 
+// TestVirshDomstatsBlockParsingAndDelta verifies virsh domstats block parsing and delta.
 func TestVirshDomstatsBlockParsingAndDelta(t *testing.T) {
 	before, err := ParseVirshDomstatsBlock("block.0.name=vda\nblock.0.rd.reqs=10\nblock.0.rd.bytes=100\nblock.0.rd.times=1000\nblock.0.wr.reqs=20\nblock.0.wr.bytes=200\nblock.0.wr.times=2000\n")
 	if err != nil {
@@ -473,6 +506,8 @@ func TestVirshDomstatsBlockParsingAndDelta(t *testing.T) {
 	}
 }
 
+// TestVirshDomstatsDeltaStatesAndDuplicateRejection verifies virsh domstats delta states and
+// duplicate rejection.
 func TestVirshDomstatsDeltaStatesAndDuplicateRejection(t *testing.T) {
 	before := []VirshBlockCounters{{Block: "vda", ReadBytes: 100}, {Block: "vdb", ReadBytes: 50}, {Block: "vdc", WriteBytes: 100}}
 	after := []VirshBlockCounters{{Block: "vda", ReadBytes: 125}, {Block: "vdc", WriteBytes: 10}, {Block: "vdd", ReadBytes: 999}}
@@ -501,6 +536,8 @@ func TestVirshDomstatsDeltaStatesAndDuplicateRejection(t *testing.T) {
 	}
 }
 
+// TestVirshDomstatsMalformedNumericErrorIsDeterministic verifies virsh domstats malformed numeric
+// error is deterministic.
 func TestVirshDomstatsMalformedNumericErrorIsDeterministic(t *testing.T) {
 	input := "block.0.name=vda\nblock.0.rd.bytes=bad-read\nblock.0.wr.bytes=bad-write\nblock.0.rd.reqs=bad-reqs\n"
 	for iteration := 0; iteration < 50; iteration++ {
@@ -511,6 +548,7 @@ func TestVirshDomstatsMalformedNumericErrorIsDeterministic(t *testing.T) {
 	}
 }
 
+// writeFakeProcProcess renders fake proc process in the package's stable operator-facing format.
 func writeFakeProcProcess(t *testing.T, procRoot string, pid int, name, cgroup string) {
 	t.Helper()
 	root := filepath.Join(procRoot, strconv.Itoa(pid))
@@ -534,6 +572,7 @@ func writeFakeProcProcess(t *testing.T, procRoot string, pid int, name, cgroup s
 	}
 }
 
+// containsString reports whether contains string.
 func containsString(values []string, fragment string) bool {
 	for _, value := range values {
 		if strings.Contains(value, fragment) {
@@ -543,6 +582,7 @@ func containsString(values []string, fragment string) bool {
 	return false
 }
 
+// hasUnavailableSection reports whether the value has unavailable section.
 func hasUnavailableSection(sections []VMBlockLatencyUnavailableSection, name, status string) bool {
 	for _, section := range sections {
 		if section.Name == name && section.Status == status {

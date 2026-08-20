@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+// TestPermissionDeniedGuidanceDependsOnEffectiveUID verifies permission denied guidance depends on
+// effective uid.
 func TestPermissionDeniedGuidanceDependsOnEffectiveUID(t *testing.T) {
 	nonRoot := permissionDeniedMessage(1000, syscall.EPERM)
 	if !strings.Contains(nonRoot, "try running with sudo") {
@@ -22,6 +24,8 @@ func TestPermissionDeniedGuidanceDependsOnEffectiveUID(t *testing.T) {
 	}
 }
 
+// TestVMBlockPermissionDiagnosticsAreStageSpecific verifies vm block permission diagnostics are
+// stage specific.
 func TestVMBlockPermissionDiagnosticsAreStageSpecific(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -55,6 +59,8 @@ func TestVMBlockPermissionDiagnosticsAreStageSpecific(t *testing.T) {
 	}
 }
 
+// TestVMBlockRuntimeDiagnosticsReadBoundedSafeHostState verifies vm block runtime diagnostics read
+// bounded safe host state.
 func TestVMBlockRuntimeDiagnosticsReadBoundedSafeHostState(t *testing.T) {
 	root := t.TempDir()
 	statusPath := filepath.Join(root, "status")
@@ -87,6 +93,8 @@ func TestVMBlockRuntimeDiagnosticsReadBoundedSafeHostState(t *testing.T) {
 	}
 }
 
+// TestGeneratedObjectPresentButAttachDeniedRemainsUnavailable verifies generated object present but
+// attach denied remains unavailable.
 func TestGeneratedObjectPresentButAttachDeniedRemainsUnavailable(t *testing.T) {
 	resources := &fakeVMBlockCountResources{issueErr: syscall.EPERM}
 	source, loader := fakeCiliumVMBlockSource(resources)
@@ -99,6 +107,8 @@ func TestGeneratedObjectPresentButAttachDeniedRemainsUnavailable(t *testing.T) {
 	}
 }
 
+// collectCountOnlyDiagnosticTestReport collects count only diagnostic test report from the
+// configured evidence sources.
 func collectCountOnlyDiagnosticTestReport(source VMBlockKernelSource, euid int) VMBlockLatencyReport {
 	return CollectVMBlockLatencyReportWithKernelSource(context.Background(), VMBlockLatencyCollectOptions{
 		Duration: time.Nanosecond, Interval: time.Nanosecond,

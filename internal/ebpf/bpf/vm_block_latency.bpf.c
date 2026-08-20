@@ -18,6 +18,7 @@ struct vmblock_count_values {
 	__u64 missing_blkcg;
 };
 
+/* Keep histogram and map bounds compile-time constant for verifier analysis. */
 #define VM_BLOCK_LATENCY_BUCKETS 14
 #define VM_BLOCK_REQUEST_MAX_ENTRIES 65536
 #define VM_BLOCK_DEVICE_MAX_ENTRIES 4096
@@ -32,6 +33,11 @@ enum vmblock_operation {
 	VM_BLOCK_OP_UNKNOWN = 4,
 };
 
+/*
+ * request_starts stores the minimum issue-time state needed at completion.
+ * The request address is only the in-kernel map key: it is never copied into
+ * an aggregate or emitted to userspace.
+ */
 struct vmblock_issue_value {
 	__u64 timestamp_ns;
 	__u64 cgroup_id;
@@ -43,12 +49,14 @@ struct vmblock_issue_value {
 	__u8 reserved;
 };
 
+/* Aggregate keys contain stable device metadata, never kernel addresses. */
 struct vmblock_device_operation_key {
 	__u32 major;
 	__u32 minor;
 	__u32 operation;
 };
 
+/* cgroup_id is the kernfs identity matched exactly against libvirt inventory. */
 struct vmblock_cgroup_device_operation_key {
 	__u64 cgroup_id;
 	__u32 major;
@@ -56,6 +64,7 @@ struct vmblock_cgroup_device_operation_key {
 	__u32 operation;
 };
 
+/* Per-CPU aggregates avoid shared-counter atomics on the tracepoint hot path. */
 struct vmblock_latency_values {
 	__u64 count;
 	__u64 total_ns;
@@ -69,6 +78,7 @@ struct vmblock_latency_values {
 	__u64 unknown_ops;
 };
 
+/* Diagnostic counters make correlation and attribution loss explicit. */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
@@ -76,6 +86,7 @@ struct {
 	__type(value, struct vmblock_count_values);
 } counters SEC(".maps");
 
+/* Bounded issue-to-completion correlation keyed by an internal request address. */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, VM_BLOCK_REQUEST_MAX_ENTRIES);
@@ -83,6 +94,7 @@ struct {
 	__type(value, struct vmblock_issue_value);
 } request_starts SEC(".maps");
 
+/* Host-wide latency histogram and operation totals. */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
@@ -90,6 +102,7 @@ struct {
 	__type(value, struct vmblock_latency_values);
 } latency_stats SEC(".maps");
 
+/* Host aggregates split by stable major:minor identity and operation class. */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
 	__uint(max_entries, VM_BLOCK_DEVICE_MAX_ENTRIES);
@@ -97,6 +110,7 @@ struct {
 	__type(value, struct vmblock_latency_values);
 } device_operation_stats SEC(".maps");
 
+/* VM-attribution aggregates split by cgroup ID, device, and operation. */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
 	__uint(max_entries, VM_BLOCK_CGROUP_DEVICE_MAX_ENTRIES);
@@ -104,6 +118,7 @@ struct {
 	__type(value, struct vmblock_latency_values);
 } cgroup_device_operation_stats SEC(".maps");
 
+/* get_counts returns this CPU's diagnostic counter block. */
 static __always_inline struct vmblock_count_values *get_counts(void)
 {
 	__u32 key = 0;
@@ -111,6 +126,7 @@ static __always_inline struct vmblock_count_values *get_counts(void)
 	return bpf_map_lookup_elem(&counters, &key);
 }
 
+/* get_latency_stats returns this CPU's host latency aggregate. */
 static __always_inline struct vmblock_latency_values *get_latency_stats(void)
 {
 	__u32 key = 0;
@@ -118,6 +134,7 @@ static __always_inline struct vmblock_latency_values *get_latency_stats(void)
 	return bpf_map_lookup_elem(&latency_stats, &key);
 }
 
+/* latency_bucket maps nanoseconds into the public fixed histogram boundaries. */
 static __always_inline __u32 latency_bucket(__u64 latency_ns)
 {
 	if (latency_ns < 100000ULL)
@@ -149,6 +166,7 @@ static __always_inline __u32 latency_bucket(__u64 latency_ns)
 	return 13;
 }
 
+/* classify_operation exposes only the allowlisted block operation class. */
 static __always_inline __u8 classify_operation(blk_opf_t cmd_flags)
 {
 	switch (cmd_flags & VM_BLOCK_REQ_OP_MASK) {
@@ -165,6 +183,11 @@ static __always_inline __u8 classify_operation(blk_opf_t cmd_flags)
 	}
 }
 
+/*
+ * extract_cgroup_identity follows the whitelisted CO-RE ownership path:
+ * request -> bio -> bi_blkg -> blkcg -> css -> cgroup -> kernfs_node.id.
+ * Every missing link remains unattributed and increments a bounded counter.
+ */
 static __always_inline void extract_cgroup_identity(
 	struct request *rq, struct vmblock_issue_value *issue,
 	struct vmblock_count_values *values)
@@ -192,6 +215,7 @@ static __always_inline void extract_cgroup_identity(
 	issue->ownership_available = 1;
 }
 
+/* observe_latency updates one per-CPU aggregate without retaining event data. */
 static __always_inline void observe_latency(struct vmblock_latency_values *values,
 					     __u64 latency_ns, __u8 operation)
 {
@@ -226,6 +250,11 @@ static __always_inline void observe_latency(struct vmblock_latency_values *value
 	}
 }
 
+/*
+ * on_block_rq_issue snapshots timestamp, operation, device, and ownership.
+ * CO-RE reads are restricted to fields declared in vmlinux_min.h; request and
+ * related kernel addresses remain inside the request_starts map.
+ */
 SEC("tp_btf/block_rq_issue")
 int BPF_PROG(on_block_rq_issue, struct request *rq)
 {
@@ -280,6 +309,11 @@ int BPF_PROG(on_block_rq_issue, struct request *rq)
 	return 0;
 }
 
+/*
+ * on_block_rq_complete closes one correlation, deletes its internal pointer
+ * key, and updates sanitized host/device/cgroup aggregates. The tracepoint's
+ * error and byte-count parameters are intentionally unused in this milestone.
+ */
 SEC("tp_btf/block_rq_complete")
 int BPF_PROG(on_block_rq_complete, struct request *rq,
 	     blk_status_t error, unsigned int nr_bytes)
@@ -364,4 +398,5 @@ int BPF_PROG(on_block_rq_complete, struct request *rq,
 	return 0;
 }
 
+/* Dual licensing is required by the kernel loader and libbpf helper policy. */
 char LICENSE[] SEC("license") = "Dual MIT/GPL";

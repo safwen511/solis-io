@@ -18,6 +18,7 @@ type fakeRunner struct {
 	calls   []string
 }
 
+// Run executes the receiver's bounded operation and propagates execution failures.
 func (runner *fakeRunner) Run(_ context.Context, _ Target, command CommandSpec) (Result, error) {
 	key := command.Key()
 	runner.calls = append(runner.calls, key)
@@ -27,6 +28,7 @@ func (runner *fakeRunner) Run(_ context.Context, _ Target, command CommandSpec) 
 	return Result{Output: runner.outputs[key]}, nil
 }
 
+// TestCommandAllowlistCannotBeOverridden verifies command allowlist cannot be overridden.
 func TestCommandAllowlistCannotBeOverridden(t *testing.T) {
 	if _, err := (CommandSpec{}).argv(); err == nil || !strings.Contains(err.Error(), "not allowlisted") {
 		t.Fatalf("zero CommandSpec argv error = %v", err)
@@ -59,6 +61,8 @@ func TestCommandAllowlistCannotBeOverridden(t *testing.T) {
 	}
 }
 
+// TestPostgreSQLCommandsAreFixedReadOnlyStatistics verifies PostgreSQL commands are fixed read only
+// statistics.
 func TestPostgreSQLCommandsAreFixedReadOnlyStatistics(t *testing.T) {
 	constructors := []func(string) (CommandSpec, error){
 		PostgreSQLVersionCommand, PostgreSQLDatabasesCommand, PostgreSQLActivityCommand,
@@ -93,6 +97,7 @@ func TestPostgreSQLCommandsAreFixedReadOnlyStatistics(t *testing.T) {
 	}
 }
 
+// TestRemoteArgumentQuotingProtectsFixedSQL verifies remote argument quoting protects fixed sql.
 func TestRemoteArgumentQuotingProtectsFixedSQL(t *testing.T) {
 	command, _ := PostgreSQLActivityCommand("postgres")
 	argv, _ := command.argv()
@@ -105,6 +110,7 @@ func TestRemoteArgumentQuotingProtectsFixedSQL(t *testing.T) {
 	}
 }
 
+// TestTargetMustComeFromInventory verifies target must come from inventory.
 func TestTargetMustComeFromInventory(t *testing.T) {
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
 	target, err := TargetForVM(vm, "flint")
@@ -126,6 +132,8 @@ func TestTargetMustComeFromInventory(t *testing.T) {
 	}
 }
 
+// TestSSHRunnerUsesNonInteractiveKnownHostOptions verifies ssh runner uses non interactive known
+// host options.
 func TestSSHRunnerUsesNonInteractiveKnownHostOptions(t *testing.T) {
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
 	target, _ := TargetForVM(vm, "flint")
@@ -145,6 +153,7 @@ func TestSSHRunnerUsesNonInteractiveKnownHostOptions(t *testing.T) {
 	}
 }
 
+// TestSSHOutputBufferIsBounded verifies ssh output buffer is bounded.
 func TestSSHOutputBufferIsBounded(t *testing.T) {
 	buffer := newBoundedBuffer(4)
 	if _, err := buffer.Write([]byte("123456")); err != nil {
@@ -155,6 +164,7 @@ func TestSSHOutputBufferIsBounded(t *testing.T) {
 	}
 }
 
+// TestCollectWithFakeRunner verifies collect with fake runner.
 func TestCollectWithFakeRunner(t *testing.T) {
 	runner := completeFakeRunner()
 	vm := inventory.VM{Name: "a-web", Tenant: "tenant-a", Role: "web", IPPlan: "192.0.2.20"}
@@ -180,6 +190,7 @@ func TestCollectWithFakeRunner(t *testing.T) {
 	}
 }
 
+// TestCollectCommandFailureIsPartial verifies collect command failure is partial.
 func TestCollectCommandFailureIsPartial(t *testing.T) {
 	runner := completeFakeRunner()
 	runner.errors[MemoryCommand().Key()] = context.DeadlineExceeded
@@ -194,6 +205,7 @@ func TestCollectCommandFailureIsPartial(t *testing.T) {
 	}
 }
 
+// TestProcessParserIgnoresTrailingArguments verifies process parser ignores trailing arguments.
 func TestProcessParserIgnoresTrailingArguments(t *testing.T) {
 	processes, err := parseProcessPressure("10 1 nginx 9.0 1.0 --password secret\n")
 	if err != nil {
@@ -208,6 +220,7 @@ func TestProcessParserIgnoresTrailingArguments(t *testing.T) {
 	}
 }
 
+// TestListeningPortsParserDeterministic verifies listening ports parser deterministic.
 func TestListeningPortsParserDeterministic(t *testing.T) {
 	output := "tcp LISTEN 0 128 0.0.0.0:8080 0.0.0.0:* users:((\"python3\",pid=2,fd=3))\n" +
 		"tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=1,fd=3))\n"
@@ -220,6 +233,7 @@ func TestListeningPortsParserDeterministic(t *testing.T) {
 	}
 }
 
+// TestGuestStatusJSONDeterministicAndPrivate verifies guest status json deterministic and private.
 func TestGuestStatusJSONDeterministicAndPrivate(t *testing.T) {
 	runner := completeFakeRunner()
 	vm := inventory.VM{Name: "a-web", IPPlan: "192.0.2.20"}
@@ -245,6 +259,7 @@ func TestGuestStatusJSONDeterministicAndPrivate(t *testing.T) {
 	}
 }
 
+// completeFakeRunner builds complete fake runner from validated inputs.
 func completeFakeRunner() *fakeRunner {
 	return &fakeRunner{outputs: map[string]string{
 		HostnameCommand().Key(): "a-web\n", KernelReleaseCommand().Key(): "7.0.0\n",

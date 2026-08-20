@@ -9,6 +9,7 @@ import (
 
 type mapVMBlockBTFTypeFinder map[string]btf.Type
 
+// TypeByName completes type by name and returns any failure to its caller.
 func (finder mapVMBlockBTFTypeFinder) TypeByName(name string, target any) error {
 	value, ok := finder[name]
 	if !ok {
@@ -39,6 +40,7 @@ func (finder mapVMBlockBTFTypeFinder) TypeByName(name string, target any) error 
 	return nil
 }
 
+// completeVMBlockBTFTypes builds complete VM block BTF types from validated inputs.
 func completeVMBlockBTFTypes() mapVMBlockBTFTypeFinder {
 	integer := &btf.Int{Name: "unsigned int", Size: 4}
 	blockDevice := &btf.Struct{Name: "block_device", Members: []btf.Member{{Name: "bd_dev", Type: integer}}}
@@ -79,6 +81,8 @@ func completeVMBlockBTFTypes() mapVMBlockBTFTypeFinder {
 	}
 }
 
+// TestVMBlockAttributionPreflightSuccessIsStillPreflightOnly verifies vm block attribution
+// preflight success is still preflight only.
 func TestVMBlockAttributionPreflightSuccessIsStillPreflightOnly(t *testing.T) {
 	report := resolveKernelVMBlockBTFCapabilities(completeVMBlockBTFTypes())
 	preflight := vmBlockAttributionPreflight(report)
@@ -90,6 +94,8 @@ func TestVMBlockAttributionPreflightSuccessIsStillPreflightOnly(t *testing.T) {
 	}
 }
 
+// TestVMBlockAttributionPreflightReportsMissingOwnershipField verifies vm block attribution
+// preflight reports missing ownership field.
 func TestVMBlockAttributionPreflightReportsMissingOwnershipField(t *testing.T) {
 	types := completeVMBlockBTFTypes()
 	bio := types["bio"].(*btf.Struct)
@@ -101,6 +107,8 @@ func TestVMBlockAttributionPreflightReportsMissingOwnershipField(t *testing.T) {
 	}
 }
 
+// TestVMBlockRequestOperationEnumMustMatchExpectedValues verifies vm block request operation enum
+// must match expected values.
 func TestVMBlockRequestOperationEnumMustMatchExpectedValues(t *testing.T) {
 	types := completeVMBlockBTFTypes()
 	enumeration := types["req_op"].(*btf.Enum)

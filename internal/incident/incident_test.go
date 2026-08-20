@@ -8,6 +8,8 @@ import (
 	"github.com/safwen511/solis-io/internal/experiment"
 )
 
+// TestNewExplanationProbableInterferenceWithoutFailures verifies new explanation probable
+// interference without failures.
 func TestNewExplanationProbableInterferenceWithoutFailures(t *testing.T) {
 	explanation, err := NewExplanation(testReport(), "tenant-a", "b-stress")
 	if err != nil {
@@ -23,6 +25,8 @@ func TestNewExplanationProbableInterferenceWithoutFailures(t *testing.T) {
 	}
 }
 
+// TestNewExplanationMentionsApplicationFailures verifies new explanation mentions application
+// failures.
 func TestNewExplanationMentionsApplicationFailures(t *testing.T) {
 	report := testReport()
 	report.DuringNoise.FailedRequests = 3
@@ -36,6 +40,7 @@ func TestNewExplanationMentionsApplicationFailures(t *testing.T) {
 	}
 }
 
+// TestNewExplanationNoConclusiveInterference verifies new explanation no conclusive interference.
 func TestNewExplanationNoConclusiveInterference(t *testing.T) {
 	report := testReport()
 	report.DuringNoise.RequestsPerSecond = 110
@@ -50,6 +55,7 @@ func TestNewExplanationNoConclusiveInterference(t *testing.T) {
 	}
 }
 
+// TestWriteExplanation verifies write explanation.
 func TestWriteExplanation(t *testing.T) {
 	explanation, err := NewExplanation(testReport(), "tenant-a", "b-stress")
 	if err != nil {
@@ -75,6 +81,7 @@ func TestWriteExplanation(t *testing.T) {
 	}
 }
 
+// testReport builds test report from validated inputs.
 func testReport() experiment.Report {
 	return experiment.Report{
 		Directory: "test-report",

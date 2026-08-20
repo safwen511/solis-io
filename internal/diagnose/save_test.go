@@ -18,6 +18,7 @@ import (
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
+// TestWriteOutputStdoutMode verifies write output stdout mode.
 func TestWriteOutputStdoutMode(t *testing.T) {
 	report := outputTestReport()
 	var want bytes.Buffer
@@ -38,6 +39,7 @@ func TestWriteOutputStdoutMode(t *testing.T) {
 	}
 }
 
+// TestWriteOutputExactPath verifies write output exact path.
 func TestWriteOutputExactPath(t *testing.T) {
 	report := outputTestReport()
 	path := filepath.Join(t.TempDir(), "diagnosis.txt")
@@ -57,6 +59,7 @@ func TestWriteOutputExactPath(t *testing.T) {
 	}
 }
 
+// TestWriteOutputJSONExactPath verifies write output json exact path.
 func TestWriteOutputJSONExactPath(t *testing.T) {
 	report := jsonOutputTestReport()
 	path := filepath.Join(t.TempDir(), "diagnosis.json")
@@ -97,6 +100,8 @@ func TestWriteOutputJSONExactPath(t *testing.T) {
 	assertPrivateDiagnosisMode(t, path)
 }
 
+// TestWriteJSONExcludesSensitiveInternalFields verifies write json excludes sensitive internal
+// fields.
 func TestWriteJSONExcludesSensitiveInternalFields(t *testing.T) {
 	report := jsonOutputTestReport()
 	report.Storage.Targets[0].VM.QEMUCmdline = "forbidden-cmdline-marker"
@@ -122,6 +127,7 @@ func TestWriteJSONExcludesSensitiveInternalFields(t *testing.T) {
 	}
 }
 
+// TestWriteOutputDirectoryUsesUTCTimestamp verifies write output directory uses utc timestamp.
 func TestWriteOutputDirectoryUsesUTCTimestamp(t *testing.T) {
 	report := outputTestReport()
 	report.Inputs.Victim = "tenant/a"
@@ -140,6 +146,8 @@ func TestWriteOutputDirectoryUsesUTCTimestamp(t *testing.T) {
 	assertDiagnosisFile(t, wantPath, report)
 }
 
+// TestWriteOutputRejectsMissingParentDirectory verifies write output rejects missing parent
+// directory.
 func TestWriteOutputRejectsMissingParentDirectory(t *testing.T) {
 	report := outputTestReport()
 	root := t.TempDir()
@@ -154,6 +162,7 @@ func TestWriteOutputRejectsMissingParentDirectory(t *testing.T) {
 	}
 }
 
+// TestWriteOutputRejectsSymlinkTarget verifies write output rejects symlink target.
 func TestWriteOutputRejectsSymlinkTarget(t *testing.T) {
 	root := t.TempDir()
 	realTarget := filepath.Join(root, "real.txt")
@@ -174,6 +183,7 @@ func TestWriteOutputRejectsSymlinkTarget(t *testing.T) {
 	}
 }
 
+// TestWriteOutputRejectsSymlinkParent verifies write output rejects symlink parent.
 func TestWriteOutputRejectsSymlinkParent(t *testing.T) {
 	root := t.TempDir()
 	realParent := filepath.Join(root, "real")
@@ -195,6 +205,7 @@ func TestWriteOutputRejectsSymlinkParent(t *testing.T) {
 	}
 }
 
+// TestWriteOutputRejectsNonRegularTarget verifies write output rejects non regular target.
 func TestWriteOutputRejectsNonRegularTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "diagnosis.txt")
 	if err := os.Mkdir(path, 0o700); err != nil {
@@ -206,6 +217,8 @@ func TestWriteOutputRejectsNonRegularTarget(t *testing.T) {
 	}
 }
 
+// TestWriteOutputRejectsConflictingDestinations verifies write output rejects conflicting
+// destinations.
 func TestWriteOutputRejectsConflictingDestinations(t *testing.T) {
 	_, err := WriteOutput(
 		&bytes.Buffer{},
@@ -218,6 +231,7 @@ func TestWriteOutputRejectsConflictingDestinations(t *testing.T) {
 	}
 }
 
+// TestSanitizeFilenamePart verifies sanitize filename part.
 func TestSanitizeFilenamePart(t *testing.T) {
 	tests := map[string]string{
 		"tenant-a":      "tenant-a",
@@ -233,6 +247,7 @@ func TestSanitizeFilenamePart(t *testing.T) {
 	}
 }
 
+// outputTestReport builds output test report from validated inputs.
 func outputTestReport() Report {
 	return Report{
 		Inputs: Inputs{
@@ -248,6 +263,7 @@ func outputTestReport() Report {
 	}
 }
 
+// jsonOutputTestReport builds JSON output test report from validated inputs.
 func jsonOutputTestReport() Report {
 	report := outputTestReport()
 	report.Storage.Targets = []storage.VMTarget{
@@ -278,6 +294,7 @@ func jsonOutputTestReport() Report {
 	return report
 }
 
+// assertDiagnosisFile performs assert diagnosis file as part of the package workflow.
 func assertDiagnosisFile(t *testing.T, path string, report Report) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -293,6 +310,7 @@ func assertDiagnosisFile(t *testing.T, path string, report Report) {
 	}
 }
 
+// assertPrivateDiagnosisMode executes the package's assert private diagnosis mode step.
 func assertPrivateDiagnosisMode(t *testing.T, path string) {
 	t.Helper()
 	info, err := os.Stat(path)

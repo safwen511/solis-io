@@ -185,6 +185,7 @@ func WriteJSON(dst io.Writer, report Report) error {
 	return encoder.Encode(buildJSONReport(report))
 }
 
+// buildJSONReport builds json report from validated inputs.
 func buildJSONReport(report Report) JSONReport {
 	result := JSONReport{
 		SchemaVersion: "1",
@@ -250,6 +251,7 @@ func buildJSONReport(report Report) JSONReport {
 	return result
 }
 
+// jsonEBPFLatency builds JSON eBPF latency from validated inputs.
 func jsonEBPFLatency(evidence *ebpf.BlockLatencyEvidence) *JSONEBPFLatencyEvidence {
 	if evidence == nil {
 		return nil
@@ -265,6 +267,7 @@ func jsonEBPFLatency(evidence *ebpf.BlockLatencyEvidence) *JSONEBPFLatencyEviden
 	}
 }
 
+// jsonEBPFVMAttribution builds JSON eBPF VM attribution from validated inputs.
 func jsonEBPFVMAttribution(report Report) *JSONEBPFVMAttribution {
 	evidence := report.EBPFVMAttribution
 	if evidence == nil {
@@ -296,6 +299,7 @@ func jsonEBPFVMAttribution(report Report) *JSONEBPFVMAttribution {
 	return result
 }
 
+// jsonDiscovery builds JSON discovery from validated inputs.
 func jsonDiscovery(report Report) *JSONDiscoveryEvidence {
 	if report.Discovery == nil {
 		return nil

@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// TestVMBlockLatencyRuntimeAccumulatorHasNoLatencySlice verifies vm block latency runtime
+// accumulator has no latency slice.
 func TestVMBlockLatencyRuntimeAccumulatorHasNoLatencySlice(t *testing.T) {
 	accumulatorType := reflect.TypeOf(vmLatencyAccumulator{})
 	for index := 0; index < accumulatorType.NumField(); index++ {
@@ -24,6 +26,8 @@ func TestVMBlockLatencyRuntimeAccumulatorHasNoLatencySlice(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencySeparatesVMDeviceAndOperation verifies vm block latency separates vm device and
+// operation.
 func TestVMBlockLatencySeparatesVMDeviceAndOperation(t *testing.T) {
 	mappings := []VMBlockCgroupMapping{
 		{Name: "a-web", CgroupIDs: []uint64{11}, MappingQuality: "cgroup_v2_inode_tree"},
@@ -73,6 +77,8 @@ func TestVMBlockLatencySeparatesVMDeviceAndOperation(t *testing.T) {
 	}
 }
 
+// TestVMBlockLatencyDeterministicNestedHistogramJSON verifies vm block latency deterministic nested
+// histogram json.
 func TestVMBlockLatencyDeterministicNestedHistogramJSON(t *testing.T) {
 	report := VMBlockLatencyReport{
 		SchemaVersion: "1", ObservedAtUTC: "2026-08-10T12:00:00Z", Duration: "1s", Interval: "1s", Mode: "experimental",
@@ -111,6 +117,7 @@ func TestVMBlockLatencyDeterministicNestedHistogramJSON(t *testing.T) {
 	}
 }
 
+// histogramWithLatency builds histogram with latency from validated inputs.
 func histogramWithLatency(latency time.Duration) boundedVMBlockLatencyHistogram {
 	var histogram boundedVMBlockLatencyHistogram
 	histogram.observe(uint64(latency))

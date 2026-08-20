@@ -15,6 +15,7 @@ Time per request:       10.000 [ms] (mean, across all concurrent requests)
 Transfer rate:          25.50 [Kbytes/sec] received
 `
 
+// TestLoadAndWriteSummary verifies load and write summary.
 func TestLoadAndWriteSummary(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "baseline.txt", httpFixture)
@@ -53,6 +54,7 @@ func TestLoadAndWriteSummary(t *testing.T) {
 	}
 }
 
+// TestLoadReportsMissingFile verifies load reports missing file.
 func TestLoadReportsMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Load(dir)
@@ -61,6 +63,7 @@ func TestLoadReportsMissingFile(t *testing.T) {
 	}
 }
 
+// TestLoadReportsParseFailure verifies load reports parse failure.
 func TestLoadReportsParseFailure(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "baseline.txt", "Failed requests: 0\n")
@@ -71,6 +74,7 @@ func TestLoadReportsParseFailure(t *testing.T) {
 	}
 }
 
+// writeTestFile renders test file in the package's stable operator-facing format.
 func writeTestFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {

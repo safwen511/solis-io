@@ -57,6 +57,7 @@ func Inspect() Report {
 	})
 }
 
+// inspect assembles non-invasive host, BTF, capability, lockdown, and object readiness checks.
 func inspect(config probeConfig) Report {
 	report := Report{}
 	if runtime.GOOS == "linux" {
@@ -118,6 +119,7 @@ func inspect(config probeConfig) Report {
 	return report
 }
 
+// readableNonemptyFileCheck reads able nonempty file check from its configured source.
 func readableNonemptyFileCheck(name, path string) Check {
 	file, err := os.Open(path)
 	if err != nil {
@@ -134,11 +136,13 @@ func readableNonemptyFileCheck(name, path string) Check {
 	return Check{Status: OK, Name: name, Detail: path}
 }
 
+// directoryReadable completes directory readable and returns any failure to its caller.
 func directoryReadable(path string) error {
 	_, err := os.ReadDir(path)
 	return err
 }
 
+// tracepointCheck builds tracepoint check from validated inputs.
 func tracepointCheck(traceRoot, event string) Check {
 	path := filepath.Join(traceRoot, "events", "block", event, "id")
 	data, err := os.ReadFile(path)
@@ -154,6 +158,7 @@ func tracepointCheck(traceRoot, event string) Check {
 	return Check{Status: OK, Name: name, Detail: fmt.Sprintf("available at %s (ID %d)", path, value)}
 }
 
+// unavailableTracepointChecks builds unavailable tracepoint checks from validated inputs.
 func unavailableTracepointChecks(reason string) []Check {
 	return []Check{
 		{Status: FAIL, Name: "formatted block:block_rq_issue", Detail: reason},
@@ -161,6 +166,7 @@ func unavailableTracepointChecks(reason string) []Check {
 	}
 }
 
+// runtimeReadinessChecks distinguishes formatted tracepoint visibility from typed-BTF readiness.
 func runtimeReadinessChecks(config probeConfig) []Check {
 	checks := make([]Check, 0, 13)
 	if config.GetEUID == nil {
@@ -213,6 +219,7 @@ func runtimeReadinessChecks(config probeConfig) []Check {
 	return checks
 }
 
+// vmBlockCapabilityDoctorChecks reports each request-metadata and ownership-path BTF requirement.
 func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, error)) []Check {
 	const unavailable = "BTF field capability probe unavailable"
 	if inspect == nil {
@@ -257,6 +264,7 @@ func vmBlockCapabilityDoctorChecks(inspect func() (VMBlockBTFCapabilityReport, e
 	return []Check{metadata, operation, device, ownership, identity, preflight, runtimeReadiness}
 }
 
+// vmBlockDoctorCapabilityCheck builds VM block doctor capability check from validated inputs.
 func vmBlockDoctorCapabilityCheck(name string, report VMBlockBTFCapabilityReport, required []string) Check {
 	missing := missingVMBlockCapabilities(report, required)
 	if len(missing) > 0 {
@@ -265,6 +273,8 @@ func vmBlockDoctorCapabilityCheck(name string, report VMBlockBTFCapabilityReport
 	return Check{Status: OK, Name: name, Detail: "available in kernel BTF"}
 }
 
+// formatVMBlockTypedTracepointPrototypes formats vm block typed tracepoint prototypes using the
+// stable output contract.
 func formatVMBlockTypedTracepointPrototypes(prototypes []vmBlockTypedTracepointPrototype) string {
 	if len(prototypes) == 0 {
 		return "typed-BTF symbols present; parameter details unavailable"
@@ -283,6 +293,7 @@ func formatVMBlockTypedTracepointPrototypes(prototypes []vmBlockTypedTracepointP
 	return strings.Join(details, "; ")
 }
 
+// diagnosticFileCheck builds diagnostic file check from validated inputs.
 func diagnosticFileCheck(name, path string, parse func(string) string) Check {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -291,6 +302,7 @@ func diagnosticFileCheck(name, path string, parse func(string) string) Check {
 	return Check{Status: OK, Name: name, Detail: firstNonEmpty(strings.TrimSpace(parse(string(data))), "-")}
 }
 
+// capabilityDoctorCheck builds capability doctor check from validated inputs.
 func capabilityDoctorCheck(name string, enabled bool) Check {
 	if enabled {
 		return Check{Status: OK, Name: name, Detail: "set in CapEff"}
@@ -298,6 +310,7 @@ func capabilityDoctorCheck(name string, enabled bool) Check {
 	return Check{Status: WARN, Name: name, Detail: "not set in CapEff; eBPF operations may rely on another applicable capability or policy"}
 }
 
+// parseMountInfo parses and validates mount info.
 func parseMountInfo(input string) []mount {
 	var mounts []mount
 	for _, line := range strings.Split(input, "\n") {
@@ -323,6 +336,7 @@ func parseMountInfo(input string) []mount {
 	return mounts
 }
 
+// unescapeMountField derives stable operator-facing text for unescape mount field.
 func unescapeMountField(value string) string {
 	replacer := strings.NewReplacer(
 		`\040`, " ",
@@ -333,6 +347,7 @@ func unescapeMountField(value string) string {
 	return replacer.Replace(value)
 }
 
+// selectMount selects mount using deterministic ordering.
 func selectMount(mounts []mount, filesystem, preferred string) string {
 	var candidates []string
 	for _, candidate := range mounts {
@@ -351,6 +366,7 @@ func selectMount(mounts []mount, filesystem, preferred string) string {
 	return candidates[0]
 }
 
+// mountExists reports whether mount exists.
 func mountExists(mounts []mount, point, filesystem string) bool {
 	for _, candidate := range mounts {
 		if candidate.point == point && candidate.filesystem == filesystem {

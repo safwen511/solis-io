@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// parsePSI parses and validates psi.
 func parsePSI(data []byte, source string) (PSIResourceStatus, error) {
 	result := PSIResourceStatus{Availability: measured(source)}
 	var someFound, fullFound bool
@@ -37,6 +38,7 @@ func parsePSI(data []byte, source string) (PSIResourceStatus, error) {
 	return result, nil
 }
 
+// parsePSIValues parses and validates psi values.
 func parsePSIValues(fields []string, source string) (PSIValues, error) {
 	if len(fields) < 4 {
 		return PSIValues{}, fmt.Errorf("PSI %q line has too few fields", fields[0])

@@ -9,6 +9,7 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestResolveTenantVictim verifies resolve tenant victim.
 func TestResolveTenantVictim(t *testing.T) {
 	plan, err := Resolve(testInventory(), "tenant-a", "b-stress")
 	if err != nil {
@@ -31,6 +32,7 @@ func TestResolveTenantVictim(t *testing.T) {
 	}
 }
 
+// TestResolveVMVictim verifies resolve vm victim.
 func TestResolveVMVictim(t *testing.T) {
 	plan, err := Resolve(testInventory(), "a-db", "b-stress")
 	if err != nil {
@@ -41,6 +43,7 @@ func TestResolveVMVictim(t *testing.T) {
 	}
 }
 
+// TestResolveUnknownSuspect verifies resolve unknown suspect.
 func TestResolveUnknownSuspect(t *testing.T) {
 	_, err := Resolve(testInventory(), "tenant-a", "missing-vm")
 	if err == nil || !strings.Contains(err.Error(), "suspect VM not found") {
@@ -48,6 +51,8 @@ func TestResolveUnknownSuspect(t *testing.T) {
 	}
 }
 
+// TestWriteIncludesPlanEvidenceAndInterpretation verifies write includes plan evidence and
+// interpretation.
 func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 	plan, err := Resolve(testInventory(), "tenant-a", "b-stress")
 	if err != nil {
@@ -91,6 +96,7 @@ func TestWriteIncludesPlanEvidenceAndInterpretation(t *testing.T) {
 	}
 }
 
+// testInventory builds test inventory from validated inputs.
 func testInventory() []inventory.VM {
 	return []inventory.VM{
 		{Name: "a-web", Tenant: "tenant-a", Role: "web", IPPlan: "192.168.130.20"},

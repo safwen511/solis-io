@@ -8,6 +8,8 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestConfiguredThresholdsChangePressureWithoutChangingDefaults verifies configured thresholds
+// change pressure without changing defaults.
 func TestConfiguredThresholdsChangePressureWithoutChangingDefaults(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-web"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
@@ -30,6 +32,8 @@ func TestConfiguredThresholdsChangePressureWithoutChangingDefaults(t *testing.T)
 	}
 }
 
+// TestSummarizeSamplesCalculatesTimeWeightedAverages verifies summarize samples calculates time
+// weighted averages.
 func TestSummarizeSamplesCalculatesTimeWeightedAverages(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
@@ -57,6 +61,7 @@ func TestSummarizeSamplesCalculatesTimeWeightedAverages(t *testing.T) {
 	}
 }
 
+// TestFormatWriteRatio verifies format write ratio.
 func TestFormatWriteRatio(t *testing.T) {
 	if got := formatWriteRatio(0.27, 0); got != "-" {
 		t.Fatalf("formatWriteRatio(0.27, 0) = %q, want -", got)
@@ -69,6 +74,7 @@ func TestFormatWriteRatio(t *testing.T) {
 	}
 }
 
+// TestConclusionLogic verifies conclusion logic.
 func TestConclusionLogic(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -91,6 +97,8 @@ func TestConclusionLogic(t *testing.T) {
 	}
 }
 
+// TestWriteActivityObservedUsesCentralNearZeroThresholds verifies write activity observed uses
+// central near zero thresholds.
 func TestWriteActivityObservedUsesCentralNearZeroThresholds(t *testing.T) {
 	if WriteActivityObserved(0, 0) {
 		t.Fatal("zero counters reported activity")
@@ -103,6 +111,7 @@ func TestWriteActivityObservedUsesCentralNearZeroThresholds(t *testing.T) {
 	}
 }
 
+// TestSyscallFallbackMarksDominantSuspect verifies syscall fallback marks dominant suspect.
 func TestSyscallFallbackMarksDominantSuspect(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
@@ -126,6 +135,8 @@ func TestSyscallFallbackMarksDominantSuspect(t *testing.T) {
 	}
 }
 
+// TestSyscallComparisonDoesNotMarkSimilarRatesDominant verifies syscall comparison does not mark
+// similar rates dominant.
 func TestSyscallComparisonDoesNotMarkSimilarRatesDominant(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}
@@ -146,6 +157,7 @@ func TestSyscallComparisonDoesNotMarkSimilarRatesDominant(t *testing.T) {
 	}
 }
 
+// TestSummaryForPlanReusesSelectedSamples verifies summary for plan reuses selected samples.
 func TestSummaryForPlanReusesSelectedSamples(t *testing.T) {
 	victimVM := inventory.VM{Name: "a-web"}
 	suspectVM := inventory.VM{Name: "b-stress"}
@@ -167,6 +179,7 @@ func TestSummaryForPlanReusesSelectedSamples(t *testing.T) {
 	}
 }
 
+// TestLowActivityReportHasNoDominantWriter verifies low activity report has no dominant writer.
 func TestLowActivityReportHasNoDominantWriter(t *testing.T) {
 	victim := Target{TargetType: "victim", VM: inventory.VM{Name: "a-db"}}
 	suspect := Target{TargetType: "suspect", VM: inventory.VM{Name: "b-stress"}}

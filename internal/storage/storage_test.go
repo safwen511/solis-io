@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestParseBlockStat verifies parse block stat.
 func TestParseBlockStat(t *testing.T) {
 	stats, err := parseBlockStat("10 20 30 40 50 60 70 80 90 100 110 120 130 140 150 160 170")
 	if err != nil {
@@ -35,12 +36,14 @@ func TestParseBlockStat(t *testing.T) {
 	}
 }
 
+// TestParseBlockStatRejectsShortLine verifies parse block stat rejects short line.
 func TestParseBlockStatRejectsShortLine(t *testing.T) {
 	if _, err := parseBlockStat("1 2 3"); err == nil {
 		t.Fatal("parseBlockStat() accepted a short line")
 	}
 }
 
+// TestCalculateDelta verifies calculate delta.
 func TestCalculateDelta(t *testing.T) {
 	previous := DeviceStats{
 		PhysicalDisk:     "/dev/nvme0n1",
@@ -81,6 +84,7 @@ func TestCalculateDelta(t *testing.T) {
 	}
 }
 
+// TestCalculateDeltaRejectsCounterReset verifies calculate delta rejects counter reset.
 func TestCalculateDeltaRejectsCounterReset(t *testing.T) {
 	previous := DeviceStats{ReadsCompleted: knownCounter(10)}
 	current := DeviceStats{ReadsCompleted: knownCounter(5)}
@@ -94,6 +98,8 @@ func TestCalculateDeltaRejectsCounterReset(t *testing.T) {
 	}
 }
 
+// TestCaptureSortsAndDeduplicatesPhysicalDisks verifies capture sorts and deduplicates physical
+// disks.
 func TestCaptureSortsAndDeduplicatesPhysicalDisks(t *testing.T) {
 	victims := []inventory.VM{
 		{Name: "a-web", Tenant: "tenant-a", Role: "web", Disk: "/images/a-web.qcow2"},
@@ -120,6 +126,8 @@ func TestCaptureSortsAndDeduplicatesPhysicalDisks(t *testing.T) {
 	}
 }
 
+// TestWatchLayerSamplesNormalizesAndDeduplicates verifies watch layer samples normalizes and
+// deduplicates.
 func TestWatchLayerSamplesNormalizesAndDeduplicates(t *testing.T) {
 	targets := []VMTarget{
 		{Storage: hoststorage.Mapping{
@@ -157,6 +165,7 @@ func TestWatchLayerSamplesNormalizesAndDeduplicates(t *testing.T) {
 	}
 }
 
+// TestWriteSnapshotFormatsUnavailableValues verifies write snapshot formats unavailable values.
 func TestWriteSnapshotFormatsUnavailableValues(t *testing.T) {
 	if got := counterText(Counter{}); got != "-" {
 		t.Fatalf("counterText() = %q, want - for unavailable counter", got)

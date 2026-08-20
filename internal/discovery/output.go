@@ -66,6 +66,7 @@ func WriteVictimTopology(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// metric formats an available measurement or an explicit unavailable marker.
 func metric(value float64, available bool) string {
 	if !available {
 		return "-"
@@ -73,6 +74,7 @@ func metric(value float64, available bool) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+// yesNo formats a boolean as yes or no for human-readable reports.
 func yesNo(value bool) string {
 	if value {
 		return "yes"
@@ -80,6 +82,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
+// emptyDash replaces empty text with a dash so table columns remain explicit.
 func emptyDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

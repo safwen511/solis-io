@@ -40,6 +40,7 @@ type processResourceMeter struct {
 	counters processResourceCounters
 }
 
+// newProcessResourceMeter snapshots Solis aggregate counters for later interval deltas.
 func newProcessResourceMeter(now time.Time) *processResourceMeter {
 	if now.IsZero() {
 		now = time.Now()
@@ -47,6 +48,7 @@ func newProcessResourceMeter(now time.Time) *processResourceMeter {
 	return &processResourceMeter{started: now, previous: now, counters: readProcessResourceCounters()}
 }
 
+// Sample reports Solis CPU, RSS, disk I/O, goroutine, and uptime aggregates for the UI.
 func (meter *processResourceMeter) Sample(now time.Time) ProcessResources {
 	if now.IsZero() {
 		now = time.Now()
@@ -76,6 +78,7 @@ func (meter *processResourceMeter) Sample(now time.Time) ProcessResources {
 	return result
 }
 
+// readProcessResourceCounters reads only aggregate self counters, never arguments or environments.
 func readProcessResourceCounters() processResourceCounters {
 	var result processResourceCounters
 	var usage unix.Rusage
@@ -91,10 +94,12 @@ func readProcessResourceCounters() processResourceCounters {
 	return result
 }
 
+// timevalDuration converts a kernel timeval into a Go duration without floating-point loss.
 func timevalDuration(value unix.Timeval) time.Duration {
 	return time.Duration(value.Sec)*time.Second + time.Duration(value.Usec)*time.Microsecond
 }
 
+// readSelfRSS derives resident bytes from the current process's aggregate statm counters.
 func readSelfRSS() (uint64, bool) {
 	contents, err := os.ReadFile("/proc/self/statm")
 	if err != nil {
@@ -115,6 +120,7 @@ func readSelfRSS() (uint64, bool) {
 	return residentPages * uint64(pageSize), true
 }
 
+// readSelfDiskIO reads only aggregate self I/O byte counters.
 func readSelfDiskIO() (uint64, uint64, bool) {
 	contents, err := os.ReadFile("/proc/self/io")
 	if err != nil {
@@ -123,6 +129,7 @@ func readSelfDiskIO() (uint64, uint64, bool) {
 	return parseSelfDiskIO(string(contents))
 }
 
+// parseSelfDiskIO extracts read_bytes and write_bytes while ignoring unrelated fields.
 func parseSelfDiskIO(contents string) (uint64, uint64, bool) {
 	var readBytes, writeBytes uint64
 	readFound := false

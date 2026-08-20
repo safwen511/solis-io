@@ -69,6 +69,7 @@ func LoadFromConfig(path string) ([]VM, error) {
 	return vms, nil
 }
 
+// validateHeader validates header against its required contract.
 func validateHeader(header []string) (map[string]int, error) {
 	indexes := make(map[string]int, len(header))
 	for index, value := range header {
@@ -93,10 +94,12 @@ func validateHeader(header []string) (map[string]int, error) {
 	return indexes, nil
 }
 
+// field derives stable operator-facing text for field.
 func field(row []string, indexes map[string]int, name string) string {
 	return strings.TrimSpace(row[indexes[name]])
 }
 
+// validateVMRow validates vm row against its required contract.
 func validateVMRow(vm VM) error {
 	identifiers := []struct{ name, value string }{
 		{"name", vm.Name},
@@ -128,6 +131,7 @@ func validateVMRow(vm VM) error {
 	return nil
 }
 
+// validIdentifier reports whether valid identifier.
 func validIdentifier(value string) bool {
 	if value == "" {
 		return false

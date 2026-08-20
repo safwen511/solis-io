@@ -58,6 +58,7 @@ func CollectWithThresholds(vms []inventory.VM, duration, interval time.Duration,
 	return NewReportWithThresholds(duration, interval, samples, thresholds), nil
 }
 
+// eligibleVMs keeps only running VMs that have a usable QEMU PID for live sampling.
 func eligibleVMs(vms []inventory.VM) []inventory.VM {
 	var eligible []inventory.VM
 	for _, vm := range vms {
@@ -70,6 +71,7 @@ func eligibleVMs(vms []inventory.VM) []inventory.VM {
 	return eligible
 }
 
+// validPID reports whether valid pid.
 func validPID(value string) bool {
 	pid, err := strconv.Atoi(strings.TrimSpace(value))
 	return err == nil && pid > 0

@@ -73,6 +73,7 @@ func Collect(options Options) (HostStatus, error) {
 	})
 }
 
+// collectWith collects with from the configured evidence sources.
 func collectWith(options Options, deps dependencies) (HostStatus, error) {
 	if options.Interval <= 0 {
 		return HostStatus{}, errors.New("host metrics interval must be positive")
@@ -120,6 +121,7 @@ func collectWith(options Options, deps dependencies) (HostStatus, error) {
 	return status, nil
 }
 
+// readCPU reads cpu from its configured source.
 func readCPU(readFile func(string) ([]byte, error), path string) (cpuCounters, error) {
 	data, err := readFile(path)
 	if err != nil {
@@ -128,6 +130,7 @@ func readCPU(readFile func(string) ([]byte, error), path string) (cpuCounters, e
 	return parseProcStat(data)
 }
 
+// collectCPU collects cpu from the configured evidence sources.
 func collectCPU(readFile func(string) ([]byte, error), path string, previous cpuCounters, previousErr error) CPUStatus {
 	current, currentErr := readCPU(readFile, path)
 	if err := firstError(previousErr, currentErr); err != nil {
@@ -140,6 +143,7 @@ func collectCPU(readFile func(string) ([]byte, error), path string, previous cpu
 	return status
 }
 
+// collectMemory collects memory from the configured evidence sources.
 func collectMemory(readFile func(string) ([]byte, error), path string) MemoryStatus {
 	data, err := readFile(path)
 	if err != nil {
@@ -152,6 +156,7 @@ func collectMemory(readFile func(string) ([]byte, error), path string) MemorySta
 	return status
 }
 
+// collectPSI collects psi from the configured evidence sources.
 func collectPSI(readFile func(string) ([]byte, error), options Options) PSIStatus {
 	pressureRoot := filepath.Join(options.ProcRoot, "pressure")
 	if !options.CollectPSI {
@@ -183,6 +188,7 @@ func collectPSI(readFile func(string) ([]byte, error), options Options) PSIStatu
 	return status
 }
 
+// filesystemTargets builds filesystem targets from validated inputs.
 func filesystemTargets(options Options) []filesystemTarget {
 	if options.Mountpoints != nil {
 		targets := make([]filesystemTarget, 0, len(options.Mountpoints))
@@ -196,6 +202,7 @@ func filesystemTargets(options Options) []filesystemTarget {
 	return []filesystemTarget{{path: "/"}, {path: libvirtImagesPath, optional: true}}
 }
 
+// collectFilesystems collects filesystems from the configured evidence sources.
 func collectFilesystems(options Options, statfs func(string, *syscall.Statfs_t) error) FilesystemSection {
 	targets := filesystemTargets(options)
 	section := FilesystemSection{Mounts: []FilesystemStatus{}}
@@ -232,6 +239,7 @@ func collectFilesystems(options Options, statfs func(string, *syscall.Statfs_t) 
 	return section
 }
 
+// readDisks reads disks from its configured source.
 func readDisks(readFile func(string) ([]byte, error), path string) (map[string]diskCounters, error) {
 	data, err := readFile(path)
 	if err != nil {
@@ -240,6 +248,7 @@ func readDisks(readFile func(string) ([]byte, error), path string) (map[string]d
 	return parseDiskstats(data)
 }
 
+// collectDisks collects disks from the configured evidence sources.
 func collectDisks(readFile func(string) ([]byte, error), readDir func(string) ([]os.DirEntry, error), path string, previous map[string]diskCounters, previousErr error, options Options) DiskSection {
 	current, currentErr := readDisks(readFile, path)
 	if currentErr != nil {
@@ -263,6 +272,7 @@ func collectDisks(readFile func(string) ([]byte, error), readDir func(string) ([
 	return section
 }
 
+// readBlockDeviceNames reads block device names from its configured source.
 func readBlockDeviceNames(readDir func(string) ([]os.DirEntry, error), path string) (map[string]struct{}, error) {
 	entries, err := readDir(path)
 	if err != nil {
@@ -278,6 +288,7 @@ func readBlockDeviceNames(readDir func(string) ([]os.DirEntry, error), path stri
 	return names, nil
 }
 
+// filterDiskCounters filters disk counters according to the configured criteria.
 func filterDiskCounters(counters map[string]diskCounters, names map[string]struct{}) map[string]diskCounters {
 	filtered := make(map[string]diskCounters)
 	for name, counter := range counters {
@@ -288,6 +299,7 @@ func filterDiskCounters(counters map[string]diskCounters, names map[string]struc
 	return filtered
 }
 
+// readNetwork reads network from its configured source.
 func readNetwork(readFile func(string) ([]byte, error), path string) (map[string]networkCounters, error) {
 	data, err := readFile(path)
 	if err != nil {
@@ -296,6 +308,7 @@ func readNetwork(readFile func(string) ([]byte, error), path string) (map[string
 	return parseNetDev(data)
 }
 
+// collectNetwork collects network from the configured evidence sources.
 func collectNetwork(readFile func(string) ([]byte, error), path string, previous map[string]networkCounters, previousErr error, options Options) NetworkSection {
 	if !options.CollectNetwork {
 		return NetworkSection{Availability: disabled(path), Interfaces: []NetworkInterfaceStatus{}}
@@ -313,6 +326,7 @@ func collectNetwork(readFile func(string) ([]byte, error), path string, previous
 	return section
 }
 
+// collectQEMUProcesses collects qemu processes from the configured evidence sources.
 func collectQEMUProcesses(readFile func(string) ([]byte, error), readDir func(string) ([]os.DirEntry, error), procRoot string) QEMUProcessSection {
 	entries, err := readDir(procRoot)
 	if err != nil {
@@ -356,6 +370,7 @@ func collectQEMUProcesses(readFile func(string) ([]byte, error), readDir func(st
 	return QEMUProcessSection{Availability: measured(procRoot), Processes: processes}
 }
 
+// hostAvailability builds host availability from validated inputs.
 func hostAvailability(status HostStatus) observability.Availability {
 	const source = "local Linux procfs/sysfs/statfs"
 	available := status.CPU.Availability.Available || status.Memory.Availability.Available ||
@@ -367,6 +382,7 @@ func hostAvailability(status HostStatus) observability.Availability {
 	return measured(source)
 }
 
+// readTrimmed reads trimmed from its configured source.
 func readTrimmed(readFile func(string) ([]byte, error), path string) string {
 	data, err := readFile(path)
 	if err != nil {
@@ -375,6 +391,7 @@ func readTrimmed(readFile func(string) ([]byte, error), path string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// firstError completes first error and returns any failure to its caller.
 func firstError(errorsToCheck ...error) error {
 	for _, err := range errorsToCheck {
 		if err != nil {
@@ -384,6 +401,7 @@ func firstError(errorsToCheck ...error) error {
 	return nil
 }
 
+// uint64Pointer builds uint64 pointer from validated inputs.
 func uint64Pointer(value uint64) *uint64 {
 	return &value
 }

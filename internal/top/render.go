@@ -265,6 +265,7 @@ func WriteFrame(dst io.Writer, view View, frame Frame) error {
 	return err
 }
 
+// samplingStatus derives stable operator-facing text for sampling status.
 func samplingStatus(frame Frame, now time.Time) string {
 	if frame.ActivePanel == panelWorkflowOutput {
 		if frame.WorkflowRunning {
@@ -304,6 +305,7 @@ func samplingStatus(frame Frame, now time.Time) string {
 	return fmt.Sprintf("COLLECTING [%s] %s/%s", bar, elapsed.Round(100*time.Millisecond), frame.WindowDuration)
 }
 
+// writeVMTable renders VM table in the package's stable operator-facing format.
 func writeVMTable(dst io.Writer, view View, selectedVM string, width int) error {
 	table := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	compact := width > 0 && width < compactLayoutWidth
@@ -367,6 +369,7 @@ func writeVMTable(dst io.Writer, view View, selectedVM string, width int) error 
 	return nil
 }
 
+// writeHostSummary renders host summary in the package's stable operator-facing format.
 func writeHostSummary(dst io.Writer, view HostView, width int) error {
 	if width > 0 && width < compactLayoutWidth {
 		_, err := fmt.Fprintf(dst,
@@ -387,6 +390,7 @@ func writeHostSummary(dst io.Writer, view HostView, width int) error {
 	return err
 }
 
+// writeStorageSummary renders storage summary in the package's stable operator-facing format.
 func writeStorageSummary(dst io.Writer, views []StorageView, width int) error {
 	if len(views) == 0 {
 		_, err := fmt.Fprintln(dst, "Storage: no mapped physical device is available")
@@ -418,6 +422,8 @@ func writeStorageSummary(dst io.Writer, views []StorageView, width int) error {
 	return nil
 }
 
+// writeAttributionSummary renders attribution summary in the package's stable operator-facing
+// format.
 func writeAttributionSummary(dst io.Writer, view AttributionView) error {
 	switch {
 	case !view.Requested:
@@ -444,6 +450,7 @@ func writeAttributionSummary(dst io.Writer, view AttributionView) error {
 	}
 }
 
+// writeAttributionLoss renders attribution loss in the package's stable operator-facing format.
 func writeAttributionLoss(dst io.Writer, view AttributionView, width int) error {
 	if !view.Requested || !view.CollectorAvailable {
 		return nil
@@ -471,6 +478,7 @@ func writeAttributionLoss(dst io.Writer, view AttributionView, width int) error 
 	return err
 }
 
+// writeEvidenceStrip renders evidence strip in the package's stable operator-facing format.
 func writeEvidenceStrip(dst io.Writer, view View, width int) error {
 	var body strings.Builder
 	if _, err := fmt.Fprintf(&body,
@@ -500,6 +508,7 @@ func writeEvidenceStrip(dst io.Writer, view View, width int) error {
 	return writeBox(dst, "EVIDENCE STRIP", body.String(), width)
 }
 
+// writeSelectedVM renders selected VM in the package's stable operator-facing format.
 func writeSelectedVM(dst io.Writer, view View, name string) error {
 	row, ok := findVMRow(view.Rows, name)
 	if !ok {
@@ -591,6 +600,7 @@ func writeSelectedVM(dst io.Writer, view View, name string) error {
 	return nil
 }
 
+// writeVMInvestigation renders VM investigation in the package's stable operator-facing format.
 func writeVMInvestigation(dst io.Writer, view View, name string, history []VMInvestigationSample) error {
 	row, ok := findVMRow(view.Rows, name)
 	if !ok {
@@ -640,6 +650,7 @@ func writeVMInvestigation(dst io.Writer, view View, name string, history []VMInv
 	return writeStoragePeers(dst, view, row)
 }
 
+// writeVMHistory renders VM history in the package's stable operator-facing format.
 func writeVMHistory(dst io.Writer, history []VMInvestigationSample) error {
 	if _, err := fmt.Fprintln(dst, "\nRecent completed evidence windows:"); err != nil {
 		return err
@@ -670,6 +681,7 @@ func writeVMHistory(dst io.Writer, history []VMInvestigationSample) error {
 	return table.Flush()
 }
 
+// writeStoragePeers renders storage peers in the package's stable operator-facing format.
 func writeStoragePeers(dst io.Writer, view View, selected VMRow) error {
 	if selected.PhysicalDisk == "" || selected.PhysicalDisk == "-" {
 		return nil
@@ -703,6 +715,7 @@ func writeStoragePeers(dst io.Writer, view View, selected VMRow) error {
 	return nil
 }
 
+// writeHelp renders help in the package's stable operator-facing format.
 func writeHelp(dst io.Writer, width int) error {
 	const body = `1 Home  •  2 Investigate VM  •  3 Events  •  4 Command Center
 ↑/k and ↓/j move the selected VM, command, or workflow output; Tab and ←/→ cycle panels
@@ -716,6 +729,7 @@ No arbitrary command execution or VM modification is available.`
 	return writeBox(dst, "HELP  •  KEYBOARD REFERENCE", body, width)
 }
 
+// writePanelTabs renders panel tabs in the package's stable operator-facing format.
 func writePanelTabs(dst io.Writer, active dashboardPanel, application bool, width int) error {
 	if active == "" {
 		active = panelOverview
@@ -750,6 +764,7 @@ func writePanelTabs(dst io.Writer, active dashboardPanel, application bool, widt
 	return err
 }
 
+// writeApplicationBanner renders application banner in the package's stable operator-facing format.
 func writeApplicationBanner(dst io.Writer, width, _ int, resources ProcessResources) error {
 	if width > 0 && width < compactLayoutWidth {
 		body := "LIVE KVM STORAGE OBSERVABILITY  •  READ-ONLY PROVIDER CONSOLE\n" + compactProcessResourceLine(resources)
@@ -775,6 +790,7 @@ Single-host KVM storage observability  •  real VM-attributed block latency`
 	return err
 }
 
+// wideApplicationBannerBody derives stable operator-facing text for wide application banner body.
 func wideApplicationBannerBody(art string, resources ProcessResources, innerWidth int) string {
 	leftLines := strings.Split(art, "\n")
 	rightLines := processResourceLines(resources)
@@ -805,6 +821,7 @@ func wideApplicationBannerBody(art string, resources ProcessResources, innerWidt
 	return strings.Join(lines, "\n")
 }
 
+// processResourceLines builds process resource lines from validated inputs.
 func processResourceLines(resources ProcessResources) []string {
 	cpu := "unavailable"
 	if resources.CPUAvailable {
@@ -832,6 +849,7 @@ func processResourceLines(resources ProcessResources) []string {
 	}
 }
 
+// compactProcessResourceLine derives stable operator-facing text for compact process resource line.
 func compactProcessResourceLine(resources ProcessResources) string {
 	cpu := "-"
 	if resources.CPUAvailable {
@@ -849,10 +867,12 @@ func compactProcessResourceLine(resources ProcessResources) string {
 		cpu, memory, disk, resources.Goroutines, compactDuration(resources.Uptime))
 }
 
+// formatResourceRate formats resource rate using the stable output contract.
 func formatResourceRate(bytesPerSecond float64) string {
 	return formatResourceBytes(bytesPerSecond) + "/s"
 }
 
+// formatResourceBytes formats resource bytes using the stable output contract.
 func formatResourceBytes(value float64) string {
 	if value < 0 {
 		value = 0
@@ -874,6 +894,7 @@ func formatResourceBytes(value float64) string {
 	}
 }
 
+// compactDuration derives stable operator-facing text for compact duration.
 func compactDuration(value time.Duration) string {
 	if value < 0 {
 		value = 0
@@ -891,6 +912,7 @@ func compactDuration(value time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", minutes, seconds)
 }
 
+// writeWorkflowPanel renders workflow panel in the package's stable operator-facing format.
 func writeWorkflowPanel(dst io.Writer, selected int, selectedVM string, width int) error {
 	if _, err := fmt.Fprintln(dst, "Allowlist: fixed Solis workflows only  •  no shell execution"); err != nil {
 		return err
@@ -947,6 +969,7 @@ func writeWorkflowPanel(dst io.Writer, selected int, selectedVM string, width in
 	return err
 }
 
+// writeWorkflowOutput renders workflow output in the package's stable operator-facing format.
 func writeWorkflowOutput(dst io.Writer, frame Frame) error {
 	state := "✓ COMPLETE"
 	if frame.WorkflowRunning {
@@ -1060,6 +1083,7 @@ func writeWorkflowOutput(dst io.Writer, frame Frame) error {
 	return err
 }
 
+// workflowPanelTitle derives stable operator-facing text for workflow panel title.
 func workflowPanelTitle(frame Frame) string {
 	workflow := strings.ToUpper(strings.ReplaceAll(string(frame.WorkflowRequest.Workflow), "_", " "))
 	if workflow == "" {
@@ -1077,6 +1101,7 @@ func workflowPanelTitle(frame Frame) string {
 	return "WORKFLOW OUTPUT  •  " + workflow + "  •  " + state
 }
 
+// sanitizedWorkflowLine sanitizes d workflow line for safe output.
 func sanitizedWorkflowLine(value string, width int) string {
 	limit := workflowLineWidth(width)
 	filtered := make([]rune, 0, len(value))
@@ -1096,10 +1121,12 @@ func sanitizedWorkflowLine(value string, width int) string {
 	return string(filtered)
 }
 
+// workflowDisplayLines builds workflow display lines from validated inputs.
 func workflowDisplayLines(value string, width int) []string {
 	return wrappedDisplayLines(value, workflowLineWidth(width))
 }
 
+// wrappedDisplayLines builds wrapped display lines from validated inputs.
 func wrappedDisplayLines(value string, limit int) []string {
 	if limit < 1 {
 		limit = 1
@@ -1131,6 +1158,7 @@ func wrappedDisplayLines(value string, limit int) []string {
 	return lines
 }
 
+// workflowLineWidth builds workflow line width from validated inputs.
 func workflowLineWidth(width int) int {
 	limit := 180
 	if width > 0 {
@@ -1142,6 +1170,7 @@ func workflowLineWidth(width int) int {
 	return limit
 }
 
+// writeEvents renders events in the package's stable operator-facing format.
 func writeEvents(dst io.Writer, events []MonitorEvent, limit int) error {
 	if _, err := fmt.Fprintln(dst, "Derived state changes only; these are not raw kernel events or causal alerts."); err != nil {
 		return err
@@ -1168,6 +1197,7 @@ func writeEvents(dst io.Writer, events []MonitorEvent, limit int) error {
 	return table.Flush()
 }
 
+// writePanelBox renders panel box in the package's stable operator-facing format.
 func writePanelBox(dst io.Writer, title string, width int, render func(io.Writer) error) error {
 	var body strings.Builder
 	if err := render(&body); err != nil {
@@ -1176,6 +1206,7 @@ func writePanelBox(dst io.Writer, title string, width int, render func(io.Writer
 	return writeBox(dst, title, body.String(), width)
 }
 
+// writeBox renders box in the package's stable operator-facing format.
 func writeBox(dst io.Writer, title, body string, width int) error {
 	boxWidth := minPositive(width, 180)
 	if boxWidth < 32 {
@@ -1214,6 +1245,7 @@ func writeBox(dst io.Writer, title, body string, width int) error {
 	return err
 }
 
+// padRunes derives stable operator-facing text for pad runes.
 func padRunes(value string, width int) string {
 	runes := []rune(value)
 	if len(runes) > width {
@@ -1222,6 +1254,7 @@ func padRunes(value string, width int) string {
 	return string(runes) + strings.Repeat(" ", width-len(runes))
 }
 
+// minPositive builds min positive from validated inputs.
 func minPositive(value, maximum int) int {
 	if value <= 0 || value > maximum {
 		return maximum
@@ -1229,6 +1262,7 @@ func minPositive(value, maximum int) int {
 	return value
 }
 
+// findVMRow finds vm row in the available data.
 func findVMRow(rows []VMRow, name string) (VMRow, bool) {
 	for _, row := range rows {
 		if row.Name == name {
@@ -1238,6 +1272,7 @@ func findVMRow(rows []VMRow, name string) (VMRow, bool) {
 	return VMRow{}, false
 }
 
+// detailText derives stable operator-facing text for detail text.
 func detailText(value string, available bool) string {
 	if !available {
 		return "-"
@@ -1245,6 +1280,7 @@ func detailText(value string, available bool) string {
 	return displayText(value)
 }
 
+// detailList derives stable operator-facing text for detail list.
 func detailList(values []string, available bool) string {
 	if !available || len(values) == 0 {
 		return "-"
@@ -1252,6 +1288,7 @@ func detailList(values []string, available bool) string {
 	return strings.Join(values, ",")
 }
 
+// optionalFloat derives stable operator-facing text for optional float.
 func optionalFloat(value float64, available bool, precision int) string {
 	if !available {
 		return "-"
@@ -1259,6 +1296,7 @@ func optionalFloat(value float64, available bool, precision int) string {
 	return fmt.Sprintf("%.*f", precision, value)
 }
 
+// optionalUint derives stable operator-facing text for optional uint.
 func optionalUint(value uint64, available bool) string {
 	if !available {
 		return "-"
@@ -1266,6 +1304,7 @@ func optionalUint(value uint64, available bool) string {
 	return fmt.Sprintf("%d", value)
 }
 
+// optionalPercent derives stable operator-facing text for optional percent.
 func optionalPercent(value float64, available bool) string {
 	if !available {
 		return "-"

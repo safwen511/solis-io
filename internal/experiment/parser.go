@@ -52,6 +52,7 @@ func Load(reportDir string) (Report, error) {
 	}, nil
 }
 
+// parseHTTPFile parses and validates http file.
 func parseHTTPFile(path string) (HTTPMetrics, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -120,6 +121,7 @@ func parseHTTPFile(path string) (HTTPMetrics, error) {
 	return metrics, nil
 }
 
+// parseFIOFile parses and validates fio file.
 func parseFIOFile(path string) (FIOMetrics, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -164,6 +166,7 @@ func parseFIOFile(path string) (FIOMetrics, error) {
 	return metrics, nil
 }
 
+// firstValue builds first value and returns an error when validation or source access fails.
 func firstValue(line, prefix string) (string, error) {
 	fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, prefix)))
 	if len(fields) == 0 {
@@ -172,10 +175,12 @@ func firstValue(line, prefix string) (string, error) {
 	return fields[0], nil
 }
 
+// fieldError completes field error and returns any failure to its caller.
 func fieldError(path, field string, err error) error {
 	return fmt.Errorf("parse %q field %q: %w", path, field, err)
 }
 
+// missingHTTPFields builds missing http fields from validated inputs.
 func missingHTTPFields(failed, rps, latency, transfer bool) []string {
 	var missing []string
 	if !failed {

@@ -51,6 +51,7 @@ func CalculateDelta(previous, current DeviceStats, interval time.Duration) (Devi
 	}, nil
 }
 
+// scaleRate builds scale rate from validated inputs.
 func scaleRate(rate Rate, scale float64) Rate {
 	if !rate.Available {
 		return Rate{}
@@ -58,6 +59,7 @@ func scaleRate(rate Rate, scale float64) Rate {
 	return Rate{Value: rate.Value * scale, Available: true}
 }
 
+// counterRate builds counter rate from validated inputs.
 func counterRate(previous, current Counter, interval time.Duration) Rate {
 	delta, available := counterDelta(previous, current)
 	if !available {
@@ -69,6 +71,7 @@ func counterRate(previous, current Counter, interval time.Duration) Rate {
 	}
 }
 
+// counterDelta builds counter delta from validated inputs.
 func counterDelta(previous, current Counter) (uint64, bool) {
 	if !previous.Available || !current.Available || current.Value < previous.Value {
 		return 0, false

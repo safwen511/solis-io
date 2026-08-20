@@ -37,6 +37,7 @@ func WriteSummary(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// writeHTTPRow renders http row in the package's stable operator-facing format.
 func writeHTTPRow(w io.Writer, phase string, metrics HTTPMetrics) {
 	fmt.Fprintf(
 		w,
@@ -50,6 +51,7 @@ func writeHTTPRow(w io.Writer, phase string, metrics HTTPMetrics) {
 	)
 }
 
+// conclusion derives stable operator-facing text for conclusion.
 func conclusion(throughputDrop, latencyIncrease float64) string {
 	switch {
 	case throughputDrop > 0 && latencyIncrease > 0:

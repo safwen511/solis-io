@@ -49,6 +49,7 @@ func WriteFinal(dst io.Writer, summary FinalSummary) error {
 	return w.Flush()
 }
 
+// metric formats an available measurement or an explicit unavailable marker.
 func metric(value float64, available bool) string {
 	if !available {
 		return "-"
@@ -56,6 +57,7 @@ func metric(value float64, available bool) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+// dash uses a dash to represent a value that was not observed.
 func dash(value string) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if value == "" {

@@ -88,6 +88,7 @@ func RunWithOptions(options Options) Report {
 	return report
 }
 
+// hostChecks builds host checks from validated inputs.
 func hostChecks(options Options, probes Probes) []Check {
 	goos := probes.GOOS()
 	checks := []Check{
@@ -111,6 +112,7 @@ func hostChecks(options Options, probes Probes) []Check {
 	return checks
 }
 
+// labChecks builds lab checks from validated inputs.
 func labChecks(options Options) []Check {
 	checks := []Check{
 		pathCheck(options.InventoryCSV, options.InventoryCSV+" exists", false),
@@ -122,6 +124,7 @@ func labChecks(options Options) []Check {
 	return checks
 }
 
+// configurationChecks builds configuration checks from validated inputs.
 func configurationChecks(options Options, probes Probes) []Check {
 	source := valueOrDefault(options.ConfigSource, config.BuiltInDefaultsSource)
 	schema := valueOrDefault(options.SchemaVersion, "unknown")
@@ -137,6 +140,7 @@ func configurationChecks(options Options, probes Probes) []Check {
 	return append(checks, captureOutputChecks(probes, options.CaptureOutputRoot)...)
 }
 
+// fileReadableCheck builds file readable check from validated inputs.
 func fileReadableCheck(probes Probes, path, name string) Check {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -155,6 +159,7 @@ func fileReadableCheck(probes Probes, path, name string) Check {
 	return Check{Status: OK, Name: name, Detail: path}
 }
 
+// captureOutputChecks records output checks in the private evidence bundle.
 func captureOutputChecks(probes Probes, configuredPath string) []Check {
 	configuredPath = strings.TrimSpace(configuredPath)
 	if configuredPath == "" {
@@ -207,6 +212,8 @@ func captureOutputChecks(probes Probes, configuredPath string) []Check {
 	return []Check{writable, ownership, permissions}
 }
 
+// nearestExistingDirectory builds nearest existing directory and returns an error when validation
+// or source access fails.
 func nearestExistingDirectory(probes Probes, path string) (string, os.FileInfo, error) {
 	candidate := filepath.Clean(path)
 	for {
@@ -228,6 +235,7 @@ func nearestExistingDirectory(probes Probes, path string) (string, os.FileInfo, 
 	}
 }
 
+// observabilityChecks builds observability checks from validated inputs.
 func observabilityChecks(observability *config.ObservabilityConfig) []Check {
 	if observability == nil {
 		return []Check{
@@ -256,6 +264,7 @@ func observabilityChecks(observability *config.ObservabilityConfig) []Check {
 	return []Check{host, guest, services, databases}
 }
 
+// privacyChecks builds privacy checks from validated inputs.
 func privacyChecks() []Check {
 	return []Check{
 		{Status: OK, Name: "Process arguments", Detail: "not collected by observability/capture paths"},
@@ -269,6 +278,7 @@ func privacyChecks() []Check {
 	}
 }
 
+// inventoryChecks builds inventory checks from validated inputs.
 func inventoryChecks(vms []inventory.VM, inventoryPath, libvirtURI string) ([]Check, []inventory.VM) {
 	checks := []Check{{Status: OK, Name: "Can read configured VMs", Detail: inventoryPath}}
 	configured := len(vms)
@@ -291,6 +301,7 @@ func inventoryChecks(vms []inventory.VM, inventoryPath, libvirtURI string) ([]Ch
 	return checks, vms
 }
 
+// inventoryRuntimeChecks builds inventory runtime checks from validated inputs.
 func inventoryRuntimeChecks(vms []inventory.VM) []Check {
 	configured := len(vms)
 	running, pids, leases := 0, 0, 0
@@ -322,6 +333,7 @@ func inventoryRuntimeChecks(vms []inventory.VM) []Check {
 	}
 }
 
+// storageChecks builds storage checks from validated inputs.
 func storageChecks(vms []inventory.VM) []Check {
 	var selected *inventory.VM
 	for i := range vms {
@@ -375,6 +387,7 @@ func storageChecks(vms []inventory.VM) []Check {
 	return checks
 }
 
+// qemuChecks builds QEMU checks from validated inputs.
 func qemuChecks(vms []inventory.VM) []Check {
 	var running bool
 	for _, vm := range vms {
@@ -405,6 +418,7 @@ func qemuChecks(vms []inventory.VM) []Check {
 	return []Check{{Status: SKIP, Name: "QEMU process I/O permission", Detail: "no QEMU PID for a running VM", Remediation: "verify libvirt QEMU PID files"}}
 }
 
+// unavailableInventoryChecks builds unavailable inventory checks from validated inputs.
 func unavailableInventoryChecks(err error, inventoryPath string) []Check {
 	return []Check{
 		{Status: FAIL, Name: "Can read configured VMs", Detail: err.Error(), Remediation: "verify " + inventoryPath},
@@ -415,6 +429,7 @@ func unavailableInventoryChecks(err error, inventoryPath string) []Check {
 	}
 }
 
+// unavailableStorageChecks builds unavailable storage checks from validated inputs.
 func unavailableStorageChecks() []Check {
 	return []Check{
 		{Status: SKIP, Name: "Resolve a VM disk path", Detail: "inventory unavailable"},
@@ -425,6 +440,7 @@ func unavailableStorageChecks() []Check {
 	}
 }
 
+// executableCheck builds executable check from validated inputs.
 func executableCheck(probes Probes, name, checkName, remediation string) Check {
 	path, err := probes.LookPath(name)
 	if err != nil {
@@ -433,6 +449,7 @@ func executableCheck(probes Probes, name, checkName, remediation string) Check {
 	return Check{Status: OK, Name: checkName, Detail: path}
 }
 
+// directoryReadableCheck builds directory readable check from validated inputs.
 func directoryReadableCheck(probes Probes, path, checkName string) Check {
 	info, err := probes.Stat(path)
 	if err != nil {
@@ -447,6 +464,7 @@ func directoryReadableCheck(probes Probes, path, checkName string) Check {
 	return Check{Status: OK, Name: checkName, Detail: path}
 }
 
+// libvirtAccessCheck builds libvirt access check from validated inputs.
 func libvirtAccessCheck(uri string, virshStatus Status, probes Probes) Check {
 	if virshStatus != OK {
 		return Check{Status: SKIP, Name: "Read-only libvirt access", Detail: "virsh is unavailable", Remediation: "install libvirt/virsh"}
@@ -471,6 +489,7 @@ func libvirtAccessCheck(uri string, virshStatus Status, probes Probes) Check {
 	return Check{Status: OK, Name: "Read-only libvirt access", Detail: valueOrDefault(uri, "default URI")}
 }
 
+// rootUsageCheck builds root usage check from validated inputs.
 func rootUsageCheck(euid int) Check {
 	if euid == 0 {
 		return Check{
@@ -483,6 +502,7 @@ func rootUsageCheck(euid int) Check {
 	return Check{Status: OK, Name: "Running as root", Detail: "no"}
 }
 
+// pathCheck builds path check from validated inputs.
 func pathCheck(path, checkName string, wantDirectory bool) Check {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -497,6 +517,7 @@ func pathCheck(path, checkName string, wantDirectory bool) Check {
 	return Check{Status: OK, Name: checkName, Detail: "exists"}
 }
 
+// countCheck builds count check from validated inputs.
 func countCheck(name string, count, total int, failIfZero bool, remediation string) Check {
 	status := OK
 	if count < total {
@@ -508,6 +529,7 @@ func countCheck(name string, count, total int, failIfZero bool, remediation stri
 	return Check{Status: status, Name: name, Detail: fmt.Sprintf("%d of %d", count, total), Remediation: remediationIfNeeded(status, remediation)}
 }
 
+// missingVMCheck builds missing VM check from validated inputs.
 func missingVMCheck(name string, names []string, remediation string) Check {
 	if len(names) == 0 {
 		return Check{Status: OK, Name: name, Detail: "none"}
@@ -516,6 +538,7 @@ func missingVMCheck(name string, names []string, remediation string) Check {
 	return Check{Status: WARN, Name: name, Detail: strings.Join(names, ", "), Remediation: remediation}
 }
 
+// remediationIfNeeded derives stable operator-facing text for remediation if needed.
 func remediationIfNeeded(status Status, remediation string) string {
 	if status == OK {
 		return ""
@@ -523,11 +546,13 @@ func remediationIfNeeded(status Status, remediation string) string {
 	return remediation
 }
 
+// present reports whether present.
 func present(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && value != "-"
 }
 
+// firstDevice derives stable operator-facing text for first device.
 func firstDevice(devices string) string {
 	for _, device := range strings.Split(devices, ",") {
 		if present(device) {
@@ -537,6 +562,7 @@ func firstDevice(devices string) string {
 	return ""
 }
 
+// valueOrDefault returns the trimmed value or the supplied fallback when it is empty.
 func valueOrDefault(value, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -545,6 +571,7 @@ func valueOrDefault(value, fallback string) string {
 	return value
 }
 
+// oneLine collapses whitespace so diagnostic text cannot break line-oriented output.
 func oneLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }

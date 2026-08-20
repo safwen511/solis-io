@@ -152,6 +152,7 @@ func AssessEBPFVMAttribution(report Report) EBPFVMAttributionAssessment {
 	return result
 }
 
+// valueOrUnavailable returns the value or an explicit unavailable marker.
 func valueOrUnavailable(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "unavailable"
@@ -255,6 +256,7 @@ func LiveVerdict(evidence Evidence) string {
 	return InsufficientLiveVerdict
 }
 
+// sharedPhysicalDisk builds shared physical disk from validated inputs.
 func sharedPhysicalDisk(targets []storage.VMTarget) (bool, bool) {
 	victimDisks := make(map[string]bool)
 	suspectDisks := make(map[string]bool)
@@ -278,6 +280,7 @@ func sharedPhysicalDisk(targets []storage.VMTarget) (bool, bool) {
 	return false, true
 }
 
+// hasTargetType reports whether the value has target type.
 func hasTargetType(value, targetType string) bool {
 	for _, candidate := range strings.Split(value, ",") {
 		if strings.TrimSpace(candidate) == targetType {
@@ -287,6 +290,7 @@ func hasTargetType(value, targetType string) bool {
 	return false
 }
 
+// addDevices adds devices to the current aggregate.
 func addDevices(devices map[string]bool, value string) {
 	for _, device := range strings.Split(value, ",") {
 		device = strings.TrimSpace(device)

@@ -131,6 +131,7 @@ func (collector *Collector) Collect(ctx context.Context, request CollectRequest)
 	return normalizeReport(report), nil
 }
 
+// applyDefaults applies defaults to the current model.
 func (collector *Collector) applyDefaults() {
 	if collector.cgroupRoot == "" {
 		collector.cgroupRoot = defaultCgroupRoot
@@ -155,6 +156,7 @@ func (collector *Collector) applyDefaults() {
 	}
 }
 
+// sampleBaseline samples baseline for the configured observation interval.
 func (collector *Collector) sampleBaseline(ctx context.Context, vm inventory.VM, mapping ebpf.VMBlockCgroupMapping, uri string) sourceSample {
 	if isKnownStopped(vm.State) {
 		err := fmt.Errorf("VM state is %s", valueOrDefault(strings.TrimSpace(vm.State), "unknown"))
@@ -173,6 +175,7 @@ func (collector *Collector) sampleBaseline(ctx context.Context, vm inventory.VM,
 	}
 }
 
+// sampleAfter samples after for the configured observation interval.
 func (collector *Collector) sampleAfter(ctx context.Context, vm inventory.VM, mapping ebpf.VMBlockCgroupMapping, baseline sourceSample, uri string) sourceSample {
 	if isKnownStopped(vm.State) {
 		err := fmt.Errorf("VM state is %s", valueOrDefault(strings.TrimSpace(vm.State), "unknown"))
@@ -209,6 +212,7 @@ func (collector *Collector) sampleAfter(ctx context.Context, vm inventory.VM, ma
 	}
 }
 
+// readPreferredIOStat reads preferred io stat from its configured source.
 func (collector *Collector) readPreferredIOStat(mapping ebpf.VMBlockCgroupMapping) (string, string, uint64, []byte, error) {
 	if len(mapping.CgroupPaths) == 0 {
 		return "", "", 0, nil, fmt.Errorf("VM cgroup mapping unavailable: %s", valueOrDefault(mapping.MappingQuality, "unavailable"))
@@ -238,6 +242,7 @@ func (collector *Collector) readPreferredIOStat(mapping ebpf.VMBlockCgroupMappin
 	return "", "", 0, nil, fmt.Errorf("read VM cgroup io.stat: %s", strings.Join(failures, "; "))
 }
 
+// buildVMReport builds vm report from validated inputs.
 func (collector *Collector) buildVMReport(vm inventory.VM, mapping ebpf.VMBlockCgroupMapping, baseline, after sourceSample, report *VMStorageStatsReport, hostDevices map[string]HostDevice) VMStorageStatsVM {
 	pid, _ := strconv.Atoi(strings.TrimSpace(vm.QEMUPID))
 	if mapping.QEMUPID != 0 {
@@ -292,6 +297,7 @@ func (collector *Collector) buildVMReport(vm inventory.VM, mapping ebpf.VMBlockC
 	return result
 }
 
+// buildCgroupEvidence builds cgroup evidence from validated inputs.
 func (collector *Collector) buildCgroupEvidence(vm string, baseline, after sourceSample, hostDevices map[string]HostDevice) CgroupIOStatEvidence {
 	evidence := CgroupIOStatEvidence{
 		Quality: "unavailable", SourceCgroupPath: baseline.cgroupPath, SourceCgroupKind: baseline.cgroupKind,
@@ -372,6 +378,7 @@ func (collector *Collector) buildCgroupEvidence(vm string, baseline, after sourc
 	return evidence
 }
 
+// buildVirshEvidence builds virsh evidence from validated inputs.
 func buildVirshEvidence(vm string, baseline, after sourceSample) VirshDomstatsEvidence {
 	evidence := VirshDomstatsEvidence{
 		Quality: "unavailable", Disks: []VirshVirtualDiskDelta{},
@@ -424,6 +431,7 @@ func buildVirshEvidence(vm string, baseline, after sourceSample) VirshDomstatsEv
 	return evidence
 }
 
+// buildQEMUEvidence builds qemu evidence from validated inputs.
 func buildQEMUEvidence(baseline, after sourceSample) QEMUPressureEvidence {
 	evidence := QEMUPressureEvidence{
 		Quality: "unavailable",
@@ -473,6 +481,7 @@ type cgroupCandidate struct {
 	Kind string
 }
 
+// preferredCgroupCandidates builds preferred cgroup candidates from validated inputs.
 func preferredCgroupCandidates(mapping ebpf.VMBlockCgroupMapping) []cgroupCandidate {
 	seen := make(map[string]bool)
 	candidates := []cgroupCandidate{}
@@ -494,6 +503,7 @@ func preferredCgroupCandidates(mapping ebpf.VMBlockCgroupMapping) []cgroupCandid
 	return candidates
 }
 
+// cgroupPathKind derives stable operator-facing text for cgroup path kind.
 func cgroupPathKind(path string) string {
 	cleaned := filepath.Clean(path)
 	parts := strings.Split(strings.TrimPrefix(cleaned, "/"), "/")
@@ -521,6 +531,7 @@ func cgroupPathKind(path string) string {
 	}
 }
 
+// cgroupKindPriority builds cgroup kind priority from validated inputs.
 func cgroupKindPriority(kind string) int {
 	switch kind {
 	case "machine_scope":
@@ -534,6 +545,7 @@ func cgroupKindPriority(kind string) int {
 	}
 }
 
+// rootedPath builds rooted path and returns an error when validation or source access fails.
 func rootedPath(root, cgroupPath, leaf string) (string, error) {
 	if !strings.HasPrefix(cgroupPath, "/") {
 		return "", fmt.Errorf("invalid cgroup path %q", cgroupPath)
@@ -551,6 +563,7 @@ func rootedPath(root, cgroupPath, leaf string) (string, error) {
 	return joined, nil
 }
 
+// hasParentComponent reports whether the value has parent component.
 func hasParentComponent(path string) bool {
 	for _, component := range strings.Split(path, "/") {
 		if component == ".." {
@@ -560,6 +573,7 @@ func hasParentComponent(path string) bool {
 	return false
 }
 
+// indexMappings indexes mappings by its stable identity.
 func indexMappings(mappings []ebpf.VMBlockCgroupMapping) map[string]ebpf.VMBlockCgroupMapping {
 	result := make(map[string]ebpf.VMBlockCgroupMapping, len(mappings))
 	for _, mapping := range mappings {
@@ -568,6 +582,8 @@ func indexMappings(mappings []ebpf.VMBlockCgroupMapping) map[string]ebpf.VMBlock
 	return result
 }
 
+// duplicateCgroupDeviceIDs returns sorted duplicate cgroup/device identities without losing
+// collision evidence.
 func duplicateCgroupDeviceIDs(data string) []string {
 	seen := make(map[string]bool)
 	duplicates := []string{}
@@ -585,6 +601,7 @@ func duplicateCgroupDeviceIDs(data string) []string {
 	return sortedUnique(duplicates)
 }
 
+// safeCounterDelta builds safe counter delta from validated inputs.
 func safeCounterDelta(before, after uint64) (uint64, bool) {
 	if after < before {
 		return 0, true
@@ -592,6 +609,7 @@ func safeCounterDelta(before, after uint64) (uint64, bool) {
 	return after - before, false
 }
 
+// deltaStatusCaveat derives stable operator-facing text for delta status caveat.
 func deltaStatusCaveat(status string) string {
 	switch status {
 	case "baseline_missing":
@@ -605,6 +623,7 @@ func deltaStatusCaveat(status string) string {
 	}
 }
 
+// mappingSectionStatus maps mapping section status into its corresponding evidence identity.
 func mappingSectionStatus(quality string) string {
 	if quality == "cgroup_v2_inode_partial" {
 		return "partial"
@@ -612,13 +631,16 @@ func mappingSectionStatus(quality string) string {
 	return "unavailable"
 }
 
+// isRunning reports whether running.
 func isRunning(state string) bool { return strings.EqualFold(strings.TrimSpace(state), "running") }
 
+// isKnownStopped reports whether known stopped.
 func isKnownStopped(state string) bool {
 	state = strings.ToLower(strings.Join(strings.Fields(state), " "))
 	return state == "shut off" || state == "shutoff"
 }
 
+// valueOrDefault returns the trimmed value or the supplied fallback when it is empty.
 func valueOrDefault(value, fallback string) string {
 	if value = strings.TrimSpace(value); value != "" {
 		return value

@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+// TestWatchWritesOneValidJSONDocumentPerIteration verifies watch writes one valid json document per
+// iteration.
 func TestWatchWritesOneValidJSONDocumentPerIteration(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	iteration := 0
@@ -53,6 +55,7 @@ func TestWatchWritesOneValidJSONDocumentPerIteration(t *testing.T) {
 	}
 }
 
+// TestWatchRejectsInvalidOptions verifies watch rejects invalid options.
 func TestWatchRejectsInvalidOptions(t *testing.T) {
 	collector := func(context.Context) (ObserveSnapshot, error) { return ObserveSnapshot{}, nil }
 	for _, options := range []WatchOptions{{}, {Every: time.Second, Iterations: -1}} {

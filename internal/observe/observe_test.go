@@ -20,6 +20,8 @@ import (
 	"github.com/safwen511/solis-io/internal/servicehealth"
 )
 
+// TestVictimOnlySnapshotRendersDeterministicJSON verifies victim only snapshot renders
+// deterministic json.
 func TestVictimOnlySnapshotRendersDeterministicJSON(t *testing.T) {
 	snapshot := collectFixture(t, Request{Victim: "a-web", Duration: 10 * time.Second, Interval: 2 * time.Second})
 	if snapshot.SelectedSuspect != "-" || snapshot.SuspectMode != "victim-only" {
@@ -38,6 +40,7 @@ func TestVictimOnlySnapshotRendersDeterministicJSON(t *testing.T) {
 	}
 }
 
+// TestPairwiseSnapshotIncludesSelectedSuspect verifies pairwise snapshot includes selected suspect.
 func TestPairwiseSnapshotIncludesSelectedSuspect(t *testing.T) {
 	snapshot := collectFixture(t, Request{Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second})
 	if snapshot.SelectedSuspect != "b-stress" || snapshot.SuspectMode != "pairwise" {
@@ -51,6 +54,8 @@ func TestPairwiseSnapshotIncludesSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestDiscoverySnapshotIncludesSelectedSuspect verifies discovery snapshot includes selected
+// suspect.
 func TestDiscoverySnapshotIncludesSelectedSuspect(t *testing.T) {
 	request := Request{Victim: "a-web", DiscoverSuspects: true, Duration: 10 * time.Second, Interval: 2 * time.Second}
 	snapshot, err := Collect(context.Background(), request, fixtureVMs(), fixtureDependencies(true))
@@ -65,6 +70,8 @@ func TestDiscoverySnapshotIncludesSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestOptionalDisabledAndNotConfiguredAreNonFatal verifies optional disabled and not configured are
+// non fatal.
 func TestOptionalDisabledAndNotConfiguredAreNonFatal(t *testing.T) {
 	snapshot := collectFixture(t, Request{
 		Victim: "a-web", Duration: 10 * time.Second, Interval: 2 * time.Second,
@@ -78,6 +85,7 @@ func TestOptionalDisabledAndNotConfiguredAreNonFatal(t *testing.T) {
 	}
 }
 
+// TestPartialCollectorFailureIsRepresented verifies partial collector failure is represented.
 func TestPartialCollectorFailureIsRepresented(t *testing.T) {
 	dependencies := fixtureDependencies(false)
 	dependencies.Host = func(context.Context, string) (hostmetrics.HostStatus, error) {
@@ -93,6 +101,8 @@ func TestPartialCollectorFailureIsRepresented(t *testing.T) {
 	}
 }
 
+// TestOptionalCollectorsShareSnapshotWindowID verifies optional collectors share snapshot window
+// id.
 func TestOptionalCollectorsShareSnapshotWindowID(t *testing.T) {
 	dependencies := fixtureDependencies(false)
 	dependencies.Guest = func(_ context.Context, vm inventory.VM, windowID string) (observability.GuestStatus, error) {
@@ -126,6 +136,8 @@ func TestOptionalCollectorsShareSnapshotWindowID(t *testing.T) {
 	}
 }
 
+// TestSnapshotPrivacyFlagsStayFalseAndUnsafeModelsAreRejected verifies snapshot privacy flags stay
+// false and unsafe models are rejected.
 func TestSnapshotPrivacyFlagsStayFalseAndUnsafeModelsAreRejected(t *testing.T) {
 	snapshot := collectFixture(t, Request{Victim: "a-web", Duration: 10 * time.Second, Interval: 2 * time.Second})
 	if !privacySafe(snapshot.Privacy) {
@@ -138,6 +150,7 @@ func TestSnapshotPrivacyFlagsStayFalseAndUnsafeModelsAreRejected(t *testing.T) {
 	}
 }
 
+// TestCollectorRejectsUnsafeSubmodelPrivacy verifies collector rejects unsafe submodel privacy.
 func TestCollectorRejectsUnsafeSubmodelPrivacy(t *testing.T) {
 	dependencies := fixtureDependencies(false)
 	dependencies.Guest = func(_ context.Context, vm inventory.VM, windowID string) (observability.GuestStatus, error) {
@@ -155,6 +168,7 @@ func TestCollectorRejectsUnsafeSubmodelPrivacy(t *testing.T) {
 	}
 }
 
+// TestCorrelationsDoNotOverstateCausality verifies correlations do not overstate causality.
 func TestCorrelationsDoNotOverstateCausality(t *testing.T) {
 	snapshot := collectFixture(t, Request{Victim: "a-web", Suspect: "b-stress", Duration: 10 * time.Second, Interval: 2 * time.Second})
 	output := strings.ToLower(render(t, snapshot))
@@ -178,6 +192,8 @@ func TestCorrelationsDoNotOverstateCausality(t *testing.T) {
 	}
 }
 
+// TestExistingVMAttributionIsProjectedWithoutRuntimeDiagnostics verifies existing vm attribution is
+// projected without runtime diagnostics.
 func TestExistingVMAttributionIsProjectedWithoutRuntimeDiagnostics(t *testing.T) {
 	report := fixtureVMAttribution("available")
 	report.Diagnostics.RawError = "forbidden 0xffff request_pointer /proc/123/cmdline"
@@ -213,6 +229,8 @@ func TestExistingVMAttributionIsProjectedWithoutRuntimeDiagnostics(t *testing.T)
 	}
 }
 
+// TestDegradedVMAttributionIsPartialAndUnavailableIsNotFabricated verifies degraded vm attribution
+// is partial and unavailable is not fabricated.
 func TestDegradedVMAttributionIsPartialAndUnavailableIsNotFabricated(t *testing.T) {
 	degraded := fixtureVMAttribution("degraded")
 	snapshot, err := Collect(context.Background(), Request{
@@ -249,6 +267,8 @@ func TestDegradedVMAttributionIsPartialAndUnavailableIsNotFabricated(t *testing.
 	}
 }
 
+// TestVMAttributionPrivacyViolationIsRejected verifies vm attribution privacy violation is
+// rejected.
 func TestVMAttributionPrivacyViolationIsRejected(t *testing.T) {
 	report := fixtureVMAttribution("available")
 	report.Privacy.EnvironmentCollected = true
@@ -261,6 +281,7 @@ func TestVMAttributionPrivacyViolationIsRejected(t *testing.T) {
 	}
 }
 
+// TestUnknownVictimAndSuspectAreRejected verifies unknown victim and suspect are rejected.
 func TestUnknownVictimAndSuspectAreRejected(t *testing.T) {
 	dependencies := fixtureDependencies(false)
 	_, err := Collect(context.Background(), Request{Victim: "missing", Duration: time.Second, Interval: time.Second}, fixtureVMs(), dependencies)
@@ -273,6 +294,7 @@ func TestUnknownVictimAndSuspectAreRejected(t *testing.T) {
 	}
 }
 
+// collectFixture collects fixture from the configured evidence sources.
 func collectFixture(t *testing.T, request Request) ObserveSnapshot {
 	t.Helper()
 	snapshot, err := Collect(context.Background(), request, fixtureVMs(), fixtureDependencies(false))
@@ -282,6 +304,7 @@ func collectFixture(t *testing.T, request Request) ObserveSnapshot {
 	return snapshot
 }
 
+// fixtureVMs builds fixture VMs from validated inputs.
 func fixtureVMs() []inventory.VM {
 	return []inventory.VM{
 		{Name: "a-web", Tenant: "tenant-a", Role: "web", State: "running", IPPlan: "192.0.2.10", QEMUPID: "101", Disk: "/images/a-web.qcow2"},
@@ -289,6 +312,7 @@ func fixtureVMs() []inventory.VM {
 	}
 }
 
+// fixtureDependencies builds fixture dependencies from validated inputs.
 func fixtureDependencies(withDiscovery bool) Dependencies {
 	vms := fixtureVMs()
 	dependencies := Dependencies{
@@ -324,10 +348,12 @@ func fixtureDependencies(withDiscovery bool) Dependencies {
 	return dependencies
 }
 
+// measuredAvailability builds measured availability from validated inputs.
 func measuredAvailability(source string) observability.Availability {
 	return observability.Availability{Available: true, Source: source, Quality: observability.EvidenceQualityMeasured}
 }
 
+// fixtureVMAttribution builds fixture VM attribution from validated inputs.
 func fixtureVMAttribution(quality string) ebpf.VMBlockLatencyReport {
 	return ebpf.VMBlockLatencyReport{
 		SchemaVersion: "1", ObservedAtUTC: "2026-08-09T10:11:12Z", Duration: "10s", Interval: "2s",
@@ -345,6 +371,7 @@ func fixtureVMAttribution(quality string) ebpf.VMBlockLatencyReport {
 	}
 }
 
+// assertSectionState performs assert section state as part of the package workflow.
 func assertSectionState(t *testing.T, snapshot ObserveSnapshot, section string, state EvidenceState) {
 	t.Helper()
 	for _, value := range snapshot.EvidenceQuality.Sections {
@@ -358,6 +385,7 @@ func assertSectionState(t *testing.T, snapshot ObserveSnapshot, section string, 
 	t.Fatalf("section %s missing from evidence quality", section)
 }
 
+// findCorrelation finds correlation in the available data.
 func findCorrelation(snapshot ObserveSnapshot, name string) (Correlation, bool) {
 	for _, correlation := range snapshot.Correlations {
 		if correlation.Name == name {
@@ -367,6 +395,7 @@ func findCorrelation(snapshot ObserveSnapshot, name string) (Correlation, bool) 
 	return Correlation{}, false
 }
 
+// render derives stable operator-facing text for render.
 func render(t *testing.T, snapshot ObserveSnapshot) string {
 	t.Helper()
 	var output bytes.Buffer
@@ -376,6 +405,7 @@ func render(t *testing.T, snapshot ObserveSnapshot) string {
 	return output.String()
 }
 
+// assertUnavailableState performs assert unavailable state as part of the package workflow.
 func assertUnavailableState(t *testing.T, snapshot ObserveSnapshot, section string, state EvidenceState) {
 	t.Helper()
 	for _, unavailable := range snapshot.UnavailableSections {

@@ -24,6 +24,7 @@ type sequenceFileReader struct {
 	inodeCalls  map[string]int
 }
 
+// ReadFile reads file from its configured source.
 func (reader *sequenceFileReader) ReadFile(path string) ([]byte, error) {
 	if reader.calls == nil {
 		reader.calls = make(map[string]int)
@@ -37,6 +38,7 @@ func (reader *sequenceFileReader) ReadFile(path string) ([]byte, error) {
 	return values[index], nil
 }
 
+// Inode returns the filesystem inode used as the stable cgroup identity.
 func (reader *sequenceFileReader) Inode(path string) (uint64, error) {
 	if reader.inodeCalls == nil {
 		reader.inodeCalls = make(map[string]int)
@@ -61,6 +63,7 @@ type sequenceVirshSource struct {
 	calls  map[string]int
 }
 
+// ReadBlockStats reads block stats from its configured source.
 func (source *sequenceVirshSource) ReadBlockStats(_ context.Context, vm, _ string) ([]byte, error) {
 	if source.calls == nil {
 		source.calls = make(map[string]int)
@@ -88,6 +91,7 @@ type sequenceIdentitySource struct {
 	calls  map[string]int
 }
 
+// Validate reports whether the receiver satisfies its required invariants.
 func (source *sequenceIdentitySource) Validate(mapping ebpf.VMBlockCgroupMapping) (ebpf.QEMUProcessIdentity, error) {
 	if source.calls == nil {
 		source.calls = make(map[string]int)
@@ -113,6 +117,7 @@ func (source *sequenceIdentitySource) Validate(mapping ebpf.VMBlockCgroupMapping
 	}, nil
 }
 
+// Read reads bounded source data and propagates access failures.
 func (source *sequenceQEMUSource) Read(pid string) (qemuio.Counters, error) {
 	if source.calls == nil {
 		source.calls = make(map[string]int)
@@ -130,10 +135,12 @@ func (source *sequenceQEMUSource) Read(pid string) (qemuio.Counters, error) {
 
 type noWaiter struct{}
 
+// Wait completes wait and returns any failure to its caller.
 func (noWaiter) Wait(context.Context, time.Duration, time.Duration) error { return nil }
 
 type fakeDeviceResolver map[string]HostDevice
 
+// Resolve resolves source identities from validated inputs and reports unsupported layouts.
 func (resolver fakeDeviceResolver) Resolve(id string) HostDevice {
 	if device, ok := resolver[id]; ok {
 		return device
@@ -141,6 +148,7 @@ func (resolver fakeDeviceResolver) Resolve(id string) HostDevice {
 	return HostDevice{DeviceID: id, LayerKind: "unknown"}
 }
 
+// TestCollectorCollectsRealValidationDeltas verifies collector collects real validation deltas.
 func TestCollectorCollectsRealValidationDeltas(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	ioPath := "/fake-cgroup" + scope + "/io.stat"
@@ -207,6 +215,7 @@ func TestCollectorCollectsRealValidationDeltas(t *testing.T) {
 	}
 }
 
+// TestCgroupEvidenceDeltaStates verifies cgroup evidence delta states.
 func TestCgroupEvidenceDeltaStates(t *testing.T) {
 	collector := &Collector{devices: fakeDeviceResolver{}}
 	tests := []struct {
@@ -245,6 +254,7 @@ func TestCgroupEvidenceDeltaStates(t *testing.T) {
 	}
 }
 
+// TestCgroupEvidenceRejectsDuplicateDevice verifies cgroup evidence rejects duplicate device.
 func TestCgroupEvidenceRejectsDuplicateDevice(t *testing.T) {
 	collector := &Collector{devices: fakeDeviceResolver{}}
 	evidence := collector.buildCgroupEvidence("a-web",
@@ -255,6 +265,7 @@ func TestCgroupEvidenceRejectsDuplicateDevice(t *testing.T) {
 	}
 }
 
+// TestVirshEvidenceDeltaStatesAndTiming verifies virsh evidence delta states and timing.
 func TestVirshEvidenceDeltaStatesAndTiming(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -283,6 +294,7 @@ func TestVirshEvidenceDeltaStatesAndTiming(t *testing.T) {
 	}
 }
 
+// TestVirshEvidenceRejectsDuplicateKey verifies virsh evidence rejects duplicate key.
 func TestVirshEvidenceRejectsDuplicateKey(t *testing.T) {
 	evidence := buildVirshEvidence("a-web", sourceSample{virshData: []byte("block.0.name=vda\nblock.0.rd.bytes=1\nblock.0.rd.bytes=2\n")}, sourceSample{virshData: []byte("block.0.name=vda\n")})
 	if evidence.Available || !strings.Contains(evidence.Error, "duplicate") {
@@ -290,6 +302,7 @@ func TestVirshEvidenceRejectsDuplicateKey(t *testing.T) {
 	}
 }
 
+// TestQEMUPressureUnavailableIsNonFatal verifies qemu pressure unavailable is non fatal.
 func TestQEMUPressureUnavailableIsNonFatal(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	ioPath := "/fake" + scope + "/io.stat"
@@ -317,6 +330,8 @@ func TestQEMUPressureUnavailableIsNonFatal(t *testing.T) {
 	}
 }
 
+// TestQEMUPressureRequiresVerifiedPIDIdentity verifies qemu pressure requires verified pid
+// identity.
 func TestQEMUPressureRequiresVerifiedPIDIdentity(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	mapping := ebpf.VMBlockCgroupMapping{
@@ -349,6 +364,8 @@ func TestQEMUPressureRequiresVerifiedPIDIdentity(t *testing.T) {
 	}
 }
 
+// TestQEMUPressureRevalidatesIdentityAtAfterSample verifies qemu pressure revalidates identity at
+// after sample.
 func TestQEMUPressureRevalidatesIdentityAtAfterSample(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	mapping := ebpf.VMBlockCgroupMapping{
@@ -376,6 +393,7 @@ func TestQEMUPressureRevalidatesIdentityAtAfterSample(t *testing.T) {
 	}
 }
 
+// TestCgroupIdentityContinuity verifies cgroup identity continuity.
 func TestCgroupIdentityContinuity(t *testing.T) {
 	collector := &Collector{devices: fakeDeviceResolver{}}
 	before := sourceSample{cgroupPath: "/scope", cgroupKind: "machine_scope", cgroupInode: 10, cgroupData: []byte("8:0 rbytes=10 wbytes=20\n")}
@@ -402,6 +420,8 @@ func TestCgroupIdentityContinuity(t *testing.T) {
 	})
 }
 
+// TestQEMUPressureCounterResetPublishesNoPartialDeltas verifies qemu pressure counter reset
+// publishes no partial deltas.
 func TestQEMUPressureCounterResetPublishesNoPartialDeltas(t *testing.T) {
 	baseline := qemuio.Counters{ReadBytes: 100, WriteBytes: 200, Syscr: 300, Syscw: 400}
 	for _, test := range []struct {
@@ -429,6 +449,7 @@ func TestQEMUPressureCounterResetPublishesNoPartialDeltas(t *testing.T) {
 	}
 }
 
+// TestCgroupCandidateScopeSelection verifies cgroup candidate scope selection.
 func TestCgroupCandidateScopeSelection(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	mapping := ebpf.VMBlockCgroupMapping{CgroupPaths: []string{
@@ -448,6 +469,7 @@ func TestCgroupCandidateScopeSelection(t *testing.T) {
 	}
 }
 
+// TestEmulatorCgroupFallbackIsPartial verifies emulator cgroup fallback is partial.
 func TestEmulatorCgroupFallbackIsPartial(t *testing.T) {
 	scope := `/machine.slice/machine-qemu\x2d3\x2da\x2dweb.scope`
 	emulator := scope + "/libvirt/emulator"
@@ -459,6 +481,8 @@ func TestEmulatorCgroupFallbackIsPartial(t *testing.T) {
 	}
 }
 
+// TestStoppedVMIsReportedUnavailableWithoutSourceReads verifies stopped vm is reported unavailable
+// without source reads.
 func TestStoppedVMIsReportedUnavailableWithoutSourceReads(t *testing.T) {
 	collector := &Collector{
 		files: &sequenceFileReader{}, virsh: &sequenceVirshSource{}, qemu: &sequenceQEMUSource{},
@@ -477,6 +501,7 @@ func TestStoppedVMIsReportedUnavailableWithoutSourceReads(t *testing.T) {
 	}
 }
 
+// TestDeterministicPrivacySafeJSON verifies deterministic privacy safe json.
 func TestDeterministicPrivacySafeJSON(t *testing.T) {
 	report := VMStorageStatsReport{
 		SchemaVersion: SchemaVersion, ObservedAtUTC: "2026-08-09T12:00:00Z", Duration: "1s", Interval: "1s",
@@ -523,10 +548,12 @@ func TestDeterministicPrivacySafeJSON(t *testing.T) {
 	}
 }
 
+// domstats derives stable operator-facing text for domstats.
 func domstats(target string, rdReqs, rdBytes, rdTimes, wrReqs, wrBytes, wrTimes, flReqs, flTimes uint64) string {
 	return fmt.Sprintf("block.0.name=%s\nblock.0.rd.reqs=%d\nblock.0.rd.bytes=%d\nblock.0.rd.times=%d\nblock.0.wr.reqs=%d\nblock.0.wr.bytes=%d\nblock.0.wr.times=%d\nblock.0.fl.reqs=%d\nblock.0.fl.times=%d\n", target, rdReqs, rdBytes, rdTimes, wrReqs, wrBytes, wrTimes, flReqs, flTimes)
 }
 
+// hasUnavailable reports whether the value has unavailable.
 func hasUnavailable(sections []UnavailableSection, vm, section string) bool {
 	for _, candidate := range sections {
 		if candidate.VM == vm && candidate.Section == section {
@@ -536,6 +563,7 @@ func hasUnavailable(sections []UnavailableSection, vm, section string) bool {
 	return false
 }
 
+// machineScopeForTest derives stable operator-facing text for machine scope for test.
 func machineScopeForTest(path string) string {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for index, part := range parts {

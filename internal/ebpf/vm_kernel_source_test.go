@@ -15,10 +15,12 @@ type fakeVMBlockKernelSource struct {
 	session      *fakeVMBlockKernelSession
 }
 
+// Preflight checks prerequisites without loading or attaching an eBPF program.
 func (source *fakeVMBlockKernelSource) Preflight(context.Context) (VMBlockKernelPreflight, error) {
 	return source.preflight, source.preflightErr
 }
 
+// Prepare allocates a collector session but leaves lifecycle start and cleanup to the caller.
 func (source *fakeVMBlockKernelSource) Prepare(context.Context, VMBlockLatencyCollectOptions, []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	if source.prepareErr != nil {
 		return nil, source.prepareErr
@@ -38,11 +40,13 @@ type fakeVMBlockKernelSession struct {
 	closed     bool
 }
 
+// Start completes start and returns any failure to its caller.
 func (session *fakeVMBlockKernelSession) Start(context.Context) error {
 	session.started = true
 	return session.startErr
 }
 
+// Collect completes collect and returns any failure to its caller.
 func (session *fakeVMBlockKernelSession) Collect(_ context.Context, _ time.Duration, consume func(VMBlockEvent) error) error {
 	for _, event := range session.events {
 		if err := consume(event); err != nil {
@@ -52,16 +56,22 @@ func (session *fakeVMBlockKernelSession) Collect(_ context.Context, _ time.Durat
 	return session.collectErr
 }
 
+// Stats returns the session's bounded aggregate counters and collection metadata.
 func (session *fakeVMBlockKernelSession) Stats() VMBlockKernelStats { return session.stats }
+
+// Stop completes stop and returns any failure to its caller.
 func (session *fakeVMBlockKernelSession) Stop() error {
 	session.stopped = true
 	return session.stopErr
 }
+
+// Close releases the resources owned by the receiver.
 func (session *fakeVMBlockKernelSession) Close() error {
 	session.closed = true
 	return session.closeErr
 }
 
+// availableFakeKernelSource builds available fake kernel source from validated inputs.
 func availableFakeKernelSource(session *fakeVMBlockKernelSession) *fakeVMBlockKernelSource {
 	if session.stats.CollectionMode == "" {
 		session.stats.CollectionMode = "test_event_stream"
@@ -74,6 +84,8 @@ func availableFakeKernelSource(session *fakeVMBlockKernelSession) *fakeVMBlockKe
 	}
 }
 
+// TestExperimentalVMBlockKernelSourceIsHonestlyUnavailable verifies experimental vm block kernel
+// source is honestly unavailable.
 func TestExperimentalVMBlockKernelSourceIsHonestlyUnavailable(t *testing.T) {
 	options := VMBlockLatencyCollectOptions{Duration: time.Second, Interval: time.Second}
 	report := CollectVMBlockLatencyReportWithKernelSource(context.Background(), options, nil, experimentalVMBlockKernelSource{})
@@ -88,6 +100,8 @@ func TestExperimentalVMBlockKernelSourceIsHonestlyUnavailable(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourceLifecycleAndLossCounters verifies vm block kernel source lifecycle and
+// loss counters.
 func TestVMBlockKernelSourceLifecycleAndLossCounters(t *testing.T) {
 	session := &fakeVMBlockKernelSession{
 		events: []VMBlockEvent{
@@ -113,6 +127,8 @@ func TestVMBlockKernelSourceLifecycleAndLossCounters(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourcePartialStartFailureCleansUp verifies vm block kernel source partial start
+// failure cleans up.
 func TestVMBlockKernelSourcePartialStartFailureCleansUp(t *testing.T) {
 	session := &fakeVMBlockKernelSession{startErr: errors.New("attach complete tracepoint failed")}
 	report := CollectVMBlockLatencyReportWithKernelSource(
@@ -129,6 +145,8 @@ func TestVMBlockKernelSourcePartialStartFailureCleansUp(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourceCleanupOnCollectError verifies vm block kernel source cleanup on collect
+// error.
 func TestVMBlockKernelSourceCleanupOnCollectError(t *testing.T) {
 	session := &fakeVMBlockKernelSession{collectErr: errors.New("event stream failed")}
 	report := CollectVMBlockLatencyReportWithKernelSource(
@@ -145,6 +163,8 @@ func TestVMBlockKernelSourceCleanupOnCollectError(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourcePrimaryErrorsPrecedeCleanupWarnings verifies vm block kernel source
+// primary errors precede cleanup warnings.
 func TestVMBlockKernelSourcePrimaryErrorsPrecedeCleanupWarnings(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -189,6 +209,7 @@ func TestVMBlockKernelSourcePrimaryErrorsPrecedeCleanupWarnings(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourceStructuredErrors verifies vm block kernel source structured errors.
 func TestVMBlockKernelSourceStructuredErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -217,6 +238,7 @@ func TestVMBlockKernelSourceStructuredErrors(t *testing.T) {
 	}
 }
 
+// TestVMBlockKernelSourceFakeErrorEvents verifies vm block kernel source fake error events.
 func TestVMBlockKernelSourceFakeErrorEvents(t *testing.T) {
 	tests := []struct {
 		name   string

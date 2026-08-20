@@ -141,6 +141,7 @@ func CountBlockEvents(duration time.Duration) (BlockCountResult, error) {
 	}, nil
 }
 
+// attachCounter attaches counter and returns an owned handle for cleanup.
 func attachCounter(tracepoint, programName string, mapFD int, key uint32) (*counterAttachment, error) {
 	attachment := &counterAttachment{programFD: -1, linkFD: -1}
 	programFD, verifierLog, err := loadCounterProgram(mapFD, key, programName)
@@ -159,6 +160,7 @@ func attachCounter(tracepoint, programName string, mapFD int, key uint32) (*coun
 	return attachment, nil
 }
 
+// createCounterMap creates counter map while preserving the package's security invariants.
 func createCounterMap() (int, error) {
 	attr := bpfMapCreateAttr{
 		MapType:    bpfMapTypeArray,
@@ -170,6 +172,7 @@ func createCounterMap() (int, error) {
 	return bpfCall(bpfMapCreate, unsafe.Pointer(&attr), unsafe.Sizeof(attr))
 }
 
+// loadCounterProgram loads a minimal tracepoint counter and retains the verifier log on rejection.
 func loadCounterProgram(mapFD int, key uint32, programName string) (int, string, error) {
 	instructions := counterProgram(mapFD, key)
 	license := []byte("GPL\x00")
@@ -191,6 +194,7 @@ func loadCounterProgram(mapFD int, key uint32, programName string) (int, string,
 	return fd, strings.TrimRight(string(logBuffer), "\x00"), err
 }
 
+// counterProgram builds counter program from validated inputs.
 func counterProgram(mapFD int, key uint32) []bpfInstruction {
 	return []bpfInstruction{
 		{Code: 0x18, Regs: register(1, bpfPseudoMapFD), Imm: int32(mapFD)},
@@ -207,10 +211,12 @@ func counterProgram(mapFD int, key uint32) []bpfInstruction {
 	}
 }
 
+// register appends one classic BPF instruction to the bounded program under construction.
 func register(destination, source uint8) uint8 {
 	return destination | source<<4
 }
 
+// openRawTracepoint opens raw tracepoint after validating its source.
 func openRawTracepoint(name string, programFD int) (int, error) {
 	nameBytes := append([]byte(name), 0)
 	attr := bpfRawTracepointAttr{
@@ -222,6 +228,7 @@ func openRawTracepoint(name string, programFD int) (int, error) {
 	return fd, err
 }
 
+// lookupCounter looks up counter without inventing a missing value.
 func lookupCounter(mapFD int, key uint32) (uint64, error) {
 	value := uint64(0)
 	attr := bpfMapElementAttr{
@@ -235,6 +242,7 @@ func lookupCounter(mapFD int, key uint32) (uint64, error) {
 	return value, err
 }
 
+// bpfCall builds BPF call and returns an error when validation or source access fails.
 func bpfCall(command uintptr, attr unsafe.Pointer, size uintptr) (int, error) {
 	syscallNumber, err := bpfSyscallNumber()
 	if err != nil {
@@ -247,6 +255,8 @@ func bpfCall(command uintptr, attr unsafe.Pointer, size uintptr) (int, error) {
 	return int(result), nil
 }
 
+// bpfSyscallNumber builds BPF syscall number and returns an error when validation or source access
+// fails.
 func bpfSyscallNumber() (uintptr, error) {
 	switch runtime.GOARCH {
 	case "amd64":
@@ -270,6 +280,7 @@ func bpfSyscallNumber() (uintptr, error) {
 	}
 }
 
+// bpfOperationError completes BPF operation error and returns any failure to its caller.
 func bpfOperationError(operation, tracepoint string, err error, verifierLog string) error {
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		return errBPFPermission
@@ -281,6 +292,7 @@ func bpfOperationError(operation, tracepoint string, err error, verifierLog stri
 	return errors.New(message)
 }
 
+// counterDelta subtracts monotonic counters and treats reset or wrap as unavailable evidence.
 func counterDelta(start, end uint64) uint64 {
 	if end < start {
 		return 0
@@ -288,6 +300,7 @@ func counterDelta(start, end uint64) uint64 {
 	return end - start
 }
 
+// detach performs detach as part of the package workflow.
 func (attachment *counterAttachment) detach() {
 	if attachment != nil && attachment.linkFD >= 0 {
 		_ = syscall.Close(attachment.linkFD)
@@ -295,6 +308,7 @@ func (attachment *counterAttachment) detach() {
 	}
 }
 
+// close releases the underlying descriptor and preserves cleanup errors.
 func (attachment *counterAttachment) close() {
 	if attachment == nil {
 		return

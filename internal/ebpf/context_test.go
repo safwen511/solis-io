@@ -10,6 +10,7 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestNewBlockLatencyVMContextSharedStorage verifies new block latency vm context shared storage.
 func TestNewBlockLatencyVMContextSharedStorage(t *testing.T) {
 	resolver := func(path string) hoststorage.Mapping {
 		switch path {
@@ -53,6 +54,8 @@ func TestNewBlockLatencyVMContextSharedStorage(t *testing.T) {
 	}
 }
 
+// TestNewBlockLatencyVMContextDoesNotShareStorage verifies new block latency vm context does not
+// share storage.
 func TestNewBlockLatencyVMContextDoesNotShareStorage(t *testing.T) {
 	resolver := func(path string) hoststorage.Mapping {
 		physical := "/dev/nvme0n1"
@@ -71,6 +74,7 @@ func TestNewBlockLatencyVMContextDoesNotShareStorage(t *testing.T) {
 	}
 }
 
+// TestWriteVMBlockLatencySharedStorage verifies write vm block latency shared storage.
 func TestWriteVMBlockLatencySharedStorage(t *testing.T) {
 	context := BlockLatencyVMContext{
 		Victim: BlockLatencyVMTarget{
@@ -110,6 +114,8 @@ func TestWriteVMBlockLatencySharedStorage(t *testing.T) {
 	}
 }
 
+// TestWriteVMBlockLatencyWarnsAndContinuesWhenStorageDiffers verifies write vm block latency warns
+// and continues when storage differs.
 func TestWriteVMBlockLatencyWarnsAndContinuesWhenStorageDiffers(t *testing.T) {
 	context := BlockLatencyVMContext{
 		Victim:  BlockLatencyVMTarget{Name: "a-web", PhysicalDevice: "/dev/nvme0n1"},

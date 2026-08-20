@@ -8,6 +8,7 @@ import (
 	"github.com/safwen511/solis-io/internal/servicehealth"
 )
 
+// addSection adds section to the current aggregate.
 func addSection(snapshot *ObserveSnapshot, name string, state EvidenceState, source, detail string) {
 	detail = oneLine(detail)
 	snapshot.EvidenceQuality.Sections = append(snapshot.EvidenceQuality.Sections, SectionQuality{Section: name, State: state, Source: oneLine(source), Error: detail})
@@ -16,6 +17,7 @@ func addSection(snapshot *ObserveSnapshot, name string, state EvidenceState, sou
 	}
 }
 
+// finalizeQuality performs finalize quality as part of the package workflow.
 func finalizeQuality(snapshot *ObserveSnapshot) {
 	overall := EvidenceMeasured
 	baseAvailable := false
@@ -38,6 +40,7 @@ func finalizeQuality(snapshot *ObserveSnapshot) {
 	snapshot.EvidenceQuality.Overall = overall
 }
 
+// buildCorrelations builds correlations from validated inputs.
 func buildCorrelations(snapshot *ObserveSnapshot) {
 	hostAvailable := snapshot.HostStatus != nil && snapshot.HostStatus.Availability.Available
 	addCorrelation(snapshot, Correlation{
@@ -68,16 +71,19 @@ func buildCorrelations(snapshot *ObserveSnapshot) {
 	addCorrelation(snapshot, Correlation{Name: "service_health_error_observed", Present: healthError, Severity: severity(healthError, "warning"), Explanation: "A configured health endpoint returned an error status or could not be checked; response bodies were not collected.", EvidenceRefs: []string{"victim_service_status.services.health_checks"}})
 }
 
+// availabilityCorrelation builds availability correlation from validated inputs.
 func availabilityCorrelation(name string, present bool, ref string) Correlation {
 	return Correlation{Name: name, Present: present, Severity: "info", Explanation: "Availability of sanitized victim-side metadata for cautious cross-layer correlation.", EvidenceRefs: []string{ref}}
 }
 
+// addCorrelation adds correlation to the current aggregate.
 func addCorrelation(snapshot *ObserveSnapshot, correlation Correlation) {
 	correlation.EvidenceRefs = append([]string(nil), correlation.EvidenceRefs...)
 	sort.Strings(correlation.EvidenceRefs)
 	snapshot.Correlations = append(snapshot.Correlations, correlation)
 }
 
+// severity derives stable operator-facing text for severity.
 func severity(present bool, whenPresent string) string {
 	if present {
 		return whenPresent
@@ -85,6 +91,7 @@ func severity(present bool, whenPresent string) string {
 	return "info"
 }
 
+// upsertVMAttributionCorrelations executes the package's upsert VM attribution correlations step.
 func upsertVMAttributionCorrelations(snapshot *ObserveSnapshot) {
 	removeCorrelations(snapshot,
 		"host_storage_latency_available",
@@ -113,6 +120,7 @@ func upsertVMAttributionCorrelations(snapshot *ObserveSnapshot) {
 	})
 }
 
+// removeCorrelations removes correlations from the owned collection.
 func removeCorrelations(snapshot *ObserveSnapshot, names ...string) {
 	remove := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -127,6 +135,7 @@ func removeCorrelations(snapshot *ObserveSnapshot, names ...string) {
 	snapshot.Correlations = kept
 }
 
+// serviceHealthError reports whether service health error.
 func serviceHealthError(report *servicehealth.Report) bool {
 	if report == nil {
 		return false
@@ -141,12 +150,14 @@ func serviceHealthError(report *servicehealth.Report) bool {
 	return false
 }
 
+// privacySafe reports whether privacy safe.
 func privacySafe(flags observability.PrivacyFlags) bool {
 	return !flags.ProcessArgumentsCollected && !flags.EnvironmentCollected && !flags.GuestFilesCollected &&
 		!flags.QueryTextCollected && !flags.TableDataCollected && !flags.RequestBodyCollected &&
 		!flags.ResponseBodyCollected && !flags.SecretsCollected
 }
 
+// qualityForAvailability builds quality for availability from validated inputs.
 func qualityForAvailability(availability observability.Availability) EvidenceState {
 	if availability.Available && strings.TrimSpace(availability.Error) != "" {
 		return EvidencePartial

@@ -10,10 +10,12 @@ import (
 
 const defaultSysfsBlockPath = "/sys/class/block"
 
+// readDeviceStats reads device stats from its configured source.
 func readDeviceStats(physicalDisk string) DeviceStats {
 	return readDeviceStatsFrom(physicalDisk, defaultSysfsBlockPath)
 }
 
+// readDeviceStatsFrom reads device stats from from its configured source.
 func readDeviceStatsFrom(physicalDisk, sysfsBlockPath string) DeviceStats {
 	stats := DeviceStats{PhysicalDisk: physicalDisk}
 	deviceName := filepath.Base(strings.TrimSpace(physicalDisk))
@@ -33,6 +35,7 @@ func readDeviceStatsFrom(physicalDisk, sysfsBlockPath string) DeviceStats {
 	return parsed
 }
 
+// parseBlockStat parses and validates block stat.
 func parseBlockStat(line string) (DeviceStats, error) {
 	fields := strings.Fields(line)
 	if len(fields) < 11 {
@@ -60,6 +63,7 @@ func parseBlockStat(line string) (DeviceStats, error) {
 	}, nil
 }
 
+// knownCounter builds known counter from validated inputs.
 func knownCounter(value uint64) Counter {
 	return Counter{Value: value, Available: true}
 }

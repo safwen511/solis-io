@@ -13,6 +13,7 @@ import (
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
+// TestIterationSummaryRendersSelectedSuspect verifies iteration summary renders selected suspect.
 func TestIterationSummaryRendersSelectedSuspect(t *testing.T) {
 	discoveryReport := discovery.Report{
 		Candidates: []discovery.Candidate{{
@@ -44,6 +45,8 @@ func TestIterationSummaryRendersSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestIterationSummaryIncludesVMAttributionQuality verifies iteration summary includes vm
+// attribution quality.
 func TestIterationSummaryIncludesVMAttributionQuality(t *testing.T) {
 	report := diagnose.Report{
 		Inputs:  diagnose.Inputs{Victim: "a-web", Suspect: "b-stress"},
@@ -70,6 +73,8 @@ func TestIterationSummaryIncludesVMAttributionQuality(t *testing.T) {
 	}
 }
 
+// TestDegradedOrUnavailableEBPFCannotCreateAlert verifies degraded or unavailable ebpf cannot
+// create alert.
 func TestDegradedOrUnavailableEBPFCannotCreateAlert(t *testing.T) {
 	for _, quality := range []string{"degraded", "unavailable"} {
 		report := diagnose.Report{
@@ -89,6 +94,7 @@ func TestDegradedOrUnavailableEBPFCannotCreateAlert(t *testing.T) {
 	}
 }
 
+// TestAlertDecision verifies alert decision.
 func TestAlertDecision(t *testing.T) {
 	if !IsAlert(diagnose.LikelyLiveVerdict) {
 		t.Fatal("likely live verdict did not trigger alert")
@@ -98,6 +104,7 @@ func TestAlertDecision(t *testing.T) {
 	}
 }
 
+// TestAlertFormatting verifies alert formatting.
 func TestAlertFormatting(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteAlert(&output, IterationSummary{
@@ -119,6 +126,7 @@ func TestAlertFormatting(t *testing.T) {
 	}
 }
 
+// TestCaptureCooldown verifies capture cooldown.
 func TestCaptureCooldown(t *testing.T) {
 	now := time.Date(2026, 8, 9, 1, 0, 0, 0, time.UTC)
 	if !CaptureAllowed(now, time.Time{}, 2*time.Minute) {
@@ -132,6 +140,7 @@ func TestCaptureCooldown(t *testing.T) {
 	}
 }
 
+// TestFinalSummaryFormatting verifies final summary formatting.
 func TestFinalSummaryFormatting(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteFinal(&output, FinalSummary{Iterations: 4, Alerts: 2, Captures: 1}); err != nil {

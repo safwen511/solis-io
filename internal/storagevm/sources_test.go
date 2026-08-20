@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestSysfsDeviceResolverClassifiesLayers verifies sysfs device resolver classifies layers.
 func TestSysfsDeviceResolverClassifiesLayers(t *testing.T) {
 	root := t.TempDir()
 	sysDev := filepath.Join(root, "dev", "block")

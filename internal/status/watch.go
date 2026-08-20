@@ -133,10 +133,12 @@ func WriteWatchSummary(dst io.Writer, summary WatchSummary) error {
 	return err
 }
 
+// compareText compares text and reports the resulting relationship.
 func compareText(left, right string) int {
 	return strings.Compare(strings.ToLower(left), strings.ToLower(right))
 }
 
+// pressureRank builds pressure rank from validated inputs.
 func pressureRank(pressure string) int {
 	switch strings.ToLower(pressure) {
 	case PressureHigh:

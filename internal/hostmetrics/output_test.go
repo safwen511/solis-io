@@ -9,6 +9,7 @@ import (
 	"github.com/safwen511/solis-io/internal/observability"
 )
 
+// TestWriteJSONDeterministicAndPrivacySafe verifies write json deterministic and privacy safe.
 func TestWriteJSONDeterministicAndPrivacySafe(t *testing.T) {
 	status := HostStatus{
 		Hostname:          "fixture-host",
@@ -46,6 +47,7 @@ func TestWriteJSONDeterministicAndPrivacySafe(t *testing.T) {
 	}
 }
 
+// TestWriteJSONRejectsUnsafePrivacy verifies write json rejects unsafe privacy.
 func TestWriteJSONRejectsUnsafePrivacy(t *testing.T) {
 	var output bytes.Buffer
 	err := WriteJSON(&output, HostStatus{Privacy: observability.PrivacyFlags{ProcessArgumentsCollected: true}})
@@ -54,6 +56,7 @@ func TestWriteJSONRejectsUnsafePrivacy(t *testing.T) {
 	}
 }
 
+// assertTextOrder performs assert text order as part of the package workflow.
 func assertTextOrder(t *testing.T, output, first, second string) {
 	t.Helper()
 	left, right := strings.Index(output, first), strings.Index(output, second)

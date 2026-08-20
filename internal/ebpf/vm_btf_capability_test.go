@@ -12,6 +12,7 @@ type fakeVMBlockBTFCapabilityResolver struct {
 	errors  map[string]error
 }
 
+// Resolve resolves source identities from validated inputs and reports unsupported layouts.
 func (resolver fakeVMBlockBTFCapabilityResolver) Resolve(_ context.Context, requirement VMBlockBTFCapabilityRequirement) (VMBlockBTFCapability, error) {
 	if err := resolver.errors[requirement.Name]; err != nil {
 		return VMBlockBTFCapability{}, err
@@ -22,6 +23,7 @@ func (resolver fakeVMBlockBTFCapabilityResolver) Resolve(_ context.Context, requ
 	return VMBlockBTFCapability{Available: true, Status: VMBlockCapabilityAvailable}, nil
 }
 
+// TestResolveVMBlockBTFCapabilitiesFailures verifies resolve vm block btf capabilities failures.
 func TestResolveVMBlockBTFCapabilitiesFailures(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -60,6 +62,8 @@ func TestResolveVMBlockBTFCapabilitiesFailures(t *testing.T) {
 	}
 }
 
+// TestResolveVMBlockBTFCapabilitiesDeterministicSections verifies resolve vm block btf capabilities
+// deterministic sections.
 func TestResolveVMBlockBTFCapabilitiesDeterministicSections(t *testing.T) {
 	resolver := fakeVMBlockBTFCapabilityResolver{errors: map[string]error{
 		"request.biotail": &VMBlockCapabilityError{Status: VMBlockCapabilityOptionalMemberMissing, Name: "request.biotail"},
@@ -78,6 +82,8 @@ func TestResolveVMBlockBTFCapabilitiesDeterministicSections(t *testing.T) {
 	}
 }
 
+// TestRequiredVMBlockBTFCapabilitiesAreSymbolicAndComplete verifies required vm block btf
+// capabilities are symbolic and complete.
 func TestRequiredVMBlockBTFCapabilitiesAreSymbolicAndComplete(t *testing.T) {
 	requirements := RequiredVMBlockBTFCapabilities()
 	want := []string{

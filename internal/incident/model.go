@@ -46,6 +46,7 @@ func NewExplanation(report experiment.Report, victim, suspect string) (Explanati
 	}, nil
 }
 
+// assess derives stable operator-facing text for assess.
 func assess(report experiment.Report, impact experiment.Impact) string {
 	assessment := "No conclusive noisy-neighbor storage interference signal."
 	if impact.ThroughputDropPct > 0 && impact.LatencyIncreasePct > 0 {

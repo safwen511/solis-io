@@ -129,6 +129,7 @@ func ClassifyPressureWithThresholds(summary qemuio.VMSummary, thresholds config.
 	return PressureIdle, "idle"
 }
 
+// vmIP derives stable operator-facing text for VM ip.
 func vmIP(vm inventory.VM) string {
 	if strings.TrimSpace(vm.IPLease) != "" {
 		return strings.TrimSpace(vm.IPLease)
@@ -136,6 +137,7 @@ func vmIP(vm inventory.VM) string {
 	return valueOrDash(vm.IPPlan)
 }
 
+// pidNumber builds PID number from validated inputs.
 func pidNumber(value string) int {
 	pid, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || pid <= 0 {
@@ -144,6 +146,7 @@ func pidNumber(value string) int {
 	return pid
 }
 
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -152,6 +155,7 @@ func valueOrDash(value string) string {
 	return value
 }
 
+// oneLine collapses whitespace so diagnostic text cannot break line-oriented output.
 func oneLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }

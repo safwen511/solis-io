@@ -16,6 +16,7 @@ import (
 	"github.com/safwen511/solis-io/internal/observability"
 )
 
+// parseVersion parses and validates version.
 func parseVersion(output string) (string, error) {
 	rows, err := csvRows(output, 1)
 	if err != nil {
@@ -27,6 +28,7 @@ func parseVersion(output string) (string, error) {
 	return strings.TrimSpace(rows[0][0]), nil
 }
 
+// parseDatabaseCounters parses and validates database counters.
 func parseDatabaseCounters(output string) ([]observability.DatabaseCounters, error) {
 	rows, err := csvRows(output, 7)
 	if err != nil {
@@ -60,6 +62,7 @@ func parseDatabaseCounters(output string) ([]observability.DatabaseCounters, err
 	return result, nil
 }
 
+// parseActivity parses and validates activity.
 func parseActivity(output string) (observability.DatabaseActivity, error) {
 	rows, err := csvRows(output, 7)
 	if err != nil {
@@ -100,6 +103,7 @@ func parseActivity(output string) (observability.DatabaseActivity, error) {
 	return activity, nil
 }
 
+// parseExtensions parses and validates extensions.
 func parseExtensions(output string) ([]string, error) {
 	rows, err := csvRows(output, 1)
 	if err != nil {
@@ -117,6 +121,7 @@ func parseExtensions(output string) ([]string, error) {
 	return result, nil
 }
 
+// parseStatementStatistics parses and validates statement statistics.
 func parseStatementStatistics(output string) ([]observability.StatementStatistics, error) {
 	rows, err := csvRows(output, 5)
 	if err != nil {
@@ -150,6 +155,7 @@ func parseStatementStatistics(output string) ([]observability.StatementStatistic
 	return result, nil
 }
 
+// csvRows builds csv rows and returns an error when validation or source access fails.
 func csvRows(output string, fields int) ([][]string, error) {
 	reader := csv.NewReader(strings.NewReader(output))
 	reader.FieldsPerRecord = fields
@@ -168,6 +174,7 @@ func csvRows(output string, fields int) ([][]string, error) {
 	return rows, nil
 }
 
+// parseNonNegativeInt parses and validates non negative int.
 func parseNonNegativeInt(value string) (int, error) {
 	number, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || number < 0 {
@@ -176,6 +183,7 @@ func parseNonNegativeInt(value string) (int, error) {
 	return number, nil
 }
 
+// parsePostgreSQLInterval decodes and validates PostgreSQL interval, rejecting malformed input.
 func parsePostgreSQLInterval(value string) (float64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

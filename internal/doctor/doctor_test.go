@@ -13,6 +13,8 @@ import (
 	"github.com/safwen511/solis-io/internal/inventory"
 )
 
+// TestProductDoctorDoesNotRequireLabArtifacts verifies product doctor does not require lab
+// artifacts.
 func TestProductDoctorDoesNotRequireLabArtifacts(t *testing.T) {
 	report := RunWithOptions(Options{InventoryCSV: filepath.Join(t.TempDir(), "missing.csv")})
 	if len(report.Lab) != 0 {
@@ -20,6 +22,7 @@ func TestProductDoctorDoesNotRequireLabArtifacts(t *testing.T) {
 	}
 }
 
+// TestLabDoctorIncludesLabSpecificChecks verifies lab doctor includes lab specific checks.
 func TestLabDoctorIncludesLabSpecificChecks(t *testing.T) {
 	root := t.TempDir()
 	report := RunWithOptions(Options{
@@ -34,6 +37,8 @@ func TestLabDoctorIncludesLabSpecificChecks(t *testing.T) {
 	}
 }
 
+// TestProductDoctorReportsHostConfigAndInventoryChecksWithFakeProbes verifies product doctor
+// reports host config and inventory checks with fake probes.
 func TestProductDoctorReportsHostConfigAndInventoryChecksWithFakeProbes(t *testing.T) {
 	root := t.TempDir()
 	procPath := filepath.Join(root, "proc")
@@ -106,6 +111,7 @@ func TestProductDoctorReportsHostConfigAndInventoryChecksWithFakeProbes(t *testi
 	}
 }
 
+// TestCaptureOutputWarnings verifies capture output warnings.
 func TestCaptureOutputWarnings(t *testing.T) {
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o777); err != nil {
@@ -124,6 +130,7 @@ func TestCaptureOutputWarnings(t *testing.T) {
 	}
 }
 
+// TestDoctorWarnsWhenRunAsRoot verifies doctor warns when run as root.
 func TestDoctorWarnsWhenRunAsRoot(t *testing.T) {
 	check := rootUsageCheck(0)
 	if check.Status != WARN || !strings.Contains(check.Detail, "does not require root") {
@@ -131,6 +138,8 @@ func TestDoctorWarnsWhenRunAsRoot(t *testing.T) {
 	}
 }
 
+// TestDoctorReportsOptionalObservabilityAndPrivacy verifies doctor reports optional observability
+// and privacy.
 func TestDoctorReportsOptionalObservabilityAndPrivacy(t *testing.T) {
 	observability := &config.ObservabilityConfig{
 		Host:      config.HostObservabilityConfig{Enabled: true, Interval: "1s"},
@@ -154,6 +163,7 @@ func TestDoctorReportsOptionalObservabilityAndPrivacy(t *testing.T) {
 	}
 }
 
+// TestOverallResult verifies overall result.
 func TestOverallResult(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -173,6 +183,7 @@ func TestOverallResult(t *testing.T) {
 	}
 }
 
+// TestWriteFormatsSectionsAndRemediation verifies write formats sections and remediation.
 func TestWriteFormatsSectionsAndRemediation(t *testing.T) {
 	report := Report{
 		Config: []Check{{Status: OK, Name: "Config source", Detail: "built-in defaults"}},
@@ -216,6 +227,8 @@ func TestWriteFormatsSectionsAndRemediation(t *testing.T) {
 	}
 }
 
+// TestInventoryRuntimeChecksListsAffectedVMsAlphabetically verifies inventory runtime checks lists
+// affected VMs alphabetically.
 func TestInventoryRuntimeChecksListsAffectedVMsAlphabetically(t *testing.T) {
 	vms := []inventory.VM{
 		{Name: "b-web", State: "shut off", QEMUPID: "-", IPLease: "-"},
@@ -236,6 +249,8 @@ func TestInventoryRuntimeChecksListsAffectedVMsAlphabetically(t *testing.T) {
 	}
 }
 
+// TestInventoryRuntimeChecksReportsNoneWhenComplete verifies inventory runtime checks reports none
+// when complete.
 func TestInventoryRuntimeChecksReportsNoneWhenComplete(t *testing.T) {
 	vms := []inventory.VM{{
 		Name: "a-db", State: "running", QEMUPID: "200", IPLease: "192.168.130.30",
@@ -249,6 +264,7 @@ func TestInventoryRuntimeChecksReportsNoneWhenComplete(t *testing.T) {
 	}
 }
 
+// checkByName checks by name and reports any failed requirement.
 func checkByName(checks []Check, name string) Check {
 	for _, check := range checks {
 		if check.Name == name {

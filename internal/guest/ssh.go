@@ -24,6 +24,7 @@ type SSHRunner struct {
 	options SSHOptions
 }
 
+// NewSSHRunner constructs ssh runner wired to the package's production dependencies.
 func NewSSHRunner(options SSHOptions) (*SSHRunner, error) {
 	if options.ConnectTimeout <= 0 {
 		return nil, errors.New("SSH connect timeout must be positive")
@@ -37,6 +38,7 @@ func NewSSHRunner(options SSHOptions) (*SSHRunner, error) {
 	return &SSHRunner{options: options}, nil
 }
 
+// Run executes one allowlisted command over SSH without a shell or caller-supplied command text.
 func (runner *SSHRunner) Run(ctx context.Context, target Target, command CommandSpec) (Result, error) {
 	if target.host == "" || target.user == "" || target.vmName == "" {
 		return Result{}, errors.New("SSH target must be resolved from inventory")
@@ -70,6 +72,7 @@ func (runner *SSHRunner) Run(ctx context.Context, target Target, command Command
 	return Result{Output: stdout.String()}, nil
 }
 
+// arguments builds fixed SSH client arguments for the inventory-derived target.
 func (runner *SSHRunner) arguments(target Target, argv []string) []string {
 	seconds := int((runner.options.ConnectTimeout + time.Second - 1) / time.Second)
 	return []string{
@@ -82,6 +85,7 @@ func (runner *SSHRunner) arguments(target Target, argv []string) []string {
 	}
 }
 
+// joinRemoteArgs quotes only the already-allowlisted argv used by the remote transport.
 func joinRemoteArgs(argv []string) string {
 	quoted := make([]string, len(argv))
 	for index, argument := range argv {
@@ -99,8 +103,10 @@ type boundedBuffer struct {
 	exceeded bool
 }
 
+// newBoundedBuffer constructs bounded buffer wired to the package's production dependencies.
 func newBoundedBuffer(limit int) *boundedBuffer { return &boundedBuffer{limit: limit} }
 
+// Write retains at most the configured diagnostic byte limit and counts discarded bytes.
 func (buffer *boundedBuffer) Write(data []byte) (int, error) {
 	if buffer.buffer.Len()+len(data) > buffer.limit {
 		remaining := buffer.limit - buffer.buffer.Len()
@@ -113,4 +119,5 @@ func (buffer *boundedBuffer) Write(data []byte) (int, error) {
 	return buffer.buffer.Write(data)
 }
 
+// String returns the stable textual representation of the value.
 func (buffer *boundedBuffer) String() string { return buffer.buffer.String() }

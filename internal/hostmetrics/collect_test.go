@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// TestCollectPSIUnavailableDoesNotAbort verifies collect psi unavailable does not abort.
 func TestCollectPSIUnavailableDoesNotAbort(t *testing.T) {
 	status := collectPSI(func(path string) ([]byte, error) {
 		return nil, os.ErrPermission
@@ -18,6 +19,8 @@ func TestCollectPSIUnavailableDoesNotAbort(t *testing.T) {
 	}
 }
 
+// TestCollectQEMUProcessesReadsNoArgumentsOrEnvironment verifies collect qemu processes reads no
+// arguments or environment.
 func TestCollectQEMUProcessesReadsNoArgumentsOrEnvironment(t *testing.T) {
 	procRoot := t.TempDir()
 	for _, pid := range []string{"10", "20"} {
@@ -54,6 +57,8 @@ func TestCollectQEMUProcessesReadsNoArgumentsOrEnvironment(t *testing.T) {
 	}
 }
 
+// TestCollectWithPartialFailuresReturnsHostStatus verifies collect with partial failures returns
+// host status.
 func TestCollectWithPartialFailuresReturnsHostStatus(t *testing.T) {
 	status, err := collectWith(Options{
 		Interval: time.Second, CollectPSI: true, CollectNetwork: true,
@@ -80,6 +85,8 @@ func TestCollectWithPartialFailuresReturnsHostStatus(t *testing.T) {
 	}
 }
 
+// TestCollectWithCompleteFixtureCalculatesWindowedRates verifies collect with complete fixture
+// calculates windowed rates.
 func TestCollectWithCompleteFixtureCalculatesWindowedRates(t *testing.T) {
 	procRoot := t.TempDir()
 	sysRoot := t.TempDir()
@@ -151,6 +158,7 @@ func TestCollectWithCompleteFixtureCalculatesWindowedRates(t *testing.T) {
 	}
 }
 
+// TestCollectRejectsInvalidOptions verifies collect rejects invalid options.
 func TestCollectRejectsInvalidOptions(t *testing.T) {
 	_, err := collectWith(Options{}, dependencies{})
 	if err == nil || !strings.Contains(err.Error(), "interval must be positive") {

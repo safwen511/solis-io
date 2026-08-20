@@ -383,6 +383,7 @@ func RunInteractive(ctx context.Context, input io.Reader, dst io.Writer, source 
 	}
 }
 
+// writeApplicationFrame renders application frame in the package's stable operator-facing format.
 func writeApplicationFrame(output *strings.Builder, contents string) {
 	output.WriteString("\x1b[H")
 	lines := strings.Split(contents, "\n")
@@ -468,6 +469,7 @@ func colorizeApplicationFrame(contents string) string {
 	return strings.Join(lines, "\n")
 }
 
+// applyInteractiveAction applies interactive action to the current model.
 func applyInteractiveAction(view *View, state *interactiveState, action keyAction) bool {
 	if sortField, ok := sortForKey(action); ok {
 		state.sort = sortField
@@ -528,6 +530,7 @@ func applyInteractiveAction(view *View, state *interactiveState, action keyActio
 	}
 }
 
+// movePanel builds move panel from validated inputs.
 func movePanel(current dashboardPanel, delta int, application bool) dashboardPanel {
 	panels := []dashboardPanel{panelOverview, panelDetails, panelEvents}
 	if application {
@@ -547,6 +550,7 @@ func movePanel(current dashboardPanel, delta int, application bool) dashboardPan
 	return panels[index]
 }
 
+// retainedSelection derives stable operator-facing text for retained selection.
 func retainedSelection(rows []VMRow, selected string) string {
 	if len(rows) == 0 {
 		return ""
@@ -559,6 +563,7 @@ func retainedSelection(rows []VMRow, selected string) string {
 	return rows[0].Name
 }
 
+// moveSelection derives stable operator-facing text for move selection.
 func moveSelection(rows []VMRow, selected string, delta int) string {
 	if len(rows) == 0 {
 		return ""

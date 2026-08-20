@@ -85,17 +85,38 @@ type CommandSpec struct {
 	database string
 }
 
-func HostnameCommand() CommandSpec        { return CommandSpec{kind: CommandHostname} }
-func KernelReleaseCommand() CommandSpec   { return CommandSpec{kind: CommandKernelRelease} }
-func UptimeCommand() CommandSpec          { return CommandSpec{kind: CommandUptime} }
-func LoadCommand() CommandSpec            { return CommandSpec{kind: CommandLoad} }
-func MemoryCommand() CommandSpec          { return CommandSpec{kind: CommandMemory} }
-func FilesystemsCommand() CommandSpec     { return CommandSpec{kind: CommandFilesystems} }
-func NetworkAddressCommand() CommandSpec  { return CommandSpec{kind: CommandNetworkAddress} }
+// HostnameCommand selects the fixed hostname metadata command.
+func HostnameCommand() CommandSpec { return CommandSpec{kind: CommandHostname} }
+
+// KernelReleaseCommand selects the fixed kernel-release metadata command.
+func KernelReleaseCommand() CommandSpec { return CommandSpec{kind: CommandKernelRelease} }
+
+// UptimeCommand selects the fixed uptime metadata command.
+func UptimeCommand() CommandSpec { return CommandSpec{kind: CommandUptime} }
+
+// LoadCommand selects the fixed load-average metadata command.
+func LoadCommand() CommandSpec { return CommandSpec{kind: CommandLoad} }
+
+// MemoryCommand selects the fixed memory-counter metadata command.
+func MemoryCommand() CommandSpec { return CommandSpec{kind: CommandMemory} }
+
+// FilesystemsCommand selects the fixed filesystem-capacity metadata command.
+func FilesystemsCommand() CommandSpec { return CommandSpec{kind: CommandFilesystems} }
+
+// NetworkAddressCommand selects the fixed interface-address metadata command.
+func NetworkAddressCommand() CommandSpec { return CommandSpec{kind: CommandNetworkAddress} }
+
+// NetworkCountersCommand selects the fixed interface-counter metadata command.
 func NetworkCountersCommand() CommandSpec { return CommandSpec{kind: CommandNetworkCounters} }
-func ListeningPortsCommand() CommandSpec  { return CommandSpec{kind: CommandListeningPorts} }
+
+// ListeningPortsCommand selects the fixed listening-socket metadata command.
+func ListeningPortsCommand() CommandSpec { return CommandSpec{kind: CommandListeningPorts} }
+
+// ProcessPressureCommand selects comm-only process pressure metadata without arguments or environments.
 func ProcessPressureCommand() CommandSpec { return CommandSpec{kind: CommandProcessPressure} }
 
+// SystemdUnitCommand builds systemd unit command and returns an error when validation or source
+// access fails.
 func SystemdUnitCommand(unit string) (CommandSpec, error) {
 	unit = strings.TrimSpace(unit)
 	if !safeUnitPattern.MatchString(unit) || !strings.HasSuffix(unit, ".service") {
@@ -110,22 +131,32 @@ func PostgreSQLVersionCommand(database string) (CommandSpec, error) {
 	return postgreSQLCommand(CommandPostgreSQLVersion, database)
 }
 
+// PostgreSQLDatabasesCommand builds PostgreSQL databases command and returns an error when
+// validation or source access fails.
 func PostgreSQLDatabasesCommand(database string) (CommandSpec, error) {
 	return postgreSQLCommand(CommandPostgreSQLDatabases, database)
 }
 
+// PostgreSQLActivityCommand builds PostgreSQL activity command and returns an error when validation
+// or source access fails.
 func PostgreSQLActivityCommand(database string) (CommandSpec, error) {
 	return postgreSQLCommand(CommandPostgreSQLActivity, database)
 }
 
+// PostgreSQLExtensionsCommand builds PostgreSQL extensions command and returns an error when
+// validation or source access fails.
 func PostgreSQLExtensionsCommand(database string) (CommandSpec, error) {
 	return postgreSQLCommand(CommandPostgreSQLExtensions, database)
 }
 
+// PostgreSQLStatementsCommand builds PostgreSQL statements command and returns an error when
+// validation or source access fails.
 func PostgreSQLStatementsCommand(database string) (CommandSpec, error) {
 	return postgreSQLCommand(CommandPostgreSQLStatements, database)
 }
 
+// postgreSQLCommand builds PostgreSQL command and returns an error when validation or source access
+// fails.
 func postgreSQLCommand(kind CommandKind, database string) (CommandSpec, error) {
 	database = strings.TrimSpace(database)
 	if !safeDatabasePattern.MatchString(database) {
@@ -145,6 +176,7 @@ func (command CommandSpec) Key() string {
 	return string(command.kind)
 }
 
+// argv expands an allowlisted guest command into an argument vector without invoking a shell.
 func (command CommandSpec) argv() ([]string, error) {
 	switch command.kind {
 	case CommandHostname:

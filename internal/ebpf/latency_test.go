@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// TestTracepointAttachmentsUseOneDistinctFDPerTracepoint verifies tracepoint attachments use one
+// distinct fd per tracepoint.
 func TestTracepointAttachmentsUseOneDistinctFDPerTracepoint(t *testing.T) {
 	nextFD := 100
 	setPrograms := make(map[int][]uintptr)
@@ -62,6 +64,8 @@ func TestTracepointAttachmentsUseOneDistinctFDPerTracepoint(t *testing.T) {
 	}
 }
 
+// TestTracepointAttachClosesFDWhenSetProgramFails verifies tracepoint attach closes fd when set
+// program fails.
 func TestTracepointAttachClosesFDWhenSetProgramFails(t *testing.T) {
 	closed := 0
 	operations := perfEventOperations{
@@ -86,6 +90,8 @@ func TestTracepointAttachClosesFDWhenSetProgramFails(t *testing.T) {
 	}
 }
 
+// TestLatencyProgramsUseConfiguredDevAndSectorOffsets verifies latency programs use configured dev
+// and sector offsets.
 func TestLatencyProgramsUseConfiguredDevAndSectorOffsets(t *testing.T) {
 	fields := tracepointKeyFields{
 		dev:    TracepointField{Name: "dev", Offset: 8, Size: 4},
@@ -114,6 +120,7 @@ func TestLatencyProgramsUseConfiguredDevAndSectorOffsets(t *testing.T) {
 	}
 }
 
+// TestKeyFieldsRequiresDevAndSector verifies key fields requires dev and sector.
 func TestKeyFieldsRequiresDevAndSector(t *testing.T) {
 	_, err := keyFields(TracepointFormat{
 		Name:   "block_rq_issue",
@@ -124,6 +131,7 @@ func TestKeyFieldsRequiresDevAndSector(t *testing.T) {
 	}
 }
 
+// TestParseCPUList verifies parse cpu list.
 func TestParseCPUList(t *testing.T) {
 	cpus, err := parseCPUList("0-2,4,6-7\n")
 	if err != nil {
@@ -140,6 +148,7 @@ func TestParseCPUList(t *testing.T) {
 	}
 }
 
+// TestAggregateLatencyStats verifies aggregate latency stats.
 func TestAggregateLatencyStats(t *testing.T) {
 	stride := (latencyStatsValueSize + 7) &^ 7
 	data := make([]byte, stride*2)
@@ -168,6 +177,7 @@ func TestAggregateLatencyStats(t *testing.T) {
 	}
 }
 
+// TestWriteBlockLatency verifies write block latency.
 func TestWriteBlockLatency(t *testing.T) {
 	result := BlockLatencyResult{
 		Duration:          10 * time.Second,
@@ -201,6 +211,7 @@ func TestWriteBlockLatency(t *testing.T) {
 	}
 }
 
+// TestLatencyHistogramStructuredValues verifies latency histogram structured values.
 func TestLatencyHistogramStructuredValues(t *testing.T) {
 	result := BlockLatencyResult{CompletedRequests: 4, TotalLatencyNS: 200_000}
 	result.Histogram[0] = 1
@@ -220,6 +231,8 @@ func TestLatencyHistogramStructuredValues(t *testing.T) {
 	}
 }
 
+// TestLatencyOperationErrorIncludesVerifierAndPermissionGuidance verifies latency operation error
+// includes verifier and permission guidance.
 func TestLatencyOperationErrorIncludesVerifierAndPermissionGuidance(t *testing.T) {
 	verifierError := latencyOperationError("load latency program", "block_rq_complete", syscall.EINVAL, "invalid access to context")
 	for _, want := range []string{"load latency program", "block:block_rq_complete", "verifier log", "invalid access to context"} {

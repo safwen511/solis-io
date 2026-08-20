@@ -19,6 +19,7 @@ type diskCounters struct {
 	WeightedIOMilliseconds uint64
 }
 
+// parseDiskstats parses and validates diskstats.
 func parseDiskstats(data []byte) (map[string]diskCounters, error) {
 	devices := make(map[string]diskCounters)
 	for lineNumber, line := range strings.Split(string(data), "\n") {
@@ -51,6 +52,7 @@ func parseDiskstats(data []byte) (map[string]diskCounters, error) {
 	return devices, nil
 }
 
+// diskStatuses builds disk statuses from validated inputs.
 func diskStatuses(previous, current map[string]diskCounters, interval time.Duration, source string) []DiskStatus {
 	names := make([]string, 0, len(current))
 	for name := range current {
@@ -79,6 +81,7 @@ func diskStatuses(previous, current map[string]diskCounters, interval time.Durat
 	return statuses
 }
 
+// applyDiskRates applies disk rates to the current model.
 func applyDiskRates(status *DiskStatus, previous, current diskCounters, interval time.Duration) error {
 	if interval <= 0 {
 		return errors.New("disk rate interval must be positive")

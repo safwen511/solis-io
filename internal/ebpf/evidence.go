@@ -57,6 +57,7 @@ func WriteBlockLatencyEvidenceFile(dst io.Writer, evidence BlockLatencyEvidence)
 	return WriteBlockLatency(dst, evidence.Result)
 }
 
+// oneLineReason derives stable operator-facing text for one line reason.
 func oneLineReason(reason string) string {
 	return strings.Join(strings.Fields(reason), " ")
 }

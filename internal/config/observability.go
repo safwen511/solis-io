@@ -123,6 +123,7 @@ func ValidateWithInventory(settings Settings, vmNames []string) error {
 	return nil
 }
 
+// validateObservability enforces opt-in, bounded, privacy-safe collector configuration.
 func validateObservability(observability *ObservabilityConfig) error {
 	if observability == nil {
 		return nil
@@ -139,6 +140,7 @@ func validateObservability(observability *ObservabilityConfig) error {
 	return validateDatabases(observability.Databases)
 }
 
+// validateGuestObservability validates guest observability against its required contract.
 func validateGuestObservability(guest GuestObservabilityConfig) error {
 	transport := strings.TrimSpace(guest.Transport)
 	if transport != "" && transport != "ssh" {
@@ -165,6 +167,7 @@ func validateGuestObservability(guest GuestObservabilityConfig) error {
 	return nil
 }
 
+// validateServices validates services against its required contract.
 func validateServices(services []ServiceObservabilityConfig) error {
 	seenServices := make(map[string]struct{}, len(services))
 	for index, service := range services {
@@ -210,6 +213,7 @@ func validateServices(services []ServiceObservabilityConfig) error {
 	return nil
 }
 
+// validSystemdUnit accepts only simple service-unit identities, not shell fragments.
 func validSystemdUnit(unit string) bool {
 	if unit == "" || !strings.HasSuffix(unit, ".service") {
 		return false
@@ -224,6 +228,7 @@ func validSystemdUnit(unit string) bool {
 	return true
 }
 
+// validateHealthCheck validates health check against its required contract.
 func validateHealthCheck(service string, health HealthCheckConfig) error {
 	path := strings.TrimSpace(health.Path)
 	if !strings.HasPrefix(path, "/") || strings.Contains(path, "://") {
@@ -238,6 +243,7 @@ func validateHealthCheck(service string, health HealthCheckConfig) error {
 	return nil
 }
 
+// validateDatabases validates databases against its required contract.
 func validateDatabases(databases []DatabaseObservabilityConfig) error {
 	seen := make(map[string]struct{}, len(databases))
 	for index, database := range databases {
@@ -264,6 +270,7 @@ func validateDatabases(databases []DatabaseObservabilityConfig) error {
 	return nil
 }
 
+// validDatabaseName accepts only PostgreSQL identifiers suitable for fixed argv construction.
 func validDatabaseName(name string) bool {
 	if name == "" {
 		return false
@@ -278,6 +285,7 @@ func validDatabaseName(name string) bool {
 	return true
 }
 
+// validateCredentialRef validates credential ref against its required contract.
 func validateCredentialRef(reference string) error {
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
@@ -298,6 +306,7 @@ func validateCredentialRef(reference string) error {
 	return errors.New("credential_ref must be empty or use systemd-credential:, file:, or env:")
 }
 
+// validateOptionalDuration validates optional duration against its required contract.
 func validateOptionalDuration(field, value string, required bool) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -313,6 +322,7 @@ func validateOptionalDuration(field, value string, required bool) error {
 	return nil
 }
 
+// serviceIdentity builds the stable service identity used to correlate configured health checks.
 func serviceIdentity(service ServiceObservabilityConfig) string {
 	if id := strings.TrimSpace(service.ID); id != "" {
 		return id
@@ -320,12 +330,14 @@ func serviceIdentity(service ServiceObservabilityConfig) string {
 	return strings.TrimSpace(service.VM)
 }
 
+// containsSpaceOrControl rejects values that could alter line-oriented or argv boundaries.
 func containsSpaceOrControl(value string) bool {
 	return strings.IndexFunc(value, func(character rune) bool {
 		return unicode.IsSpace(character) || unicode.IsControl(character)
 	}) >= 0
 }
 
+// rejectUnsafeConfig rejects secret-like keys and collectors that cross the privacy boundary.
 func rejectUnsafeConfig(data []byte) error {
 	var value any
 	if err := json.Unmarshal(data, &value); err != nil {
@@ -334,6 +346,7 @@ func rejectUnsafeConfig(data []byte) error {
 	return walkConfigValue(value, "")
 }
 
+// walkConfigValue recursively checks decoded configuration without reading referenced credentials.
 func walkConfigValue(value any, path string) error {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -362,6 +375,7 @@ func walkConfigValue(value any, path string) error {
 	return nil
 }
 
+// unsafeSecretKey reports whether a key appears to contain inline secret material.
 func unsafeSecretKey(key string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
 	if normalized == "credential_ref" {
@@ -375,6 +389,7 @@ func unsafeSecretKey(key string) bool {
 		normalized == "private_key"
 }
 
+// forbiddenCollectorKey reports whether a collector requests payload, argument, environment, or file content.
 func forbiddenCollectorKey(key string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
 	forbidden := map[string]struct{}{

@@ -22,8 +22,10 @@ type Options struct {
 	Now            func() time.Time
 }
 
+// DefaultOptions returns the default options.
 func DefaultOptions() Options { return Options{CommandTimeout: 10 * time.Second, Now: time.Now} }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm inventory.VM, database solisconfig.DatabaseObservabilityConfig, options Options) (observability.DBStatus, error) {
 	if runner == nil {
 		return observability.DBStatus{}, errors.New("database runner is required")
@@ -120,6 +122,7 @@ func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm i
 
 type commandSet struct{ version, databases, activity, extensions, statements guest.CommandSpec }
 
+// fixedCommands builds fixed commands and returns an error when validation or source access fails.
 func fixedCommands(database string) (commandSet, error) {
 	var result commandSet
 	constructors := []struct {
@@ -140,6 +143,7 @@ func fixedCommands(database string) (commandSet, error) {
 	return result, nil
 }
 
+// collectStatements collects statements from the configured evidence sources.
 func collectStatements(ctx context.Context, runner guest.Runner, target guest.Target, database solisconfig.DatabaseObservabilityConfig, command guest.CommandSpec, timeout time.Duration, extensionsAvailable bool, status *observability.DBStatus, failures *[]string, successes *int) {
 	if !database.CollectPGStatStatements {
 		availability := unavailable(errors.New("collection disabled in configuration"))
@@ -179,6 +183,7 @@ func collectStatements(ctx context.Context, runner guest.Runner, target guest.Ta
 	(*successes)++
 }
 
+// run executes one allowlisted collection step and propagates source failures.
 func run(ctx context.Context, runner guest.Runner, target guest.Target, command guest.CommandSpec, timeout time.Duration) (string, error) {
 	commandContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -189,10 +194,12 @@ func run(ctx context.Context, runner guest.Runner, target guest.Target, command 
 	return result.Output, nil
 }
 
+// measured constructs availability metadata for a successfully measured value.
 func measured() observability.Availability {
 	return observability.Availability{Available: true, Source: source, Quality: observability.EvidenceQualityMeasured}
 }
 
+// unavailable constructs unavailable metadata with a bounded reason.
 func unavailable(err error) observability.Availability {
 	detail := "unavailable"
 	if err != nil {

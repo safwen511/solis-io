@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestResolveWithRunner verifies resolve with runner.
 func TestResolveWithRunner(t *testing.T) {
 	var calls [][]string
 	run := func(name string, args ...string) ([]byte, error) {
@@ -42,6 +43,7 @@ func TestResolveWithRunner(t *testing.T) {
 	}
 }
 
+// TestResolveDeviceMapperTopology verifies resolve device mapper topology.
 func TestResolveDeviceMapperTopology(t *testing.T) {
 	sysfs := buildTestSysfs(t)
 	run := func(name string, _ ...string) ([]byte, error) {
@@ -64,6 +66,7 @@ func TestResolveDeviceMapperTopology(t *testing.T) {
 	}
 }
 
+// TestNormalizeBlockDeviceMapper verifies normalize block device mapper.
 func TestNormalizeBlockDeviceMapper(t *testing.T) {
 	sysfs := buildTestSysfs(t)
 	got := normalizeBlockDeviceWithSysfs("/dev/mapper/test--vg-test--lv", sysfs)
@@ -72,6 +75,7 @@ func TestNormalizeBlockDeviceMapper(t *testing.T) {
 	}
 }
 
+// TestNormalizeBlockDeviceNormalPath verifies normalize block device normal path.
 func TestNormalizeBlockDeviceNormalPath(t *testing.T) {
 	sysfs := buildTestSysfs(t)
 	got := normalizeBlockDeviceWithSysfs("/dev/nvme0n1p3", sysfs)
@@ -80,6 +84,7 @@ func TestNormalizeBlockDeviceNormalPath(t *testing.T) {
 	}
 }
 
+// TestResolveNormalPartitionTopology verifies resolve normal partition topology.
 func TestResolveNormalPartitionTopology(t *testing.T) {
 	sysfs := buildTestSysfs(t)
 	run := func(name string, _ ...string) ([]byte, error) {
@@ -102,6 +107,8 @@ func TestResolveNormalPartitionTopology(t *testing.T) {
 	}
 }
 
+// TestResolveReturnsPartialMappingWhenFindmntFails verifies resolve returns partial mapping when
+// findmnt fails.
 func TestResolveReturnsPartialMappingWhenFindmntFails(t *testing.T) {
 	run := func(string, ...string) ([]byte, error) {
 		return nil, errors.New("findmnt failed")
@@ -113,6 +120,7 @@ func TestResolveReturnsPartialMappingWhenFindmntFails(t *testing.T) {
 	}
 }
 
+// TestParseDeviceListSortsAndDeduplicates verifies parse device list sorts and deduplicates.
 func TestParseDeviceListSortsAndDeduplicates(t *testing.T) {
 	got := parseDeviceList([]byte("sdb\nnvme0n1\nsdb\n"))
 	if got != "/dev/nvme0n1,/dev/sdb" {
@@ -120,12 +128,14 @@ func TestParseDeviceListSortsAndDeduplicates(t *testing.T) {
 	}
 }
 
+// TestParseFindmntRejectsIncompleteOutput verifies parse findmnt rejects incomplete output.
 func TestParseFindmntRejectsIncompleteOutput(t *testing.T) {
 	if _, _, _, ok := parseFindmnt([]byte("/ /dev/root\n")); ok {
 		t.Fatal("parseFindmnt() accepted output without filesystem type")
 	}
 }
 
+// TestSourceForLSBLKStripsSubvolume verifies source for lsblk strips subvolume.
 func TestSourceForLSBLKStripsSubvolume(t *testing.T) {
 	got := sourceForLSBLK("/dev/nvme0n1p2[/@]")
 	if got != "/dev/nvme0n1p2" {
@@ -133,6 +143,7 @@ func TestSourceForLSBLKStripsSubvolume(t *testing.T) {
 	}
 }
 
+// buildTestSysfs builds test sysfs from validated inputs.
 func buildTestSysfs(t *testing.T) string {
 	t.Helper()
 	tempDir := t.TempDir()
@@ -150,6 +161,7 @@ func buildTestSysfs(t *testing.T) string {
 	return sysfs
 }
 
+// createDMDevice performs create dm device as part of the package workflow.
 func createDMDevice(t *testing.T, sysfs, device, mapperName string, slaves []string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(sysfs, device, "dm"), 0o755); err != nil {
@@ -168,6 +180,8 @@ func createDMDevice(t *testing.T, sysfs, device, mapperName string, slaves []str
 	}
 }
 
+// createPhysicalWithPartition creates physical with partition while preserving the package's
+// security invariants.
 func createPhysicalWithPartition(t *testing.T, sysfs, devices, disk, partition string) {
 	t.Helper()
 	diskPath := filepath.Join(devices, disk)

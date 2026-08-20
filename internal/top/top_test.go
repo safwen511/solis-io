@@ -16,6 +16,8 @@ import (
 	statusview "github.com/safwen511/solis-io/internal/status"
 )
 
+// TestBuildViewMergesStatusAndAttributedLatency verifies build view merges status and attributed
+// latency.
 func TestBuildViewMergesStatusAndAttributedLatency(t *testing.T) {
 	report := attributedReport()
 	view, err := BuildView(Snapshot{
@@ -47,6 +49,8 @@ func TestBuildViewMergesStatusAndAttributedLatency(t *testing.T) {
 	}
 }
 
+// TestPressureSortUsesAttributedIOToOrderEqualPressurePeers verifies pressure sort uses attributed
+// io to order equal pressure peers.
 func TestPressureSortUsesAttributedIOToOrderEqualPressurePeers(t *testing.T) {
 	rows := []VMRow{
 		{Name: "a-db", Pressure: "low", WriteAvailable: true, WriteMiBPerSecond: 0.02, AttributionAvailable: true, AttributedOps: 11},
@@ -59,6 +63,8 @@ func TestPressureSortUsesAttributedIOToOrderEqualPressurePeers(t *testing.T) {
 	}
 }
 
+// TestBuildViewKeepsUnavailableEvidenceDistinctFromZero verifies build view keeps unavailable
+// evidence distinct from zero.
 func TestBuildViewKeepsUnavailableEvidenceDistinctFromZero(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC:        time.Now(),
@@ -92,6 +98,8 @@ func TestBuildViewKeepsUnavailableEvidenceDistinctFromZero(t *testing.T) {
 	}
 }
 
+// TestBuildViewHidesPerVMValuesWhenAttributionQualityIsUnavailable verifies build view hides per vm
+// values when attribution quality is unavailable.
 func TestBuildViewHidesPerVMValuesWhenAttributionQualityIsUnavailable(t *testing.T) {
 	report := attributedReport()
 	report.AttributionQuality = "unavailable"
@@ -128,6 +136,8 @@ func TestBuildViewHidesPerVMValuesWhenAttributionQualityIsUnavailable(t *testing
 	}
 }
 
+// TestBuildViewMarksVMStatusUnavailableWhenQEMUEvidenceIsUnavailable verifies build view marks vm
+// status unavailable when qemu evidence is unavailable.
 func TestBuildViewMarksVMStatusUnavailableWhenQEMUEvidenceIsUnavailable(t *testing.T) {
 	report := statusReport()
 	for index := range report.VMs {
@@ -149,6 +159,8 @@ func TestBuildViewMarksVMStatusUnavailableWhenQEMUEvidenceIsUnavailable(t *testi
 	}
 }
 
+// TestBuildViewIncludesRunningAndStoppedInventoryVMs verifies build view includes running and
+// stopped inventory VMs.
 func TestBuildViewIncludesRunningAndStoppedInventoryVMs(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(),
@@ -199,6 +211,8 @@ func TestBuildViewIncludesRunningAndStoppedInventoryVMs(t *testing.T) {
 	}
 }
 
+// TestBuildViewKeepsUnknownLibvirtStateDistinctFromStopped verifies build view keeps unknown
+// libvirt state distinct from stopped.
 func TestBuildViewKeepsUnknownLibvirtStateDistinctFromStopped(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(),
@@ -225,6 +239,7 @@ func TestBuildViewKeepsUnknownLibvirtStateDistinctFromStopped(t *testing.T) {
 	}
 }
 
+// TestWriteFramePrivacySafeProjection verifies write frame privacy safe projection.
 func TestWriteFramePrivacySafeProjection(t *testing.T) {
 	report := attributedReport()
 	report.VMs[0].CgroupPath = "/machine.slice/private.scope"
@@ -251,6 +266,8 @@ func TestWriteFramePrivacySafeProjection(t *testing.T) {
 	}
 }
 
+// TestWriteFrameNeutralizesTerminalControlCharacters verifies write frame neutralizes terminal
+// control characters.
 func TestWriteFrameNeutralizesTerminalControlCharacters(t *testing.T) {
 	report := statusReport()
 	report.VMs[0].Name = "a-\x1b[31mweb"
@@ -270,6 +287,8 @@ func TestWriteFrameNeutralizesTerminalControlCharacters(t *testing.T) {
 	}
 }
 
+// TestInteractiveDetailPanelShowsSelectedVMDetailsAndLossCounters verifies interactive detail panel
+// shows selected vm details and loss counters.
 func TestInteractiveDetailPanelShowsSelectedVMDetailsAndLossCounters(t *testing.T) {
 	report := attributedReport()
 	source := delayedSource{delay: 10 * time.Millisecond, snapshot: Snapshot{
@@ -299,6 +318,8 @@ func TestInteractiveDetailPanelShowsSelectedVMDetailsAndLossCounters(t *testing.
 	}
 }
 
+// TestApplicationHomePanelKeepsPersistentBranding verifies application home panel keeps persistent
+// branding.
 func TestApplicationHomePanelKeepsPersistentBranding(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
@@ -332,6 +353,8 @@ func TestApplicationHomePanelKeepsPersistentBranding(t *testing.T) {
 	}
 }
 
+// TestApplicationKeepsFullWordmarkOnWideShortTerminal verifies application keeps full wordmark on
+// wide short terminal.
 func TestApplicationKeepsFullWordmarkOnWideShortTerminal(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
@@ -354,6 +377,8 @@ func TestApplicationKeepsFullWordmarkOnWideShortTerminal(t *testing.T) {
 	}
 }
 
+// TestApplicationHeaderShowsBoundedSolisProcessResources verifies application header shows bounded
+// solis process resources.
 func TestApplicationHeaderShowsBoundedSolisProcessResources(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
@@ -391,6 +416,8 @@ func TestApplicationHeaderShowsBoundedSolisProcessResources(t *testing.T) {
 	}
 }
 
+// TestParseSelfDiskIOUsesOnlyAggregateByteCounters verifies parse self disk io uses only aggregate
+// byte counters.
 func TestParseSelfDiskIOUsesOnlyAggregateByteCounters(t *testing.T) {
 	readBytes, writeBytes, ok := parseSelfDiskIO("rchar: 99\nwchar: 101\nread_bytes: 4096\nwrite_bytes: 8192\ncancelled_write_bytes: 0\n")
 	if !ok || readBytes != 4096 || writeBytes != 8192 {
@@ -401,6 +428,8 @@ func TestParseSelfDiskIOUsesOnlyAggregateByteCounters(t *testing.T) {
 	}
 }
 
+// TestProcessResourceMeterReadsCurrentSolisAggregates verifies process resource meter reads current
+// solis aggregates.
 func TestProcessResourceMeterReadsCurrentSolisAggregates(t *testing.T) {
 	now := time.Now()
 	meter := newProcessResourceMeter(now.Add(-time.Second))
@@ -419,6 +448,8 @@ func TestProcessResourceMeterReadsCurrentSolisAggregates(t *testing.T) {
 	}
 }
 
+// TestApplicationCommandCenterExposesFixedProductWorkflows verifies application command center
+// exposes fixed product workflows.
 func TestApplicationCommandCenterExposesFixedProductWorkflows(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(), Inventory: []InventoryVM{{Name: "a-web", State: "running"}},
@@ -452,6 +483,8 @@ func TestApplicationCommandCenterExposesFixedProductWorkflows(t *testing.T) {
 	}
 }
 
+// TestApplicationUsesCompactLayoutAfterNarrowTerminalResize verifies application uses compact
+// layout after narrow terminal resize.
 func TestApplicationUsesCompactLayoutAfterNarrowTerminalResize(t *testing.T) {
 	report := attributedReport()
 	view, err := BuildView(Snapshot{
@@ -494,6 +527,8 @@ func TestApplicationUsesCompactLayoutAfterNarrowTerminalResize(t *testing.T) {
 	}
 }
 
+// TestApplicationRunsWorkflowInsideConsoleAndResumesCollection verifies application runs workflow
+// inside console and resumes collection.
 func TestApplicationRunsWorkflowInsideConsoleAndResumesCollection(t *testing.T) {
 	source := &resumableCleanupSource{firstCleaned: make(chan struct{}), resumed: make(chan struct{})}
 	input, inputWriter := io.Pipe()
@@ -552,6 +587,8 @@ func TestApplicationRunsWorkflowInsideConsoleAndResumesCollection(t *testing.T) 
 	}
 }
 
+// TestWorkflowOutputPanelNeutralizesControlsAndKeepsApplicationActive verifies workflow output
+// panel neutralizes controls and keeps application active.
 func TestWorkflowOutputPanelNeutralizesControlsAndKeepsApplicationActive(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteFrame(&output, View{Duration: "5s", Interval: "1s"}, Frame{
@@ -574,6 +611,8 @@ func TestWorkflowOutputPanelNeutralizesControlsAndKeepsApplicationActive(t *test
 	}
 }
 
+// TestWorkflowOutputPanelAlwaysShowsScrollPositionAndKeys verifies workflow output panel always
+// shows scroll position and keys.
 func TestWorkflowOutputPanelAlwaysShowsScrollPositionAndKeys(t *testing.T) {
 	var output bytes.Buffer
 	workflowOutput := strings.Join([]string{
@@ -601,6 +640,8 @@ func TestWorkflowOutputPanelAlwaysShowsScrollPositionAndKeys(t *testing.T) {
 	}
 }
 
+// TestObserveSummaryOffersExplicitPrivateDetailSave verifies observe summary offers explicit
+// private detail save.
 func TestObserveSummaryOffersExplicitPrivateDetailSave(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteFrame(&output, View{Duration: "5s", Interval: "1s"}, Frame{
@@ -627,6 +668,7 @@ func TestObserveSummaryOffersExplicitPrivateDetailSave(t *testing.T) {
 	}
 }
 
+// TestObserveSummaryReportsSavedDetailPath verifies observe summary reports saved detail path.
 func TestObserveSummaryReportsSavedDetailPath(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteFrame(&output, View{Duration: "5s", Interval: "1s"}, Frame{
@@ -645,6 +687,7 @@ func TestObserveSummaryReportsSavedDetailPath(t *testing.T) {
 	}
 }
 
+// TestTerminalColorThemeIsSemanticAndOptIn verifies terminal color theme is semantic and opt in.
 func TestTerminalColorThemeIsSemanticAndOptIn(t *testing.T) {
 	plain := "╭─ LIVE EVIDENCE ─╮\n│ VM attribution: AVAILABLE  pressure: HIGH │\n│ ▶ b-stress RUNNING │\n"
 	styled := colorizeApplicationFrame(plain)
@@ -656,6 +699,8 @@ func TestTerminalColorThemeIsSemanticAndOptIn(t *testing.T) {
 	}
 }
 
+// TestApplicationInvestigatesAnySelectedVMWithHistoryAndPeers verifies application investigates any
+// selected vm with history and peers.
 func TestApplicationInvestigatesAnySelectedVMWithHistoryAndPeers(t *testing.T) {
 	report := attributedReport()
 	view, err := BuildView(Snapshot{
@@ -696,6 +741,7 @@ func TestApplicationInvestigatesAnySelectedVMWithHistoryAndPeers(t *testing.T) {
 	}
 }
 
+// TestVMInvestigationHistoryIsBoundedPerVM verifies vm investigation history is bounded per vm.
 func TestVMInvestigationHistoryIsBoundedPerVM(t *testing.T) {
 	var tracker vmHistoryTracker
 	started := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
@@ -717,6 +763,8 @@ func TestVMInvestigationHistoryIsBoundedPerVM(t *testing.T) {
 	}
 }
 
+// TestApplicationUIRefreshesWhileBoundedCollectionRuns verifies application ui refreshes while
+// bounded collection runs.
 func TestApplicationUIRefreshesWhileBoundedCollectionRuns(t *testing.T) {
 	now := time.Now().UTC()
 	source := delayedSource{
@@ -745,6 +793,8 @@ func TestApplicationUIRefreshesWhileBoundedCollectionRuns(t *testing.T) {
 	}
 }
 
+// TestApplicationScreenUsesAlternateBufferAndRestoresCursor verifies application screen uses
+// alternate buffer and restores cursor.
 func TestApplicationScreenUsesAlternateBufferAndRestoresCursor(t *testing.T) {
 	var output bytes.Buffer
 	restore, err := EnterApplicationScreen(&output)
@@ -759,6 +809,8 @@ func TestApplicationScreenUsesAlternateBufferAndRestoresCursor(t *testing.T) {
 	}
 }
 
+// TestSamplingStatusShowsProgressAndReadyCountdown verifies sampling status shows progress and
+// ready countdown.
 func TestSamplingStatusShowsProgressAndReadyCountdown(t *testing.T) {
 	started := time.Date(2026, 8, 13, 22, 0, 0, 0, time.UTC)
 	progress := samplingStatus(Frame{
@@ -773,6 +825,8 @@ func TestSamplingStatusShowsProgressAndReadyCountdown(t *testing.T) {
 	}
 }
 
+// TestApplicationRendersEachFrameWithOneBufferedWrite verifies application renders each frame with
+// one buffered write.
 func TestApplicationRendersEachFrameWithOneBufferedWrite(t *testing.T) {
 	source := &fakeSource{snapshot: Snapshot{
 		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
@@ -801,6 +855,7 @@ func TestApplicationRendersEachFrameWithOneBufferedWrite(t *testing.T) {
 	}
 }
 
+// TestKeyActionsAndSelection verifies key actions and selection.
 func TestKeyActionsAndSelection(t *testing.T) {
 	actions := readKeyActions(strings.NewReader("j\x1b[Akpnworl?\t\nbs\x1b[C\x1b[D1234"))
 	var got []keyAction
@@ -861,6 +916,8 @@ func TestKeyActionsAndSelection(t *testing.T) {
 	}
 }
 
+// TestDerivedEventsTrackBoundedSafeStateChanges verifies derived events track bounded safe state
+// changes.
 func TestDerivedEventsTrackBoundedSafeStateChanges(t *testing.T) {
 	report := attributedReport()
 	initial, err := BuildView(Snapshot{
@@ -909,6 +966,8 @@ func TestDerivedEventsTrackBoundedSafeStateChanges(t *testing.T) {
 	}
 }
 
+// TestDerivedEventsDistinguishVMRuntimeStateFromPressure verifies derived events distinguish vm
+// runtime state from pressure.
 func TestDerivedEventsDistinguishVMRuntimeStateFromPressure(t *testing.T) {
 	initial := View{ObservedAtUTC: time.Now(), Rows: []VMRow{{Name: "a-web", State: "running", Running: true, Pressure: "idle"}}}
 	next := View{ObservedAtUTC: initial.ObservedAtUTC.Add(time.Second), Rows: []VMRow{{Name: "a-web", State: "shut off", Running: false, Pressure: "not_running"}}}
@@ -923,6 +982,8 @@ func TestDerivedEventsDistinguishVMRuntimeStateFromPressure(t *testing.T) {
 	}
 }
 
+// TestEventPanelRendersOnlyBoundedDerivedEvents verifies event panel renders only bounded derived
+// events.
 func TestEventPanelRendersOnlyBoundedDerivedEvents(t *testing.T) {
 	view, err := BuildView(Snapshot{
 		ObservedAtUTC: time.Now(), StatusAvailable: true, Status: statusReport(),
@@ -948,6 +1009,7 @@ func TestEventPanelRendersOnlyBoundedDerivedEvents(t *testing.T) {
 	}
 }
 
+// renderedEvents renders ed events for presentation.
 func renderedEvents(t *testing.T, events []MonitorEvent) string {
 	t.Helper()
 	var output bytes.Buffer
@@ -957,6 +1019,8 @@ func renderedEvents(t *testing.T, events []MonitorEvent) string {
 	return output.String()
 }
 
+// TestInteractiveQuitWaitsForCollectionCleanup verifies interactive quit waits for collection
+// cleanup.
 func TestInteractiveQuitWaitsForCollectionCleanup(t *testing.T) {
 	source := &cleanupSource{started: make(chan struct{}), cleaned: make(chan struct{})}
 	reader, writer := io.Pipe()
@@ -979,6 +1043,8 @@ func TestInteractiveQuitWaitsForCollectionCleanup(t *testing.T) {
 	}
 }
 
+// TestRunUsesBoundedRefreshesWithoutClearSequences verifies run uses bounded refreshes without
+// clear sequences.
 func TestRunUsesBoundedRefreshesWithoutClearSequences(t *testing.T) {
 	source := &fakeSource{snapshot: Snapshot{
 		ObservedAtUTC:   time.Now(),
@@ -1001,6 +1067,8 @@ func TestRunUsesBoundedRefreshesWithoutClearSequences(t *testing.T) {
 	}
 }
 
+// TestRunTreatsContextCancellationAsCleanStop verifies run treats context cancellation as clean
+// stop.
 func TestRunTreatsContextCancellationAsCleanStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1025,11 +1093,13 @@ type countingWriter struct {
 	writes int
 }
 
+// Write writes the value to its configured destination and propagates write failures.
 func (writer *countingWriter) Write(data []byte) (int, error) {
 	writer.writes++
 	return writer.Buffer.Write(data)
 }
 
+// WriteString renders string in the package's stable operator-facing format.
 func (writer *countingWriter) WriteString(data string) (int, error) {
 	writer.writes++
 	return writer.Buffer.WriteString(data)
@@ -1040,6 +1110,7 @@ type delayedSource struct {
 	snapshot Snapshot
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (source delayedSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, error) {
 	timer := time.NewTimer(source.delay)
 	defer timer.Stop()
@@ -1051,6 +1122,7 @@ func (source delayedSource) Collect(ctx context.Context, _ CollectRequest) (Snap
 	}
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (source *fakeSource) Collect(_ context.Context, _ CollectRequest) (Snapshot, error) {
 	source.calls++
 	return source.snapshot, nil
@@ -1058,6 +1130,7 @@ func (source *fakeSource) Collect(_ context.Context, _ CollectRequest) (Snapshot
 
 type cancelSource struct{}
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (cancelSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, error) {
 	<-ctx.Done()
 	return Snapshot{}, errors.New("wrapped: " + ctx.Err().Error())
@@ -1068,6 +1141,7 @@ type cleanupSource struct {
 	cleaned chan struct{}
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (source *cleanupSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, error) {
 	close(source.started)
 	<-ctx.Done()
@@ -1081,6 +1155,7 @@ type resumableCleanupSource struct {
 	resumed      chan struct{}
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func (source *resumableCleanupSource) Collect(ctx context.Context, _ CollectRequest) (Snapshot, error) {
 	source.calls++
 	call := source.calls
@@ -1100,22 +1175,26 @@ type workflowSignalWriter struct {
 	once     sync.Once
 }
 
+// Write writes the value to its configured destination and propagates write failures.
 func (writer *workflowSignalWriter) Write(value []byte) (int, error) {
 	writer.signalComplete(string(value))
 	return writer.Buffer.Write(value)
 }
 
+// WriteString renders string in the package's stable operator-facing format.
 func (writer *workflowSignalWriter) WriteString(value string) (int, error) {
 	writer.signalComplete(value)
 	return writer.Buffer.WriteString(value)
 }
 
+// signalComplete performs signal complete as part of the package workflow.
 func (writer *workflowSignalWriter) signalComplete(value string) {
 	if strings.Contains(value, "WORKFLOW OUTPUT  •  DOCTOR  •  COMPLETE") {
 		writer.once.Do(func() { close(writer.complete) })
 	}
 }
 
+// statusReport builds status report from validated inputs.
 func statusReport() statusview.Report {
 	return statusview.Report{
 		SchemaVersion: statusview.SchemaVersion,
@@ -1128,6 +1207,7 @@ func statusReport() statusview.Report {
 	}
 }
 
+// attributedReport builds attributed report from validated inputs.
 func attributedReport() ebpf.VMBlockLatencyReport {
 	return ebpf.VMBlockLatencyReport{
 		Availability:       ebpf.VMBlockLatencyAvailability{Available: true, Status: "available"},
@@ -1157,6 +1237,7 @@ func attributedReport() ebpf.VMBlockLatencyReport {
 	}
 }
 
+// hostReport builds host report from validated inputs.
 func hostReport() *hostmetrics.HostStatus {
 	available := observability.Availability{Available: true, Quality: "measured"}
 	return &hostmetrics.HostStatus{

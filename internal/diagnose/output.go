@@ -107,6 +107,8 @@ func Write(dst io.Writer, report Report) error {
 	return w.Flush()
 }
 
+// writeEBPFVMAttribution renders eBPF VM attribution in the package's stable operator-facing
+// format.
 func writeEBPFVMAttribution(dst io.Writer, report Report) {
 	evidence := report.EBPFVMAttribution
 	assessment := AssessEBPFVMAttribution(report)
@@ -137,6 +139,7 @@ func writeEBPFVMAttribution(dst io.Writer, report Report) {
 	fmt.Fprintln(dst, "Privacy:\tno guest payloads, guest files, process arguments, environments, SQL text, table data, request bodies, response bodies, or secrets were collected")
 }
 
+// ebpfVMTargetType derives stable operator-facing text for eBPF VM target type.
 func ebpfVMTargetType(report Report, name string) string {
 	var roles []string
 	for _, target := range report.Storage.Targets {
@@ -156,6 +159,7 @@ func ebpfVMTargetType(report Report, name string) string {
 	return strings.Join(roles, ",")
 }
 
+// writeStorageTarget renders storage target in the package's stable operator-facing format.
 func writeStorageTarget(dst io.Writer, target storage.VMTarget) {
 	fmt.Fprintf(
 		dst,
@@ -172,6 +176,7 @@ func writeStorageTarget(dst io.Writer, target storage.VMTarget) {
 	)
 }
 
+// writeQEMUErrors renders QEMU errors in the package's stable operator-facing format.
 func writeQEMUErrors(dst io.Writer, report Report) {
 	var wroteHeader bool
 	for _, vm := range report.QEMU.VMs {
@@ -186,6 +191,7 @@ func writeQEMUErrors(dst io.Writer, report Report) {
 	}
 }
 
+// sharedDiskText formats shared-disk evidence as yes, no, or unavailable.
 func sharedDiskText(available, shared bool) string {
 	if !available {
 		return "-"
@@ -196,6 +202,7 @@ func sharedDiskText(available, shared bool) string {
 	return "no"
 }
 
+// qemuValue formats a QEMU measurement only when its source was available.
 func qemuValue(value float64, available bool) string {
 	if !available {
 		return "-"
@@ -203,6 +210,7 @@ func qemuValue(value float64, available bool) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+// yesNo formats a boolean as yes or no for human-readable reports.
 func yesNo(value bool) string {
 	if value {
 		return "yes"
@@ -210,6 +218,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
+// valueOrDash trims a value and substitutes a dash when no value is available.
 func valueOrDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

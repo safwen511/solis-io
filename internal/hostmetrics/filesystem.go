@@ -6,6 +6,8 @@ import (
 	"syscall"
 )
 
+// filesystemStatusFromStatfs builds filesystem status from statfs and returns an error when
+// validation or source access fails.
 func filesystemStatusFromStatfs(mountpoint string, stat syscall.Statfs_t) (FilesystemStatus, error) {
 	blockSize := uint64(stat.Bsize)
 	total, overflow := multiplyUint64(stat.Blocks, blockSize)
@@ -35,6 +37,7 @@ func filesystemStatusFromStatfs(mountpoint string, stat syscall.Statfs_t) (Files
 	}, nil
 }
 
+// multiplyUint64 builds multiply uint64 from validated inputs.
 func multiplyUint64(left, right uint64) (uint64, bool) {
 	if left != 0 && right > math.MaxUint64/left {
 		return 0, true

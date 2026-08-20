@@ -59,10 +59,12 @@ var applicationWorkflows = []applicationWorkflow{
 	{ID: WorkflowVersion, Label: "Version and build", Description: "show version, commit, build time, Go version, and platform"},
 }
 
+// workflowCount returns the number of fixed workflows exposed by the command center.
 func workflowCount() int {
 	return len(applicationWorkflows)
 }
 
+// normalizedWorkflowIndex wraps keyboard navigation around the fixed workflow list.
 func normalizedWorkflowIndex(index int) int {
 	if len(applicationWorkflows) == 0 {
 		return 0
@@ -74,6 +76,7 @@ func normalizedWorkflowIndex(index int) int {
 	return index
 }
 
+// selectedWorkflowRequest creates a launch request only when the selected workflow's VM requirement is met.
 func selectedWorkflowRequest(index int, selectedVM string) (LaunchRequest, bool) {
 	if len(applicationWorkflows) == 0 {
 		return LaunchRequest{}, false

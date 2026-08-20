@@ -53,6 +53,7 @@ func Resolve(vms []inventory.VM, victimName string) (Targets, error) {
 	return resolveWith(vms, victimName, hoststorage.Resolve)
 }
 
+// resolveWith resolves with from the available inputs.
 func resolveWith(vms []inventory.VM, victimName string, resolve mappingResolver) (Targets, error) {
 	victim, ok := inventory.FindByName(vms, victimName)
 	if !ok {
@@ -168,6 +169,7 @@ func Analyze(targets Targets, sampled qemuio.SummaryReport) Report {
 	return report
 }
 
+// selectCandidate selects candidate using deterministic ordering.
 func selectCandidate(victim qemuio.VMSummary, candidates []Candidate, configured ...config.Thresholds) (string, string) {
 	thresholds := config.DefaultThresholds()
 	if len(configured) > 0 {
@@ -204,6 +206,7 @@ func selectCandidate(victim qemuio.VMSummary, candidates []Candidate, configured
 
 type candidateMetric func(qemuio.VMSummary) (average, maximum float64, eligible bool)
 
+// rankedCandidates builds ranked candidates from validated inputs.
 func rankedCandidates(candidates []Candidate, metric candidateMetric) []Candidate {
 	var ranked []Candidate
 	for _, candidate := range candidates {
@@ -226,6 +229,7 @@ func rankedCandidates(candidates []Candidate, metric candidateMetric) []Candidat
 	return ranked
 }
 
+// competingRate builds competing rate from validated inputs.
 func competingRate(victim qemuio.VMSummary, candidates []Candidate, selectedName string, rate func(qemuio.VMSummary) float64) float64 {
 	comparison := float64(0)
 	if victim.Available {
@@ -242,6 +246,7 @@ func competingRate(victim qemuio.VMSummary, candidates []Candidate, selectedName
 	return comparison
 }
 
+// candidateIdleReason reports whether the current state permits candidate idle reason.
 func candidateIdleReason(summary qemuio.VMSummary) string {
 	if !summary.Available {
 		if reason := strings.TrimSpace(summary.Error); reason != "" {
@@ -252,6 +257,7 @@ func candidateIdleReason(summary qemuio.VMSummary) string {
 	return "idle"
 }
 
+// scoreRank builds score rank from validated inputs.
 func scoreRank(score string) int {
 	switch score {
 	case "HIGH":
@@ -263,15 +269,18 @@ func scoreRank(score string) int {
 	}
 }
 
+// isRunning reports whether running.
 func isRunning(vm inventory.VM) bool {
 	return strings.EqualFold(strings.TrimSpace(vm.State), "running")
 }
 
+// hasQEMUPID reports whether the value has qemupid.
 func hasQEMUPID(vm inventory.VM) bool {
 	pid := strings.TrimSpace(vm.QEMUPID)
 	return pid != "" && pid != "-"
 }
 
+// sharesPhysicalDisk reports whether shares physical disk.
 func sharesPhysicalDisk(left, right string) bool {
 	leftDevices := deviceSet(left)
 	for device := range deviceSet(right) {
@@ -282,6 +291,7 @@ func sharesPhysicalDisk(left, right string) bool {
 	return false
 }
 
+// deviceSet builds device set from validated inputs.
 func deviceSet(value string) map[string]bool {
 	devices := make(map[string]bool)
 	for _, device := range strings.Split(value, ",") {

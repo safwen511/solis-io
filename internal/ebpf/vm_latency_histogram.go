@@ -49,6 +49,7 @@ type boundedVMBlockLatencyHistogram struct {
 	buckets [len(vmBlockLatencyBucketUpperNS)]uint64
 }
 
+// observe performs observe as part of the package workflow.
 func (histogram *boundedVMBlockLatencyHistogram) observe(latencyNS uint64) {
 	if histogram.count == 0 || latencyNS < histogram.minNS {
 		histogram.minNS = latencyNS
@@ -70,6 +71,7 @@ func (histogram *boundedVMBlockLatencyHistogram) observe(latencyNS uint64) {
 	}
 }
 
+// mergeKernel merges kernel while preserving explicit availability.
 func (histogram *boundedVMBlockLatencyHistogram) mergeKernel(value VMBlockKernelLatency) {
 	if value.Count == 0 {
 		return
@@ -87,6 +89,7 @@ func (histogram *boundedVMBlockLatencyHistogram) mergeKernel(value VMBlockKernel
 	}
 }
 
+// summary converts exact counters and fixed buckets into the public latency summary.
 func (histogram boundedVMBlockLatencyHistogram) summary() (minimum, average, p50, p95, p99, maximum float64) {
 	if histogram.count == 0 {
 		return 0, 0, 0, 0, 0, 0
@@ -99,6 +102,7 @@ func (histogram boundedVMBlockLatencyHistogram) summary() (minimum, average, p50
 		nsToMS(histogram.maxNS)
 }
 
+// percentile returns the upper bound of the first bucket reaching the requested rank.
 func (histogram boundedVMBlockLatencyHistogram) percentile(value float64) float64 {
 	if histogram.count == 0 {
 		return 0
@@ -121,6 +125,7 @@ func (histogram boundedVMBlockLatencyHistogram) percentile(value float64) float6
 	return nsToMS(histogram.maxNS)
 }
 
+// publicBuckets exposes counts and percentages without leaking map keys or kernel identities.
 func (histogram boundedVMBlockLatencyHistogram) publicBuckets() []VMBlockLatencyHistogramBucket {
 	buckets := make([]VMBlockLatencyHistogramBucket, len(vmBlockLatencyBucketLabels))
 	for index, label := range vmBlockLatencyBucketLabels {
@@ -135,10 +140,12 @@ func (histogram boundedVMBlockLatencyHistogram) publicBuckets() []VMBlockLatency
 	return buckets
 }
 
+// nsToMS converts nanoseconds to milliseconds for the public schema.
 func nsToMS(value uint64) float64 {
 	return float64(value) / float64(time.Millisecond)
 }
 
+// operationSummary projects one classified operation's bounded latency aggregate.
 func operationSummary(device, operation string, histogram boundedVMBlockLatencyHistogram) VMBlockLatencyDeviceOperation {
 	minimum, average, p50, p95, p99, maximum := histogram.summary()
 	return VMBlockLatencyDeviceOperation{

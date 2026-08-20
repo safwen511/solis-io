@@ -26,6 +26,7 @@ import (
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
+// TestCaptureDirectoryName verifies capture directory name.
 func TestCaptureDirectoryName(t *testing.T) {
 	now := time.Date(2026, 8, 8, 23, 15, 0, 0, time.FixedZone("UTC+2", 2*60*60))
 	want := "capture-20260808T211500Z-tenant-a-b-stress"
@@ -34,6 +35,7 @@ func TestCaptureDirectoryName(t *testing.T) {
 	}
 }
 
+// TestCaptureDirectoryNameSanitizesSelectors verifies capture directory name sanitizes selectors.
 func TestCaptureDirectoryNameSanitizesSelectors(t *testing.T) {
 	now := time.Date(2026, 8, 8, 21, 15, 0, 0, time.UTC)
 	want := "capture-20260808T211500Z-tenant_a-b_stress_"
@@ -42,6 +44,7 @@ func TestCaptureDirectoryNameSanitizesSelectors(t *testing.T) {
 	}
 }
 
+// TestWriteMetadata verifies write metadata.
 func TestWriteMetadata(t *testing.T) {
 	inputs := Inputs{
 		ReportDirectory: "lab/reports/workload/example",
@@ -92,6 +95,8 @@ func TestWriteMetadata(t *testing.T) {
 	}
 }
 
+// TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport verifies pairwise capture
+// preserves existing files and adds incident report.
 func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = false
@@ -123,6 +128,7 @@ func TestPairwiseCapturePreservesExistingFilesAndAddsIncidentReport(t *testing.T
 	}
 }
 
+// TestCaptureBundlePermissionsAndManifest verifies capture bundle permissions and manifest.
 func TestCaptureBundlePermissionsAndManifest(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = false
@@ -207,6 +213,8 @@ func TestCaptureBundlePermissionsAndManifest(t *testing.T) {
 	}
 }
 
+// TestCaptureFinalDirectoryIsInvisibleUntilFinalized verifies capture final directory is invisible
+// until finalized.
 func TestCaptureFinalDirectoryIsInvisibleUntilFinalized(t *testing.T) {
 	parent := t.TempDir()
 	finalDirectory := filepath.Join(parent, "capture-atomic-test")
@@ -251,6 +259,8 @@ func TestCaptureFinalDirectoryIsInvisibleUntilFinalized(t *testing.T) {
 	}
 }
 
+// TestFailedCaptureDoesNotLeaveFinalOrTemporaryDirectory verifies failed capture does not leave
+// final or temporary directory.
 func TestFailedCaptureDoesNotLeaveFinalOrTemporaryDirectory(t *testing.T) {
 	parent := t.TempDir()
 	finalDirectory := filepath.Join(parent, "capture-failure-test")
@@ -280,6 +290,8 @@ func TestFailedCaptureDoesNotLeaveFinalOrTemporaryDirectory(t *testing.T) {
 	}
 }
 
+// TestCaptureWritesObserveSnapshotAndReferencesIt verifies capture writes observe snapshot and
+// references it.
 func TestCaptureWritesObserveSnapshotAndReferencesIt(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = false
@@ -316,6 +328,8 @@ func TestCaptureWritesObserveSnapshotAndReferencesIt(t *testing.T) {
 	}
 }
 
+// TestCaptureContinuesWithUnavailableObserveSnapshot verifies capture continues with unavailable
+// observe snapshot.
 func TestCaptureContinuesWithUnavailableObserveSnapshot(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = false
@@ -341,6 +355,8 @@ func TestCaptureContinuesWithUnavailableObserveSnapshot(t *testing.T) {
 	}
 }
 
+// TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata verifies discovery capture writes
+// discovery and selected suspect metadata.
 func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.CaptureMode = "discover-suspects"
@@ -407,6 +423,8 @@ func TestDiscoveryCaptureWritesDiscoveryAndSelectedSuspectMetadata(t *testing.T)
 	}
 }
 
+// TestDiscoveryCaptureSucceedsWithoutSelectedSuspect verifies discovery capture succeeds without
+// selected suspect.
 func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.CaptureMode = "discover-suspects"
@@ -468,6 +486,8 @@ func TestDiscoveryCaptureSucceedsWithoutSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestEvidenceSummaryJSONReportBackedSelectedSuspect verifies evidence summary json report backed
+// selected suspect.
 func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.IncludeEBPFLatency = true
@@ -569,6 +589,8 @@ func TestEvidenceSummaryJSONReportBackedSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect verifies evidence summary json live only
+// without selected suspect.
 func TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.ReportDirectory = ""
@@ -630,6 +652,8 @@ func TestEvidenceSummaryJSONLiveOnlyWithoutSelectedSuspect(t *testing.T) {
 	}
 }
 
+// TestDiscoveryCaptureHandlesEBPFUnavailableAsWarning verifies discovery capture handles ebpf
+// unavailable as warning.
 func TestDiscoveryCaptureHandlesEBPFUnavailableAsWarning(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.CaptureMode = "discover-suspects"
@@ -663,6 +687,8 @@ func TestDiscoveryCaptureHandlesEBPFUnavailableAsWarning(t *testing.T) {
 	}
 }
 
+// TestDiscoveryCaptureWithoutSelectionRecordsVMWareEBPFWarning verifies discovery capture without
+// selection records vm ware ebpf warning.
 func TestDiscoveryCaptureWithoutSelectionRecordsVMWareEBPFWarning(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.CaptureMode = "discover-suspects"
@@ -696,6 +722,7 @@ func TestDiscoveryCaptureWithoutSelectionRecordsVMWareEBPFWarning(t *testing.T) 
 	}
 }
 
+// TestWriteCreatesEBPFBlockLatencyArtifact verifies write creates ebpf block latency artifact.
 func TestWriteCreatesEBPFBlockLatencyArtifact(t *testing.T) {
 	latency := ebpf.BlockLatencyEvidence{Result: ebpf.BlockLatencyResult{
 		Duration:          time.Second,
@@ -740,6 +767,8 @@ func TestWriteCreatesEBPFBlockLatencyArtifact(t *testing.T) {
 	}
 }
 
+// TestWriteContinuesWhenEBPFLatencyUnavailable verifies write continues when ebpf latency
+// unavailable.
 func TestWriteContinuesWhenEBPFLatencyUnavailable(t *testing.T) {
 	latency := ebpf.BlockLatencyEvidence{UnavailableReason: "tracepoint block:block_rq_issue not found"}
 	result, err := Write(
@@ -767,6 +796,7 @@ func TestWriteContinuesWhenEBPFLatencyUnavailable(t *testing.T) {
 	}
 }
 
+// TestCaptureWritesVMAttributedEBPFEvidence verifies capture writes vm attributed ebpf evidence.
 func TestCaptureWritesVMAttributedEBPFEvidence(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	vmReport := ebpf.VMBlockLatencyReport{
@@ -922,6 +952,8 @@ func TestCaptureWritesVMAttributedEBPFEvidence(t *testing.T) {
 	}
 }
 
+// TestVMAttributedEBPFUnavailableRemainsHonest verifies vm attributed ebpf unavailable remains
+// honest.
 func TestVMAttributedEBPFUnavailableRemainsHonest(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	report := ebpf.VMBlockLatencyReport{
@@ -950,6 +982,8 @@ func TestVMAttributedEBPFUnavailableRemainsHonest(t *testing.T) {
 	}
 }
 
+// TestWriteLiveOnlyCaptureUsesExplicitUnavailableEvidence verifies write live only capture uses
+// explicit unavailable evidence.
 func TestWriteLiveOnlyCaptureUsesExplicitUnavailableEvidence(t *testing.T) {
 	inputs := testCaptureInputs(t.TempDir())
 	inputs.ReportDirectory = ""
@@ -1003,6 +1037,7 @@ func TestWriteLiveOnlyCaptureUsesExplicitUnavailableEvidence(t *testing.T) {
 	}
 }
 
+// testCaptureInputs builds test capture inputs from validated inputs.
 func testCaptureInputs(outputDirectory string) Inputs {
 	return Inputs{
 		OutputDirectory:    outputDirectory,
@@ -1017,6 +1052,7 @@ func testCaptureInputs(outputDirectory string) Inputs {
 	}
 }
 
+// testCaptureEvidence builds test capture evidence from validated inputs.
 func testCaptureEvidence(latency *ebpf.BlockLatencyEvidence) Evidence {
 	experimentReport := experiment.Report{
 		Directory:   "report",
@@ -1035,6 +1071,7 @@ func testCaptureEvidence(latency *ebpf.BlockLatencyEvidence) Evidence {
 	}
 }
 
+// selectedDiscoveryReport selects discovery report using deterministic ordering.
 func selectedDiscoveryReport() discovery.Report {
 	report := discovery.Report{
 		Victim:        inventory.VM{Name: "a-web"},

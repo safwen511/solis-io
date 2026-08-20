@@ -26,6 +26,7 @@ type vmBlockDiagnosticConfig struct {
 	GetMemlock                  func() (string, error)
 }
 
+// defaultVMBlockDiagnosticConfig returns the default vm block diagnostic config.
 func defaultVMBlockDiagnosticConfig() vmBlockDiagnosticConfig {
 	return vmBlockDiagnosticConfig{
 		SelfStatusPath:              defaultSelfStatusPath,
@@ -37,6 +38,8 @@ func defaultVMBlockDiagnosticConfig() vmBlockDiagnosticConfig {
 	}
 }
 
+// collectVMBlockRuntimeDiagnostics collects vm block runtime diagnostics from the configured
+// evidence sources.
 func collectVMBlockRuntimeDiagnostics(config vmBlockDiagnosticConfig, stage string, err error) VMBlockRuntimeDiagnostics {
 	euid := -1
 	if config.GetEUID != nil {
@@ -63,6 +66,7 @@ func collectVMBlockRuntimeDiagnostics(config vmBlockDiagnosticConfig, stage stri
 	return diagnostics
 }
 
+// applyVMBlockMapLayoutDiagnostics applies vm block map layout diagnostics to the current model.
 func applyVMBlockMapLayoutDiagnostics(diagnostics *VMBlockRuntimeDiagnostics, err error) {
 	if diagnostics == nil || err == nil {
 		return
@@ -82,6 +86,7 @@ func applyVMBlockMapLayoutDiagnostics(diagnostics *VMBlockRuntimeDiagnostics, er
 	diagnostics.GoKeySize = layoutError.GoSize
 }
 
+// boundedError trims and bounds an error message before it reaches public diagnostics.
 func boundedError(err error) string {
 	if err == nil {
 		return ""
@@ -89,6 +94,7 @@ func boundedError(err error) string {
 	return boundVMBlockDiagnostic(err.Error(), maxVMBlockVerifierLogBytes)
 }
 
+// readDiagnosticValue reads diagnostic value from its configured source.
 func readDiagnosticValue(path string, parse func(string) string) string {
 	if strings.TrimSpace(path) == "" {
 		return "-"
@@ -101,6 +107,7 @@ func readDiagnosticValue(path string, parse func(string) string) string {
 	return firstNonEmpty(strings.TrimSpace(value), "-")
 }
 
+// parseLockdownMode parses and validates lockdown mode.
 func parseLockdownMode(value string) string {
 	for _, field := range strings.Fields(value) {
 		if strings.HasPrefix(field, "[") && strings.HasSuffix(field, "]") {
@@ -110,6 +117,7 @@ func parseLockdownMode(value string) string {
 	return strings.TrimSpace(value)
 }
 
+// readCapabilitySummary reads capability summary from its configured source.
 func readCapabilitySummary(path string) VMBlockCapabilitySummary {
 	result := VMBlockCapabilitySummary{CapEff: "-"}
 	data, err := os.ReadFile(path)
@@ -143,10 +151,13 @@ func readCapabilitySummary(path string) VMBlockCapabilitySummary {
 	return result
 }
 
+// capabilitySet reports whether capability set.
 func capabilitySet(mask uint64, bit uint) bool {
 	return bit < 64 && mask&(uint64(1)<<bit) != 0
 }
 
+// currentMemlockLimit builds current memlock limit and returns an error when validation or source
+// access fails.
 func currentMemlockLimit() (string, error) {
 	var limit unix.Rlimit
 	if err := unix.Getrlimit(unix.RLIMIT_MEMLOCK, &limit); err != nil {
@@ -155,6 +166,7 @@ func currentMemlockLimit() (string, error) {
 	return fmt.Sprintf("soft=%s hard=%s", formatRlimit(limit.Cur), formatRlimit(limit.Max)), nil
 }
 
+// formatRlimit formats rlimit using the stable output contract.
 func formatRlimit(value uint64) string {
 	if value == unix.RLIM_INFINITY {
 		return "unlimited"
@@ -162,6 +174,7 @@ func formatRlimit(value uint64) string {
 	return strconv.FormatUint(value, 10)
 }
 
+// permissionDeniedMessage derives stable operator-facing text for permission denied message.
 func permissionDeniedMessage(euid int, raw error) string {
 	var guidance string
 	if euid == 0 {
@@ -175,6 +188,7 @@ func permissionDeniedMessage(euid int, raw error) string {
 	return boundVMBlockDiagnostic(guidance+"; underlying error: "+raw.Error(), maxVMBlockVerifierLogBytes)
 }
 
+// isPermissionError reports whether permission error.
 func isPermissionError(err error) bool {
 	return errors.Is(err, ErrVMBlockLatencyPermission) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrPermission)
 }

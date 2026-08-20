@@ -13,6 +13,8 @@ import (
 	"github.com/safwen511/solis-io/internal/qemuio"
 )
 
+// TestNewReportIncludesVMIdentityAndStoragePath verifies new report includes vm identity and
+// storage path.
 func TestNewReportIncludesVMIdentityAndStoragePath(t *testing.T) {
 	report := NewReport(3*time.Second, time.Second, []Sample{{
 		VM: inventory.VM{
@@ -43,6 +45,7 @@ func TestNewReportIncludesVMIdentityAndStoragePath(t *testing.T) {
 	}
 }
 
+// TestClassifyPressureUsesBytePressure verifies classify pressure uses byte pressure.
 func TestClassifyPressureUsesBytePressure(t *testing.T) {
 	pressure, reason := ClassifyPressure(qemuio.VMSummary{
 		Available:                true,
@@ -54,6 +57,7 @@ func TestClassifyPressureUsesBytePressure(t *testing.T) {
 	}
 }
 
+// TestClassifyPressureUsesSyscallFallback verifies classify pressure uses syscall fallback.
 func TestClassifyPressureUsesSyscallFallback(t *testing.T) {
 	pressure, reason := ClassifyPressure(qemuio.VMSummary{
 		Available:             true,
@@ -64,6 +68,8 @@ func TestClassifyPressureUsesSyscallFallback(t *testing.T) {
 	}
 }
 
+// TestClassifyPressureUsesConfiguredThresholds verifies classify pressure uses configured
+// thresholds.
 func TestClassifyPressureUsesConfiguredThresholds(t *testing.T) {
 	pressure, _ := ClassifyPressureWithThresholds(qemuio.VMSummary{
 		Available:                true,
@@ -74,6 +80,7 @@ func TestClassifyPressureUsesConfiguredThresholds(t *testing.T) {
 	}
 }
 
+// TestWriteJSONProducesStatusSchema verifies write json produces status schema.
 func TestWriteJSONProducesStatusSchema(t *testing.T) {
 	report := NewReport(3*time.Second, time.Second, []Sample{{
 		VM: inventory.VM{Name: "a-web", State: "running", QEMUPID: "12345"},
@@ -102,6 +109,8 @@ func TestWriteJSONProducesStatusSchema(t *testing.T) {
 	}
 }
 
+// TestEligibleVMsIncludesOnlyRunningVMsWithPIDs verifies eligible VMs includes only running VMs
+// with pIDs.
 func TestEligibleVMsIncludesOnlyRunningVMsWithPIDs(t *testing.T) {
 	vms := eligibleVMs([]inventory.VM{
 		{Name: "b-web", State: "running", QEMUPID: "22"},
@@ -114,6 +123,7 @@ func TestEligibleVMsIncludesOnlyRunningVMsWithPIDs(t *testing.T) {
 	}
 }
 
+// TestWriteHumanShowsRequiredColumns verifies write human shows required columns.
 func TestWriteHumanShowsRequiredColumns(t *testing.T) {
 	report := NewReport(3*time.Second, time.Second, []Sample{{
 		VM: inventory.VM{Name: "a-web", Tenant: "tenant-a", Role: "web", State: "running", QEMUPID: "12345"},
@@ -133,6 +143,7 @@ func TestWriteHumanShowsRequiredColumns(t *testing.T) {
 	}
 }
 
+// TestSortReportByPressure verifies sort report by pressure.
 func TestSortReportByPressure(t *testing.T) {
 	report := Report{VMs: []VMStatus{
 		{Name: "idle", Pressure: PressureIdle},
@@ -151,6 +162,7 @@ func TestSortReportByPressure(t *testing.T) {
 	}
 }
 
+// TestWriteWatchSummary verifies write watch summary.
 func TestWriteWatchSummary(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteWatchSummary(&output, WatchSummary{
@@ -170,6 +182,8 @@ func TestWriteWatchSummary(t *testing.T) {
 	}
 }
 
+// TestWriteWatchFrameIncludesHeaderAndPressureCounts verifies write watch frame includes header and
+// pressure counts.
 func TestWriteWatchFrameIncludesHeaderAndPressureCounts(t *testing.T) {
 	report := Report{
 		Duration: "1s",

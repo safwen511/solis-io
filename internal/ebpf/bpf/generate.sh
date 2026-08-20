@@ -6,6 +6,7 @@ package_dir="$(cd -- "${script_dir}/.." && pwd)"
 generated_dir="${script_dir}/generated"
 compiler="${BPF2GO_CC:-clang}"
 
+# Fail before generation when the pinned compiler or packaged headers are absent.
 if ! command -v "${compiler}" >/dev/null 2>&1; then
   echo "missing eBPF generator compiler: ${compiler}" >&2
   echo "use build/ebpf/Dockerfile or install the generator toolchain outside target hosts" >&2
@@ -35,6 +36,7 @@ for required_header in "${required_headers[@]}"; do
   fi
 done
 
+# Report every missing dependency in one preflight result for reproducible fixes.
 if (( ${#missing_headers[@]} > 0 )); then
   for missing_header in "${missing_headers[@]}"; do
     echo "missing eBPF generator header: ${missing_header}" >&2
@@ -55,6 +57,8 @@ fi
 temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/solis-vmblock-bpf.XXXXXX")"
 trap 'rm -rf -- "${temporary_dir}"' EXIT
 
+# Generate into an isolated directory so an interrupted build cannot replace
+# the authentic embedded object with a partial file.
 (
   cd -- "${package_dir}"
   GOPACKAGE=ebpf go run github.com/cilium/ebpf/cmd/bpf2go@v0.22.0 \
@@ -74,6 +78,7 @@ if [[ ! -s "${object_path}" ]]; then
   exit 1
 fi
 
+# Replace the embedded artifact only after bpf2go produced a non-empty ELF.
 mkdir -p -- "${generated_dir}"
 install -m 0644 "${object_path}" "${generated_dir}/vm_block_latency_bpfel.o"
 echo "generated ${generated_dir}/vm_block_latency_bpfel.o"

@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestParseProcStatAndCalculateCPU verifies parse proc stat and calculate cpu.
 func TestParseProcStatAndCalculateCPU(t *testing.T) {
 	previous, err := parseProcStat([]byte("cpu 100 20 30 400 10 5 5 2 0 0\ncpu0 1 2 3 4\n"))
 	if err != nil {
@@ -29,6 +30,7 @@ func TestParseProcStatAndCalculateCPU(t *testing.T) {
 	assertNear(t, status.TotalBusyPercent, 82.0/192.0*100)
 }
 
+// TestCalculateCPURejectsCounterReset verifies calculate cpu rejects counter reset.
 func TestCalculateCPURejectsCounterReset(t *testing.T) {
 	_, err := calculateCPU(cpuCounters{User: 100}, cpuCounters{User: 99}, "/proc/stat")
 	if err == nil || !strings.Contains(err.Error(), "reset or wrapped") {
@@ -36,6 +38,7 @@ func TestCalculateCPURejectsCounterReset(t *testing.T) {
 	}
 }
 
+// TestParseMemInfo verifies parse mem info.
 func TestParseMemInfo(t *testing.T) {
 	status, err := parseMemInfo([]byte(`MemTotal:       1000 kB
 MemAvailable:    250 kB
@@ -52,6 +55,7 @@ Buffers:          10 kB
 	assertNear(t, status.MemAvailablePercent, 25)
 }
 
+// TestParsePSI verifies parse psi.
 func TestParsePSI(t *testing.T) {
 	status, err := parsePSI([]byte("some avg10=1.25 avg60=2.50 avg300=3.75 total=100\nfull avg10=0.10 avg60=0.20 avg300=0.30 total=10\n"), "/proc/pressure/io")
 	if err != nil {
@@ -64,6 +68,7 @@ func TestParsePSI(t *testing.T) {
 	assertNear(t, status.Full.Avg300, 0.30)
 }
 
+// TestParsePSIRepresentsMissingFullLine verifies parse psi represents missing full line.
 func TestParsePSIRepresentsMissingFullLine(t *testing.T) {
 	status, err := parsePSI([]byte("some avg10=1 avg60=2 avg300=3 total=100\n"), "/proc/pressure/cpu")
 	if err != nil {
@@ -74,6 +79,7 @@ func TestParsePSIRepresentsMissingFullLine(t *testing.T) {
 	}
 }
 
+// TestParseNetDevAndDeterministicOrdering verifies parse net dev and deterministic ordering.
 func TestParseNetDevAndDeterministicOrdering(t *testing.T) {
 	data := []byte(`Inter-| Receive | Transmit
  face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed
@@ -94,6 +100,7 @@ func TestParseNetDevAndDeterministicOrdering(t *testing.T) {
 	}
 }
 
+// TestNetworkRatesRejectCounterReset verifies network rates reject counter reset.
 func TestNetworkRatesRejectCounterReset(t *testing.T) {
 	status := NetworkInterfaceStatus{}
 	err := applyNetworkRates(&status, networkCounters{RXBytes: 100}, networkCounters{RXBytes: 99}, time.Second)
@@ -102,6 +109,7 @@ func TestNetworkRatesRejectCounterReset(t *testing.T) {
 	}
 }
 
+// TestParseDiskstatsAndRates verifies parse diskstats and rates.
 func TestParseDiskstatsAndRates(t *testing.T) {
 	previous, err := parseDiskstats([]byte("8 0 sda 10 0 100 0 20 0 200 0 1 0 300 0 0 0 0\n"))
 	if err != nil {
@@ -121,6 +129,7 @@ func TestParseDiskstatsAndRates(t *testing.T) {
 	assertNear(t, statuses[0].WriteSectorsPerSecond, 30)
 }
 
+// TestDiskRatesRejectCounterReset verifies disk rates reject counter reset.
 func TestDiskRatesRejectCounterReset(t *testing.T) {
 	status := DiskStatus{}
 	err := applyDiskRates(&status, diskCounters{ReadsCompleted: 10}, diskCounters{ReadsCompleted: 9}, time.Second)
@@ -129,6 +138,7 @@ func TestDiskRatesRejectCounterReset(t *testing.T) {
 	}
 }
 
+// TestFilesystemStatusFromStatfs verifies filesystem status from statfs.
 func TestFilesystemStatusFromStatfs(t *testing.T) {
 	status, err := filesystemStatusFromStatfs("/", syscall.Statfs_t{
 		Bsize: 4096, Blocks: 100, Bfree: 25, Bavail: 20, Files: 50, Ffree: 10,
@@ -143,6 +153,7 @@ func TestFilesystemStatusFromStatfs(t *testing.T) {
 	assertNear(t, status.FilesUsedPercent, 80)
 }
 
+// TestQEMUProcessParsersUseCommandNameOnly verifies qemu process parsers use command name only.
 func TestQEMUProcessParsersUseCommandNameOnly(t *testing.T) {
 	command, qemu := qemuCommand([]byte("qemu-system-x86\n"))
 	if !qemu || command != "qemu-system-x86" {
@@ -158,6 +169,7 @@ func TestQEMUProcessParsersUseCommandNameOnly(t *testing.T) {
 	}
 }
 
+// assertNear performs assert near as part of the package workflow.
 func assertNear(t *testing.T, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 0.000001 {

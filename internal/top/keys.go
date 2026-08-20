@@ -30,6 +30,7 @@ const (
 	keySaveDetail
 )
 
+// readKeyActions reads key actions from its configured source.
 func readKeyActions(src io.Reader) <-chan keyAction {
 	actions := make(chan keyAction, 8)
 	go func() {
@@ -52,6 +53,7 @@ func readKeyActions(src io.Reader) <-chan keyAction {
 	return actions
 }
 
+// keyForByte builds key for byte from validated inputs.
 func keyForByte(value byte) keyAction {
 	switch value {
 	case 'q', 'Q', 0x03:
@@ -95,6 +97,7 @@ func keyForByte(value byte) keyAction {
 	}
 }
 
+// readEscapeAction reads escape action from its configured source.
 func readEscapeAction(reader *bufio.Reader) keyAction {
 	open, err := reader.ReadByte()
 	if err != nil || open != '[' {
@@ -120,6 +123,7 @@ func readEscapeAction(reader *bufio.Reader) keyAction {
 	}
 }
 
+// sortForKey sorts for key into stable output order.
 func sortForKey(action keyAction) (string, bool) {
 	switch action {
 	case keySortName:

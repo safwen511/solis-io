@@ -11,6 +11,8 @@ import (
 	"unsafe"
 )
 
+// TestInspectFindsBTFMountsAndBlockTracepoints verifies inspect finds btf mounts and block
+// tracepoints.
 func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	root := t.TempDir()
 	traceRoot := filepath.Join(root, "trace")
@@ -78,6 +80,8 @@ func TestInspectFindsBTFMountsAndBlockTracepoints(t *testing.T) {
 	}
 }
 
+// TestDoctorSeparatesFormattedTracepointsFromTypedBTFReadiness verifies doctor separates formatted
+// tracepoints from typed btf readiness.
 func TestDoctorSeparatesFormattedTracepointsFromTypedBTFReadiness(t *testing.T) {
 	root := t.TempDir()
 	traceRoot := filepath.Join(root, "trace")
@@ -111,6 +115,8 @@ func TestDoctorSeparatesFormattedTracepointsFromTypedBTFReadiness(t *testing.T) 
 	}
 }
 
+// TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim verifies doctor runtime checks include
+// capabilities and no attach claim.
 func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
 	root := t.TempDir()
 	statusPath := filepath.Join(root, "status")
@@ -168,6 +174,7 @@ func TestDoctorRuntimeChecksIncludeCapabilitiesAndNoAttachClaim(t *testing.T) {
 	}
 }
 
+// findDoctorCheck finds doctor check in the available data.
 func findDoctorCheck(report Report, name string) Check {
 	for _, check := range report.Checks {
 		if check.Name == name {
@@ -177,6 +184,7 @@ func findDoctorCheck(report Report, name string) Check {
 	return Check{Name: name}
 }
 
+// TestReadyRejectsFailureButAllowsWarning verifies ready rejects failure but allows warning.
 func TestReadyRejectsFailureButAllowsWarning(t *testing.T) {
 	if !Ready(Report{Checks: []Check{{Status: OK}, {Status: WARN}}}) {
 		t.Fatal("Ready() = false for OK/WARN checks")
@@ -186,6 +194,7 @@ func TestReadyRejectsFailureButAllowsWarning(t *testing.T) {
 	}
 }
 
+// TestParseMountInfoUnescapesMountpoint verifies parse mount info unescapes mountpoint.
 func TestParseMountInfoUnescapesMountpoint(t *testing.T) {
 	mounts := parseMountInfo("31 20 0:30 / /tmp/trace\\040space rw - tracefs tracefs rw\n")
 	if len(mounts) != 1 || mounts[0].point != "/tmp/trace space" || mounts[0].filesystem != "tracefs" {
@@ -193,6 +202,8 @@ func TestParseMountInfoUnescapesMountpoint(t *testing.T) {
 	}
 }
 
+// TestWriteBlockWatchMakesReadinessOnlyModeClear verifies write block watch makes readiness only
+// mode clear.
 func TestWriteBlockWatchMakesReadinessOnlyModeClear(t *testing.T) {
 	report := Report{Checks: []Check{{Status: OK, Name: "Kernel BTF", Detail: defaultBTFPath}}}
 	var output bytes.Buffer
@@ -206,6 +217,7 @@ func TestWriteBlockWatchMakesReadinessOnlyModeClear(t *testing.T) {
 	}
 }
 
+// TestParseTracepointFormat verifies parse tracepoint format.
 func TestParseTracepointFormat(t *testing.T) {
 	input := `name: block_rq_issue
 ID: 112
@@ -241,6 +253,7 @@ format:
 	}
 }
 
+// TestWriteBlockEventsHighlightsUsefulFields verifies write block events highlights useful fields.
 func TestWriteBlockEventsHighlightsUsefulFields(t *testing.T) {
 	formats := []TracepointFormat{{
 		Name: "block_rq_issue",
@@ -261,6 +274,7 @@ func TestWriteBlockEventsHighlightsUsefulFields(t *testing.T) {
 	}
 }
 
+// TestWriteBlockCountFormatsRates verifies write block count formats rates.
 func TestWriteBlockCountFormatsRates(t *testing.T) {
 	var output bytes.Buffer
 	result := BlockCountResult{Duration: 2 * time.Second, IssueCount: 25, CompleteCount: 20}
@@ -274,6 +288,8 @@ func TestWriteBlockCountFormatsRates(t *testing.T) {
 	}
 }
 
+// TestCounterProgramDoesNotReadTracepointContext verifies counter program does not read tracepoint
+// context.
 func TestCounterProgramDoesNotReadTracepointContext(t *testing.T) {
 	instructions := counterProgram(7, 1)
 	for _, instruction := range instructions {
@@ -289,6 +305,7 @@ func TestCounterProgramDoesNotReadTracepointContext(t *testing.T) {
 	}
 }
 
+// TestBPFABILayout verifies bpfabi layout.
 func TestBPFABILayout(t *testing.T) {
 	tests := []struct {
 		name string

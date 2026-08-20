@@ -7,11 +7,13 @@ import (
 	"strings"
 )
 
+// qemuCommand builds QEMU command from validated inputs.
 func qemuCommand(data []byte) (string, bool) {
 	command := strings.TrimSpace(string(data))
 	return command, strings.HasPrefix(command, "qemu-system-")
 }
 
+// parseRSSBytes parses and validates rss bytes.
 func parseRSSBytes(data []byte) (uint64, error) {
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)
@@ -30,6 +32,7 @@ func parseRSSBytes(data []byte) (uint64, error) {
 	return 0, errors.New("VmRSS not found")
 }
 
+// parseProcessCPUTicks parses and validates process cpu ticks.
 func parseProcessCPUTicks(data []byte) (uint64, error) {
 	line := strings.TrimSpace(string(data))
 	closing := strings.LastIndex(line, ")")
@@ -51,6 +54,7 @@ func parseProcessCPUTicks(data []byte) (uint64, error) {
 	return userTicks + systemTicks, nil
 }
 
+// numericPID builds numeric PID from validated inputs.
 func numericPID(value string) (int, bool) {
 	pid, err := strconv.Atoi(value)
 	return pid, err == nil && pid > 0

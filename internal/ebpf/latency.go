@@ -203,6 +203,7 @@ func MeasureBlockLatency(duration time.Duration) (BlockLatencyResult, error) {
 	return result, nil
 }
 
+// findTracepointFormat finds tracepoint format in the available data.
 func findTracepointFormat(formats []TracepointFormat, name string) (TracepointFormat, error) {
 	for _, format := range formats {
 		if format.Name == name || format.Name == "block:"+name {
@@ -212,6 +213,7 @@ func findTracepointFormat(formats []TracepointFormat, name string) (TracepointFo
 	return TracepointFormat{}, fmt.Errorf("tracepoint format block:%s is missing", name)
 }
 
+// keyFields builds key fields and returns an error when validation or source access fails.
 func keyFields(format TracepointFormat) (tracepointKeyFields, error) {
 	var fields tracepointKeyFields
 	var haveDev, haveSector bool
@@ -239,6 +241,7 @@ func keyFields(format TracepointFormat) (tracepointKeyFields, error) {
 	return fields, nil
 }
 
+// issueLatencyProgram builds the verifier-bounded instruction stream for request issue timestamps.
 func issueLatencyProgram(startMapFD int, fields tracepointKeyFields) ([]bpfInstruction, error) {
 	builder := newInstructionBuilder()
 	builder.emit(0xbf, 6, 1, 0, 0)
@@ -259,6 +262,8 @@ func issueLatencyProgram(startMapFD int, fields tracepointKeyFields) ([]bpfInstr
 	return builder.finalize()
 }
 
+// completeLatencyProgram builds complete latency program and returns an error when validation or
+// source access fails.
 func completeLatencyProgram(startMapFD, statsMapFD int, fields tracepointKeyFields) ([]bpfInstruction, error) {
 	builder := newInstructionBuilder()
 	builder.emit(0xbf, 6, 1, 0, 0)
@@ -316,10 +321,13 @@ func completeLatencyProgram(startMapFD, statsMapFD int, fields tracepointKeyFiel
 	return builder.finalize()
 }
 
+// newInstructionBuilder constructs instruction builder wired to the package's production
+// dependencies.
 func newInstructionBuilder() *instructionBuilder {
 	return &instructionBuilder{labels: make(map[string]int)}
 }
 
+// emit performs emit as part of the package workflow.
 func (builder *instructionBuilder) emit(code, destination, source uint8, offset int16, immediate int32) {
 	builder.instructions = append(builder.instructions, bpfInstruction{
 		Code: code,
@@ -329,11 +337,13 @@ func (builder *instructionBuilder) emit(code, destination, source uint8, offset 
 	})
 }
 
+// loadMap emits a verifier-safe map lookup instruction sequence for the selected register.
 func (builder *instructionBuilder) loadMap(destination uint8, mapFD int) {
 	builder.emit(0x18, destination, bpfPseudoMapFD, 0, int32(mapFD))
 	builder.emit(0, 0, 0, 0, 0)
 }
 
+// loadContextKey emits the architecture-specific tracepoint context load for the request identity.
 func (builder *instructionBuilder) loadContextKey(fields tracepointKeyFields) error {
 	for _, field := range []struct {
 		value       TracepointField
@@ -352,6 +362,8 @@ func (builder *instructionBuilder) loadContextKey(fields tracepointKeyFields) er
 	return nil
 }
 
+// contextLoadCode builds context load code and returns an error when validation or source access
+// fails.
 func contextLoadCode(size uint64) (uint8, error) {
 	switch size {
 	case 1:
@@ -367,15 +379,18 @@ func contextLoadCode(size uint64) (uint8, error) {
 	}
 }
 
+// jump performs jump as part of the package workflow.
 func (builder *instructionBuilder) jump(code, destination, source uint8, immediate int32, label string) {
 	builder.fixups = append(builder.fixups, instructionFixup{index: len(builder.instructions), label: label})
 	builder.emit(code, destination, source, 0, immediate)
 }
 
+// label performs label as part of the package workflow.
 func (builder *instructionBuilder) label(name string) {
 	builder.labels[name] = len(builder.instructions)
 }
 
+// finalize builds finalize and returns an error when validation or source access fails.
 func (builder *instructionBuilder) finalize() ([]bpfInstruction, error) {
 	for _, fixup := range builder.fixups {
 		target, ok := builder.labels[fixup.label]
@@ -391,6 +406,7 @@ func (builder *instructionBuilder) finalize() ([]bpfInstruction, error) {
 	return builder.instructions, nil
 }
 
+// createBPFMap creates BPF map while preserving the package's security invariants.
 func createBPFMap(mapType, keySize, valueSize, maxEntries uint32, name string) (int, error) {
 	attr := bpfMapCreateAttr{
 		MapType:    mapType,
@@ -402,6 +418,7 @@ func createBPFMap(mapType, keySize, valueSize, maxEntries uint32, name string) (
 	return bpfCall(bpfMapCreate, unsafe.Pointer(&attr), unsafe.Sizeof(attr))
 }
 
+// loadTracepointProgram loads one classic tracepoint program and retains bounded verifier diagnostics.
 func loadTracepointProgram(instructions []bpfInstruction, name string) (int, string, error) {
 	license := []byte("GPL\x00")
 	logBuffer := make([]byte, 256*1024)
@@ -422,10 +439,13 @@ func loadTracepointProgram(instructions []bpfInstruction, name string) (int, str
 	return fd, strings.TrimRight(string(logBuffer), "\x00"), err
 }
 
+// attachTracepointProgram attaches tracepoint program and returns an owned handle for cleanup.
 func attachTracepointProgram(eventID uint64, programFD, cpu int) (*perfAttachment, error) {
 	return attachTracepointProgramWithOperations(eventID, programFD, cpu, systemPerfEventOperations)
 }
 
+// attachTracepointProgramWithOperations attaches tracepoint program with operations and returns an
+// owned handle for cleanup.
 func attachTracepointProgramWithOperations(eventID uint64, programFD, cpu int, operations perfEventOperations) (*perfAttachment, error) {
 	fd, err := operations.open(eventID, cpu)
 	if err != nil {
@@ -440,6 +460,7 @@ func attachTracepointProgramWithOperations(eventID uint64, programFD, cpu int, o
 	return attachment, nil
 }
 
+// openTracepointPerfEvent opens tracepoint perf event after validating its source.
 func openTracepointPerfEvent(eventID uint64, cpu int) (int, error) {
 	attr := make([]byte, perfAttrSizeVersion0)
 	binary.NativeEndian.PutUint32(attr[0:4], perfTypeTracepoint)
@@ -464,6 +485,7 @@ func openTracepointPerfEvent(eventID uint64, cpu int) (int, error) {
 	return int(result), nil
 }
 
+// perfEventIOCTL completes perf event ioctl and returns any failure to its caller.
 func perfEventIOCTL(fd int, request, argument uintptr) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), request, argument)
 	if errno != 0 {
@@ -472,6 +494,7 @@ func perfEventIOCTL(fd int, request, argument uintptr) error {
 	return nil
 }
 
+// enable completes enable and returns any failure to its caller.
 func (attachment *perfAttachment) enable() error {
 	if attachment == nil || attachment.fd < 0 {
 		return errors.New("tracepoint perf event is closed")
@@ -479,6 +502,7 @@ func (attachment *perfAttachment) enable() error {
 	return attachment.ops.ioctl(attachment.fd, perfEventIOCEnable, 0)
 }
 
+// close releases the underlying descriptor and preserves cleanup errors.
 func (attachment *perfAttachment) close() {
 	if attachment == nil || attachment.fd < 0 {
 		return
@@ -488,6 +512,8 @@ func (attachment *perfAttachment) close() {
 	attachment.fd = -1
 }
 
+// hostCPUConfiguration builds host cpu configuration and returns an error when validation or source
+// access fails.
 func hostCPUConfiguration(onlinePath, possiblePath string) ([]int, int, error) {
 	onlineData, err := os.ReadFile(onlinePath)
 	if err != nil {
@@ -511,6 +537,7 @@ func hostCPUConfiguration(onlinePath, possiblePath string) ([]int, int, error) {
 	return online, possible[len(possible)-1] + 1, nil
 }
 
+// parseCPUList parses and validates cpu list.
 func parseCPUList(input string) ([]int, error) {
 	seen := make(map[int]bool)
 	for _, part := range strings.Split(strings.TrimSpace(input), ",") {
@@ -542,6 +569,7 @@ func parseCPUList(input string) ([]int, error) {
 	return cpus, nil
 }
 
+// lookupPerCPUValue looks up per cpu value without inventing a missing value.
 func lookupPerCPUValue(mapFD int, key uint32, valueSize, cpuCount int) ([]byte, error) {
 	stride := (valueSize + 7) &^ 7
 	value := make([]byte, stride*cpuCount)
@@ -556,6 +584,7 @@ func lookupPerCPUValue(mapFD int, key uint32, valueSize, cpuCount int) ([]byte, 
 	return value, err
 }
 
+// aggregateLatencyStats aggregates latency stats into its bounded summary.
 func aggregateLatencyStats(duration time.Duration, data []byte, cpuCount int) (BlockLatencyResult, error) {
 	stride := (latencyStatsValueSize + 7) &^ 7
 	if cpuCount <= 0 || len(data) < stride*cpuCount {
@@ -578,6 +607,7 @@ func aggregateLatencyStats(duration time.Duration, data []byte, cpuCount int) (B
 	return result, nil
 }
 
+// latencyOperationError completes latency operation error and returns any failure to its caller.
 func latencyOperationError(operation, tracepoint string, err error, verifierLog string) error {
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		return errBPFLatencyPermission

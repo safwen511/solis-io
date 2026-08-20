@@ -84,6 +84,7 @@ func CaptureAllowed(now, lastCapture time.Time, cooldown time.Duration) bool {
 	return lastCapture.IsZero() || !now.Before(lastCapture.Add(cooldown))
 }
 
+// pairwiseClassification builds pairwise classification from validated inputs.
 func pairwiseClassification(report diagnose.Report) (string, string) {
 	qemu := report.QEMU
 	switch {

@@ -182,6 +182,7 @@ func WriteEvidenceSummary(dst io.Writer, inputs Inputs, evidence Evidence, times
 	return encoder.Encode(summary)
 }
 
+// buildEvidenceSummary builds evidence summary from validated inputs.
 func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) EvidenceSummary {
 	thresholds := qemuio.EffectiveThresholds(inputs.Thresholds)
 	victimVM, victimStorage := resolvedTarget(inputs.Victim, "victim", evidence)
@@ -240,6 +241,7 @@ func buildEvidenceSummary(inputs Inputs, evidence Evidence, timestamp string) Ev
 	}
 }
 
+// ebpfVMAttributionEvidence builds eBPF VM attribution evidence from validated inputs.
 func ebpfVMAttributionEvidence(evidence Evidence) EBPFVMAttributionEvidence {
 	report := evidence.Diagnosis
 	if report.EBPFVMAttribution == nil {
@@ -258,6 +260,8 @@ func ebpfVMAttributionEvidence(evidence Evidence) EBPFVMAttributionEvidence {
 	}
 }
 
+// optionalEBPFVMAttributionFilename derives stable operator-facing text for optional eBPF VM
+// attribution filename.
 func optionalEBPFVMAttributionFilename(inputs Inputs) string {
 	if inputs.IncludeEBPFLatency {
 		return "ebpf-vm-block-latency.json"
@@ -265,6 +269,7 @@ func optionalEBPFVMAttributionFilename(inputs Inputs) string {
 	return "-"
 }
 
+// resolvedTarget resolves d target from the available inputs.
 func resolvedTarget(selector, targetType string, evidence Evidence) (inventory.VM, hoststorage.Mapping) {
 	var fallback *storage.VMTarget
 	for index := range evidence.Storage.Targets {
@@ -285,6 +290,7 @@ func resolvedTarget(selector, targetType string, evidence Evidence) (inventory.V
 	return inventory.VM{Name: valueOrDash(selector)}, hoststorage.Mapping{}
 }
 
+// hasTargetType reports whether the value has target type.
 func hasTargetType(value, targetType string) bool {
 	for _, candidate := range strings.Split(value, ",") {
 		if strings.TrimSpace(candidate) == targetType {
@@ -294,6 +300,7 @@ func hasTargetType(value, targetType string) bool {
 	return false
 }
 
+// vmEvidence builds VM evidence from validated inputs.
 func vmEvidence(vm inventory.VM, mapping hoststorage.Mapping, fallbackName string) VMEvidence {
 	name := valueOrDash(vm.Name)
 	if name == "-" {
@@ -315,6 +322,7 @@ func vmEvidence(vm inventory.VM, mapping hoststorage.Mapping, fallbackName strin
 	}
 }
 
+// selectedSuspectEvidence selects suspect evidence using deterministic ordering.
 func selectedSuspectEvidence(inputs Inputs, evidence Evidence, vm inventory.VM, reason, score string) SuspectEvidence {
 	if evidence.Discovery != nil && evidence.Discovery.Selected == nil {
 		return SuspectEvidence{
@@ -340,6 +348,7 @@ func selectedSuspectEvidence(inputs Inputs, evidence Evidence, vm inventory.VM, 
 	}
 }
 
+// suspectClassification builds suspect classification from validated inputs.
 func suspectClassification(inputs Inputs, evidence Evidence) (string, string) {
 	if evidence.Discovery != nil {
 		if evidence.Discovery.Selected == nil {
@@ -360,6 +369,7 @@ func suspectClassification(inputs Inputs, evidence Evidence) (string, string) {
 	}
 }
 
+// experimentEvidence builds experiment evidence from validated inputs.
 func experimentEvidence(evidence Evidence) ExperimentEvidence {
 	result := ExperimentEvidence{Available: evidence.Diagnosis.ExperimentAvailable}
 	if !result.Available {
@@ -375,6 +385,7 @@ func experimentEvidence(evidence Evidence) ExperimentEvidence {
 	return result
 }
 
+// qemuEvidence builds QEMU evidence from validated inputs.
 func qemuEvidence(evidence Evidence) QEMUEvidence {
 	qemu := evidence.QEMU
 	return QEMUEvidence{
@@ -388,6 +399,7 @@ func qemuEvidence(evidence Evidence) QEMUEvidence {
 	}
 }
 
+// discoveryEvidence builds discovery evidence from validated inputs.
 func discoveryEvidence(inputs Inputs, report *discovery.Report) DiscoveryEvidence {
 	result := DiscoveryEvidence{
 		Enabled:         captureMode(inputs) == "discover-suspects",
@@ -419,6 +431,7 @@ func discoveryEvidence(inputs Inputs, report *discovery.Report) DiscoveryEvidenc
 	return result
 }
 
+// ebpfLatencyEvidence builds eBPF latency evidence from validated inputs.
 func ebpfLatencyEvidence(inputs Inputs, evidence *ebpf.BlockLatencyEvidence) EBPFLatencyEvidence {
 	result := EBPFLatencyEvidence{
 		Requested: inputs.IncludeEBPFLatency,
@@ -450,6 +463,7 @@ func ebpfLatencyEvidence(inputs Inputs, evidence *ebpf.BlockLatencyEvidence) EBP
 	return result
 }
 
+// topologyPhysicalDisk derives stable operator-facing text for topology physical disk.
 func topologyPhysicalDisk(victim, suspect hoststorage.Mapping, shared bool) string {
 	if !shared {
 		return "-"
@@ -461,6 +475,7 @@ func topologyPhysicalDisk(victim, suspect hoststorage.Mapping, shared bool) stri
 	return valueOrDash(suspect.PhysicalDisk)
 }
 
+// verdictSeverity derives stable operator-facing text for verdict severity.
 func verdictSeverity(verdict string) string {
 	switch verdict {
 	case diagnose.ProbableVerdict:
@@ -479,6 +494,7 @@ func verdictSeverity(verdict string) string {
 	}
 }
 
+// parsePID parses and validates pid.
 func parsePID(value string) *int {
 	pid, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || pid <= 0 {

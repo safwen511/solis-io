@@ -37,12 +37,14 @@ func Write(dst io.Writer, snapshot Snapshot) error {
 	return w.Flush()
 }
 
+// writeVMTargets renders VM targets in the package's stable operator-facing format.
 func writeVMTargets(dst io.Writer, targets []VMTarget) error {
 	w := tabwriter.NewWriter(dst, 0, 0, 2, ' ', 0)
 	writeVMTargetRows(w, targets)
 	return w.Flush()
 }
 
+// writeVMTargetRows renders VM target rows in the package's stable operator-facing format.
 func writeVMTargetRows(w io.Writer, targets []VMTarget) {
 	fmt.Fprintln(w, "VM storage targets")
 	fmt.Fprintln(w, "TARGET\tVM\tTENANT\tROLE\tQEMU_PID\tDISK\tSOURCE_DEVICE\tPARENT_DEVICE\tPHYSICAL_DISK")
@@ -64,6 +66,7 @@ func writeVMTargetRows(w io.Writer, targets []VMTarget) {
 	fmt.Fprintln(w)
 }
 
+// counterText formats a counter value or a dash when its source is unavailable.
 func counterText(counter Counter) string {
 	if !counter.Available {
 		return "-"
@@ -71,6 +74,7 @@ func counterText(counter Counter) string {
 	return strconv.FormatUint(counter.Value, 10)
 }
 
+// emptyDash replaces empty text with a dash so table columns remain explicit.
 func emptyDash(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

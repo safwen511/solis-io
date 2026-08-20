@@ -15,6 +15,7 @@ import (
 	"github.com/safwen511/solis-io/internal/storage"
 )
 
+// TestVerdict verifies verdict.
 func TestVerdict(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -100,6 +101,8 @@ func TestVerdict(t *testing.T) {
 	}
 }
 
+// TestLiveVerdictUsesInfrastructureEvidenceWithoutClaimingSlowdown verifies live verdict uses
+// infrastructure evidence without claiming slowdown.
 func TestLiveVerdictUsesInfrastructureEvidenceWithoutClaimingSlowdown(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -135,6 +138,8 @@ func TestLiveVerdictUsesInfrastructureEvidenceWithoutClaimingSlowdown(t *testing
 	}
 }
 
+// TestNewLiveReportAndOutputOmitApplicationMetrics verifies new live report and output omit
+// application metrics.
 func TestNewLiveReportAndOutputOmitApplicationMetrics(t *testing.T) {
 	snapshot := storage.Snapshot{Targets: []storage.VMTarget{
 		{TargetType: "victim", Storage: hoststorage.Mapping{PhysicalDisk: "/dev/nvme0n1"}},
@@ -176,6 +181,8 @@ func TestNewLiveReportAndOutputOmitApplicationMetrics(t *testing.T) {
 	}
 }
 
+// TestReportBackedOutputRetainsExperimentMetrics verifies report backed output retains experiment
+// metrics.
 func TestReportBackedOutputRetainsExperimentMetrics(t *testing.T) {
 	experimentReport := experiment.Report{
 		Baseline:    experiment.HTTPMetrics{RequestsPerSecond: 100, TimePerRequestMS: 10},
@@ -202,6 +209,8 @@ func TestReportBackedOutputRetainsExperimentMetrics(t *testing.T) {
 	}
 }
 
+// TestWriteIncludesQEMUSyscallFallbackEvidence verifies write includes qemu syscall fallback
+// evidence.
 func TestWriteIncludesQEMUSyscallFallbackEvidence(t *testing.T) {
 	report := Report{
 		QEMU: qemuio.SummaryReport{
@@ -235,6 +244,8 @@ func TestWriteIncludesQEMUSyscallFallbackEvidence(t *testing.T) {
 	}
 }
 
+// TestWriteWithoutEBPFLatencyPreservesExistingOutput verifies write without ebpf latency preserves
+// existing output.
 func TestWriteWithoutEBPFLatencyPreservesExistingOutput(t *testing.T) {
 	var output bytes.Buffer
 	if err := Write(&output, Report{}); err != nil {
@@ -248,6 +259,7 @@ func TestWriteWithoutEBPFLatencyPreservesExistingOutput(t *testing.T) {
 	}
 }
 
+// TestWriteIncludesSuspectDiscoveryTable verifies write includes suspect discovery table.
 func TestWriteIncludesSuspectDiscoveryTable(t *testing.T) {
 	discoveryReport := discovery.Report{
 		Victim:        inventory.VM{Name: "a-web"},
@@ -288,6 +300,8 @@ func TestWriteIncludesSuspectDiscoveryTable(t *testing.T) {
 	}
 }
 
+// TestWriteDiscoveryWithoutSelectionIncludesVerdictAndEBPFNotice verifies write discovery without
+// selection includes verdict and ebpf notice.
 func TestWriteDiscoveryWithoutSelectionIncludesVerdictAndEBPFNotice(t *testing.T) {
 	discoveryReport := discovery.Report{
 		Victim:          inventory.VM{Name: "a-web"},
@@ -322,6 +336,7 @@ func TestWriteDiscoveryWithoutSelectionIncludesVerdictAndEBPFNotice(t *testing.T
 	}
 }
 
+// TestWriteIncludesEBPFBlockLatencyEvidence verifies write includes ebpf block latency evidence.
 func TestWriteIncludesEBPFBlockLatencyEvidence(t *testing.T) {
 	latency := ebpf.BlockLatencyEvidence{Result: ebpf.BlockLatencyResult{
 		Duration:          10 * time.Second,
@@ -350,6 +365,7 @@ func TestWriteIncludesEBPFBlockLatencyEvidence(t *testing.T) {
 	}
 }
 
+// TestWriteIncludesEBPFUnavailableWarning verifies write includes ebpf unavailable warning.
 func TestWriteIncludesEBPFUnavailableWarning(t *testing.T) {
 	latency := ebpf.BlockLatencyEvidence{UnavailableReason: "permission denied loading eBPF\ntry running with sudo"}
 	var output bytes.Buffer
@@ -362,6 +378,7 @@ func TestWriteIncludesEBPFUnavailableWarning(t *testing.T) {
 	}
 }
 
+// TestWriteIncludesVMAttributedEBPFEvidence verifies write includes vm attributed ebpf evidence.
 func TestWriteIncludesVMAttributedEBPFEvidence(t *testing.T) {
 	vmEvidence := attributedLatencyFixture("available", 4, 96, 100)
 	report := Report{
@@ -394,6 +411,7 @@ func TestWriteIncludesVMAttributedEBPFEvidence(t *testing.T) {
 	}
 }
 
+// TestApplyEBPFVMAttributionIsConservative verifies apply ebpfvm attribution is conservative.
 func TestApplyEBPFVMAttributionIsConservative(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -430,6 +448,7 @@ func TestApplyEBPFVMAttributionIsConservative(t *testing.T) {
 	}
 }
 
+// attributedLatencyFixture builds attributed latency fixture from validated inputs.
 func attributedLatencyFixture(quality string, unattributedPercent float64, victimOps, suspectOps uint64) ebpf.VMBlockLatencyReport {
 	attributed := victimOps + suspectOps
 	return ebpf.VMBlockLatencyReport{

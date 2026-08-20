@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// qemuDetails builds QEMU details from validated inputs.
 func qemuDetails(name string) (string, string) {
 	pid := readLibvirtPIDFile(name)
 	if pid != "" {
@@ -26,6 +27,7 @@ func qemuDetails(name string) (string, string) {
 	return pid, ""
 }
 
+// readLibvirtPIDFile reads libvirt pid file from its configured source.
 func readLibvirtPIDFile(name string) string {
 	dirs := []string{
 		"/run/libvirt/qemu",
@@ -58,6 +60,7 @@ func readLibvirtPIDFile(name string) string {
 	return ""
 }
 
+// readProcCmdline reads proc cmdline from its configured source.
 func readProcCmdline(pid string) string {
 	b, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
 	if err != nil {
@@ -67,6 +70,7 @@ func readProcCmdline(pid string) string {
 	return strings.TrimSpace(strings.ReplaceAll(string(b), "\x00", " "))
 }
 
+// findCmdlineByPID finds cmdline by pid in the available data.
 func findCmdlineByPID(pid string) string {
 	out, err := exec.Command("ps", "-ww", "-p", pid, "-o", "args=").CombinedOutput()
 	if err != nil {
@@ -76,6 +80,7 @@ func findCmdlineByPID(pid string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// findQEMUFromPS finds qemu from ps in the available data.
 func findQEMUFromPS(name string) (string, string) {
 	out, err := exec.Command("ps", "-ww", "-eo", "pid=,args=").CombinedOutput()
 	if err != nil {

@@ -18,10 +18,12 @@ func Resolve(diskPath string) Mapping {
 	return resolveWithRunnerAndSysfs(diskPath, runCommand, defaultSysfsBlockPath)
 }
 
+// resolveWithRunner resolves with runner from the available inputs.
 func resolveWithRunner(diskPath string, run commandRunner) Mapping {
 	return resolveWithRunnerAndSysfs(diskPath, run, defaultSysfsBlockPath)
 }
 
+// resolveWithRunnerAndSysfs resolves with runner and sysfs from the available inputs.
 func resolveWithRunnerAndSysfs(diskPath string, run commandRunner, sysfsBlockPath string) Mapping {
 	diskPath = strings.TrimSpace(diskPath)
 	mapping := Mapping{DiskPath: diskPath}
@@ -61,10 +63,12 @@ func resolveWithRunnerAndSysfs(diskPath string, run commandRunner, sysfsBlockPat
 	return mapping
 }
 
+// runCommand executes the command workflow.
 func runCommand(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
 }
 
+// parseFindmnt parses and validates findmnt.
 func parseFindmnt(output []byte) (string, string, string, bool) {
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(line)
@@ -76,6 +80,7 @@ func parseFindmnt(output []byte) (string, string, string, bool) {
 	return "", "", "", false
 }
 
+// sourceForLSBLK derives stable operator-facing text for source for lsblk.
 func sourceForLSBLK(source string) string {
 	if index := strings.IndexByte(source, '['); index >= 0 {
 		return source[:index]
@@ -89,6 +94,8 @@ func NormalizeBlockDevice(device string) string {
 	return normalizeBlockDeviceWithSysfs(device, defaultSysfsBlockPath)
 }
 
+// normalizeBlockDeviceWithSysfs normalizes block device with sysfs into its canonical
+// representation.
 func normalizeBlockDeviceWithSysfs(device, sysfsBlockPath string) string {
 	device = sourceForLSBLK(strings.TrimSpace(device))
 	if !strings.HasPrefix(device, "/dev/") {
@@ -100,6 +107,7 @@ func normalizeBlockDeviceWithSysfs(device, sysfsBlockPath string) string {
 	return device
 }
 
+// parseDeviceList parses and validates device list.
 func parseDeviceList(output []byte) string {
 	var devices []string
 	for _, line := range strings.Split(string(output), "\n") {
@@ -112,6 +120,7 @@ func parseDeviceList(output []byte) string {
 	return formatDeviceList(devices)
 }
 
+// resolveSysfsTopology resolves sysfs topology from the available inputs.
 func resolveSysfsTopology(source, sysfsBlockPath string) ([]string, []string) {
 	kernelName := kernelBlockName(source, sysfsBlockPath)
 	if kernelName == "" {
@@ -127,6 +136,7 @@ func resolveSysfsTopology(source, sysfsBlockPath string) ([]string, []string) {
 	return sortedUnique(parents), sortedUnique(physicalDisks)
 }
 
+// kernelBlockName derives stable operator-facing text for kernel block name.
 func kernelBlockName(source, sysfsBlockPath string) string {
 	if resolved, err := filepath.EvalSymlinks(source); err == nil {
 		name := filepath.Base(resolved)
@@ -160,6 +170,7 @@ func kernelBlockName(source, sysfsBlockPath string) string {
 	return ""
 }
 
+// terminalSlaves builds terminal slaves from validated inputs.
 func terminalSlaves(name, sysfsBlockPath string, visited map[string]bool) []string {
 	if visited[name] {
 		return nil
@@ -181,6 +192,7 @@ func terminalSlaves(name, sysfsBlockPath string, visited map[string]bool) []stri
 	return sortedUnique(terminals)
 }
 
+// physicalDisksFor builds physical disks for from validated inputs.
 func physicalDisksFor(name, sysfsBlockPath string, visited map[string]bool) []string {
 	if visited[name] {
 		return nil
@@ -205,6 +217,7 @@ func physicalDisksFor(name, sysfsBlockPath string, visited map[string]bool) []st
 	return []string{name}
 }
 
+// blockSlaves builds block slaves from validated inputs.
 func blockSlaves(name, sysfsBlockPath string) []string {
 	entries, err := os.ReadDir(filepath.Join(sysfsBlockPath, name, "slaves"))
 	if err != nil {
@@ -219,6 +232,7 @@ func blockSlaves(name, sysfsBlockPath string) []string {
 	return slaves
 }
 
+// partitionParent derives stable operator-facing text for partition parent.
 func partitionParent(name, sysfsBlockPath string) string {
 	if _, err := os.Stat(filepath.Join(sysfsBlockPath, name, "partition")); err != nil {
 		return ""
@@ -235,11 +249,13 @@ func partitionParent(name, sysfsBlockPath string) string {
 	return parent
 }
 
+// blockEntryExists reports whether block entry exists.
 func blockEntryExists(sysfsBlockPath, name string) bool {
 	_, err := os.Stat(filepath.Join(sysfsBlockPath, name))
 	return err == nil
 }
 
+// isVirtualBlockDevice reports whether virtual block device.
 func isVirtualBlockDevice(name string) bool {
 	return strings.HasPrefix(name, "dm-") ||
 		strings.HasPrefix(name, "loop") ||
@@ -247,6 +263,7 @@ func isVirtualBlockDevice(name string) bool {
 		strings.HasPrefix(name, "zram")
 }
 
+// formatDeviceList formats device list using the stable output contract.
 func formatDeviceList(devices []string) string {
 	devices = sortedUnique(devices)
 	for i, device := range devices {
@@ -257,6 +274,7 @@ func formatDeviceList(devices []string) string {
 	return strings.Join(devices, ",")
 }
 
+// sortedUnique sorts values and removes duplicates for deterministic output.
 func sortedUnique(values []string) []string {
 	seen := make(map[string]bool)
 	var result []string

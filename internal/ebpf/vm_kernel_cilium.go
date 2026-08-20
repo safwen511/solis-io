@@ -40,6 +40,7 @@ type VMBlockKernelStageError struct {
 	Err       error
 }
 
+// Error returns the human-readable error description.
 func (err *VMBlockKernelStageError) Error() string {
 	if err == nil {
 		return ""
@@ -51,6 +52,7 @@ func (err *VMBlockKernelStageError) Error() string {
 	return message
 }
 
+// Unwrap exposes the underlying error for standard error-chain inspection.
 func (err *VMBlockKernelStageError) Unwrap() error {
 	if err == nil {
 		return nil
@@ -58,6 +60,7 @@ func (err *VMBlockKernelStageError) Unwrap() error {
 	return err.Err
 }
 
+// vmBlockStageStatus derives stable operator-facing text for VM block stage status.
 func vmBlockStageStatus(err error, fallback string) string {
 	var stageError *VMBlockKernelStageError
 	if errors.As(err, &stageError) {
@@ -86,6 +89,8 @@ type ciliumVMBlockKernelSource struct {
 	loader          vmBlockCountObjectLoader
 }
 
+// newCiliumVMBlockKernelSource constructs cilium VM block kernel source wired to the package's
+// production dependencies.
 func newCiliumVMBlockKernelSource() VMBlockKernelSource {
 	return &ciliumVMBlockKernelSource{
 		platform:        runtime.GOOS,
@@ -97,6 +102,7 @@ func newCiliumVMBlockKernelSource() VMBlockKernelSource {
 	}
 }
 
+// Preflight checks prerequisites without loading or attaching an eBPF program.
 func (source *ciliumVMBlockKernelSource) Preflight(context.Context) (VMBlockKernelPreflight, error) {
 	if source == nil || source.platform != "linux" {
 		return VMBlockKernelPreflight{Status: VMBlockCapabilityUnsupportedKernel, Error: ErrVMBlockUnsupportedKernel.Error()}, ErrVMBlockUnsupportedKernel
@@ -144,6 +150,7 @@ func (source *ciliumVMBlockKernelSource) Preflight(context.Context) (VMBlockKern
 	return VMBlockKernelPreflight{Available: true, Status: "available", Capabilities: capabilities}, nil
 }
 
+// Prepare allocates a collector session but leaves lifecycle start and cleanup to the caller.
 func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, options VMBlockLatencyCollectOptions, _ []VMBlockCgroupMapping) (VMBlockKernelSession, error) {
 	if strings.TrimSpace(options.DeviceFilter) != "" {
 		return nil, &VMBlockKernelStageError{
@@ -171,6 +178,7 @@ func (source *ciliumVMBlockKernelSource) Prepare(_ context.Context, options VMBl
 	return &ciliumVMBlockKernelSession{resources: resources}, nil
 }
 
+// supportsBPFELArchitecture reports whether GOARCH uses little-endian layouts supported by the ELF.
 func supportsBPFELArchitecture(architecture string) bool {
 	switch strings.TrimSpace(architecture) {
 	case "386", "amd64", "arm", "arm64", "loong64", "mipsle", "mips64le", "ppc64le", "riscv64":
@@ -180,6 +188,8 @@ func supportsBPFELArchitecture(architecture string) bool {
 	}
 }
 
+// classifyVMBlockObjectProviderError maps VM block object provider error to the package's stable
+// public status categories.
 func classifyVMBlockObjectProviderError(stage, operation string, err error) error {
 	if errors.Is(err, ErrVMBlockObjectUnavailable) || errors.Is(err, fs.ErrNotExist) {
 		return &VMBlockKernelStageError{Status: "object_unavailable", Stage: stage, Operation: operation, Err: err}
@@ -187,6 +197,8 @@ func classifyVMBlockObjectProviderError(stage, operation string, err error) erro
 	return &VMBlockKernelStageError{Status: "object_invalid", Stage: stage, Operation: operation, Err: err}
 }
 
+// classifyVMBlockPreflightStatus maps VM block preflight status to the package's stable public
+// status categories.
 func classifyVMBlockPreflightStatus(err error) string {
 	switch {
 	case errors.Is(err, ErrVMBlockBTFMissing):
@@ -204,11 +216,15 @@ func classifyVMBlockPreflightStatus(err error) string {
 	}
 }
 
+// probeVMBlockTypedTracepoints inspects VM block typed tracepoints without mutating the observed
+// host.
 func probeVMBlockTypedTracepoints() error {
 	_, err := inspectVMBlockTypedTracepoints()
 	return err
 }
 
+// inspectVMBlockTypedTracepoints inspects VM block typed tracepoints without mutating the observed
+// host.
 func inspectVMBlockTypedTracepoints() ([]vmBlockTypedTracepointPrototype, error) {
 	if _, err := os.Stat("/sys/kernel/btf/vmlinux"); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -252,6 +268,7 @@ var vmBlockTypedTracepointExpectations = []vmBlockTypedTracepointExpectation{
 	},
 }
 
+// resolveVMBlockTypedTracepoints resolves both tp_btf prototypes and records their exact parameters.
 func resolveVMBlockTypedTracepoints(spec vmBlockBTFTypeFinder) ([]vmBlockTypedTracepointPrototype, error) {
 	if spec == nil {
 		return nil, &VMBlockKernelStageError{
@@ -283,6 +300,7 @@ func resolveVMBlockTypedTracepoints(spec vmBlockBTFTypeFinder) ([]vmBlockTypedTr
 	return prototypes, nil
 }
 
+// describeVMBlockTypedTracepoint accepts the kernel's typedef/function representation of one tp_btf hook.
 func describeVMBlockTypedTracepoint(tracepoint *btf.Typedef, expectation vmBlockTypedTracepointExpectation) (vmBlockTypedTracepointPrototype, error) {
 	if tracepoint == nil {
 		return vmBlockTypedTracepointPrototype{}, errors.New("kernel BTF typedef is nil")
@@ -314,6 +332,7 @@ func describeVMBlockTypedTracepoint(tracepoint *btf.Typedef, expectation vmBlock
 	}, nil
 }
 
+// formatVMBlockBTFType formats vm block btf type using the stable output contract.
 func formatVMBlockBTFType(value btf.Type) string {
 	value = btf.QualifiedType(value)
 	switch typed := value.(type) {
@@ -336,6 +355,7 @@ func formatVMBlockBTFType(value btf.Type) string {
 	}
 }
 
+// equalVMBlockParameters reports whether two candidate prototypes describe the same parameter list.
 func equalVMBlockParameters(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
@@ -348,6 +368,7 @@ func equalVMBlockParameters(got, want []string) bool {
 	return true
 }
 
+// firstVMBlockParameter derives stable operator-facing text for first VM block parameter.
 func firstVMBlockParameter(parameters []string) string {
 	if len(parameters) == 0 {
 		return "-"
@@ -366,6 +387,7 @@ type ciliumVMBlockKernelSession struct {
 	closeErr     error
 }
 
+// Start attaches issue first and complete second, rolling back issue if the second attach fails.
 func (session *ciliumVMBlockKernelSession) Start(context.Context) error {
 	issueLink, err := session.resources.AttachIssue()
 	if err != nil {
@@ -396,6 +418,7 @@ func (session *ciliumVMBlockKernelSession) Start(context.Context) error {
 	return nil
 }
 
+// Collect keeps the attached programs active for one bounded observation window.
 func (session *ciliumVMBlockKernelSession) Collect(ctx context.Context, duration time.Duration, _ func(VMBlockEvent) error) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -431,8 +454,10 @@ func (session *ciliumVMBlockKernelSession) Collect(ctx context.Context, duration
 	return nil
 }
 
+// Stats returns the session's bounded aggregate counters and collection metadata.
 func (session *ciliumVMBlockKernelSession) Stats() VMBlockKernelStats { return session.stats }
 
+// Stop detaches both links and joins cleanup failures without hiding either stage.
 func (session *ciliumVMBlockKernelSession) Stop() error {
 	session.stopOnce.Do(func() {
 		// Stop new issues first, then allow the completion hook to remain until
@@ -446,6 +471,7 @@ func (session *ciliumVMBlockKernelSession) Stop() error {
 	return session.stopErr
 }
 
+// Close releases the resources owned by the receiver.
 func (session *ciliumVMBlockKernelSession) Close() error {
 	session.closeOnce.Do(func() {
 		stopErr := session.Stop()
@@ -458,6 +484,7 @@ func (session *ciliumVMBlockKernelSession) Close() error {
 	return session.closeErr
 }
 
+// closeVMBlockLink closes vm block link and preserves any cleanup failure.
 func closeVMBlockLink(target *io.Closer) error {
 	if target == nil || *target == nil {
 		return nil
@@ -467,6 +494,8 @@ func closeVMBlockLink(target *io.Closer) error {
 	return link.Close()
 }
 
+// classifyVMBlockAttachError maps VM block attach error to the package's stable public status
+// categories.
 func classifyVMBlockAttachError(stage, operation string, err error) error {
 	if isPermissionError(err) {
 		return &VMBlockKernelStageError{Status: "permission_denied", Stage: stage, Operation: operation, Err: err}
@@ -477,6 +506,8 @@ func classifyVMBlockAttachError(stage, operation string, err error) error {
 	return &VMBlockKernelStageError{Status: "attach_failed", Stage: stage, Operation: operation, Err: err}
 }
 
+// classifyVMBlockLoadError maps VM block load error to the package's stable public status
+// categories.
 func classifyVMBlockLoadError(err error) error {
 	var verifierError *VMBlockVerifierError
 	if errors.As(err, &verifierError) {
@@ -512,6 +543,7 @@ type VMBlockMapLayoutError struct {
 	GoSize         int
 }
 
+// Error returns the human-readable error description.
 func (err *VMBlockMapLayoutError) Error() string {
 	if err == nil {
 		return ""
@@ -534,6 +566,7 @@ type ciliumVMBlockObjects struct {
 	CgroupDeviceOperationStats *ciliumebpf.Map     `ebpf:"cgroup_device_operation_stats"`
 }
 
+// Load validates authentic object map layouts before loading CO-RE programs into the kernel.
 func (ciliumVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, error) {
 	spec, err := ciliumebpf.LoadCollectionSpecFromReader(bytes.NewReader(object))
 	if err != nil {
@@ -556,6 +589,7 @@ func (ciliumVMBlockObjectLoader) Load(object []byte) (vmBlockCountResources, err
 	return objects, nil
 }
 
+// validateVMBlockCollectionSpec verifies every required program and map before kernel loading.
 func validateVMBlockCollectionSpec(spec *ciliumebpf.CollectionSpec) error {
 	if spec == nil {
 		return fmt.Errorf("%w: embedded eBPF collection spec is nil", ErrVMBlockObjectInvalid)
@@ -595,6 +629,7 @@ func validateVMBlockCollectionSpec(spec *ciliumebpf.CollectionSpec) error {
 	return nil
 }
 
+// validateVMBlockMapKeyLayout rejects C/Go key-size drift before map iteration can fail ambiguously.
 func validateVMBlockMapKeyLayout(mapName string, objectKeySize uint32, key any) error {
 	goKeySize := binary.Size(key)
 	if goKeySize < 0 || uint32(goKeySize) != objectKeySize {
@@ -605,6 +640,7 @@ func validateVMBlockMapKeyLayout(mapName string, objectKeySize uint32, key any) 
 	return nil
 }
 
+// validateVMBlockMapValueLayout rejects C/Go value-size drift before map iteration can fail ambiguously.
 func validateVMBlockMapValueLayout(mapName string, objectValueSize uint32, value any) error {
 	goValueSize := binary.Size(value)
 	if goValueSize < 0 || uint32(goValueSize) != objectValueSize {
@@ -615,14 +651,17 @@ func validateVMBlockMapValueLayout(mapName string, objectValueSize uint32, value
 	return nil
 }
 
+// AttachIssue attaches the generated tp_btf/block_rq_issue program.
 func (objects *ciliumVMBlockObjects) AttachIssue() (io.Closer, error) {
 	return link.AttachTracing(link.TracingOptions{Program: objects.OnIssue})
 }
 
+// AttachComplete attaches the generated tp_btf/block_rq_complete program.
 func (objects *ciliumVMBlockObjects) AttachComplete() (io.Closer, error) {
 	return link.AttachTracing(link.TracingOptions{Program: objects.OnComplete})
 }
 
+// ReadStats merges per-CPU sanitized aggregates; request map keys never enter the result.
 func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 	var perCPU []vmBlockCountValues
 	key := uint32(0)
@@ -681,6 +720,7 @@ func (objects *ciliumVMBlockObjects) ReadStats() (VMBlockKernelStats, error) {
 	return partial, nil
 }
 
+// readDeviceOperations reads device operations from its configured source.
 func (objects *ciliumVMBlockObjects) readDeviceOperations() ([]VMBlockKernelDeviceOperation, error) {
 	if err := validateVMBlockMapKeyLayout(vmBlockDeviceOperationMapName, objects.DeviceOperationStats.KeySize(), vmBlockDeviceOperationKey{}); err != nil {
 		return nil, err
@@ -711,6 +751,7 @@ func (objects *ciliumVMBlockObjects) readDeviceOperations() ([]VMBlockKernelDevi
 	return result, nil
 }
 
+// readCgroupDeviceOperations reads cgroup device operations from its configured source.
 func (objects *ciliumVMBlockObjects) readCgroupDeviceOperations() ([]VMBlockKernelCgroupDeviceOperation, error) {
 	if err := validateVMBlockMapKeyLayout(vmBlockCgroupDeviceOperationMapName, objects.CgroupDeviceOperationStats.KeySize(), vmBlockCgroupDeviceOperationKey{}); err != nil {
 		return nil, err
@@ -744,6 +785,7 @@ func (objects *ciliumVMBlockObjects) readCgroupDeviceOperations() ([]VMBlockKern
 	return result, nil
 }
 
+// Close releases the resources owned by the receiver.
 func (objects *ciliumVMBlockObjects) Close() error {
 	return errors.Join(
 		closeCiliumProgram(objects.OnIssue),
@@ -810,6 +852,7 @@ type vmBlockDeviceOperationKey struct {
 	Operation uint32
 }
 
+// mergeVMBlockPerCPULatency merges vm block per cpu latency while preserving explicit availability.
 func mergeVMBlockPerCPULatency(values []vmBlockLatencyValues) VMBlockKernelLatency {
 	var result VMBlockKernelLatency
 	for _, value := range values {
@@ -833,6 +876,7 @@ func mergeVMBlockPerCPULatency(values []vmBlockLatencyValues) VMBlockKernelLaten
 	return result
 }
 
+// vmBlockOperationName derives stable operator-facing text for VM block operation name.
 func vmBlockOperationName(operation uint32) string {
 	switch operation {
 	case 0:
@@ -848,6 +892,7 @@ func vmBlockOperationName(operation uint32) string {
 	}
 }
 
+// closeCiliumProgram closes cilium program and preserves any cleanup failure.
 func closeCiliumProgram(program *ciliumebpf.Program) error {
 	if program == nil {
 		return nil
@@ -855,6 +900,7 @@ func closeCiliumProgram(program *ciliumebpf.Program) error {
 	return program.Close()
 }
 
+// closeCiliumMap closes cilium map and preserves any cleanup failure.
 func closeCiliumMap(blockMap *ciliumebpf.Map) error {
 	if blockMap == nil {
 		return nil
@@ -862,6 +908,7 @@ func closeCiliumMap(blockMap *ciliumebpf.Map) error {
 	return blockMap.Close()
 }
 
+// saturatingAdd prevents counter aggregation from wrapping into misleading small values.
 func saturatingAdd(left, right uint64) uint64 {
 	if math.MaxUint64-left < right {
 		return math.MaxUint64

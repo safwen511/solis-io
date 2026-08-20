@@ -23,6 +23,7 @@ func Capture(victimSelector, suspectSelector string, victims []inventory.VM, sus
 	)
 }
 
+// captureWith records with in the private evidence bundle.
 func captureWith(
 	victimSelector string,
 	suspectSelector string,

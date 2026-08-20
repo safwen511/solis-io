@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// TestWriteJSONFileIsPrivateAndReplacesRegularFile verifies write json file is private and replaces
+// regular file.
 func TestWriteJSONFileIsPrivateAndReplacesRegularFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "stats.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -35,6 +37,7 @@ func TestWriteJSONFileIsPrivateAndReplacesRegularFile(t *testing.T) {
 	}
 }
 
+// TestWriteJSONFileRejectsSymlinkTarget verifies write json file rejects symlink target.
 func TestWriteJSONFileRejectsSymlinkTarget(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")
@@ -55,6 +58,8 @@ func TestWriteJSONFileRejectsSymlinkTarget(t *testing.T) {
 	}
 }
 
+// TestWriteJSONFileCleansTempOnRenderFailure verifies write json file cleans temp on render
+// failure.
 func TestWriteJSONFileCleansTempOnRenderFailure(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "stats.json")

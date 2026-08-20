@@ -11,6 +11,8 @@ import (
 	"testing"
 )
 
+// TestWritePrivateAtomicFileIsPrivateAndReplacesRegularFile verifies write private atomic file is
+// private and replaces regular file.
 func TestWritePrivateAtomicFileIsPrivateAndReplacesRegularFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "report.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -38,6 +40,8 @@ func TestWritePrivateAtomicFileIsPrivateAndReplacesRegularFile(t *testing.T) {
 	}
 }
 
+// TestWritePrivateAtomicFileRejectsMissingParent verifies write private atomic file rejects missing
+// parent.
 func TestWritePrivateAtomicFileRejectsMissingParent(t *testing.T) {
 	root := t.TempDir()
 	missingParent := filepath.Join(root, "missing", "nested")
@@ -51,6 +55,8 @@ func TestWritePrivateAtomicFileRejectsMissingParent(t *testing.T) {
 	}
 }
 
+// TestWritePrivateAtomicFileRejectsSymlinkTarget verifies write private atomic file rejects symlink
+// target.
 func TestWritePrivateAtomicFileRejectsSymlinkTarget(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.json")
@@ -71,6 +77,8 @@ func TestWritePrivateAtomicFileRejectsSymlinkTarget(t *testing.T) {
 	}
 }
 
+// TestWritePrivateAtomicFileRejectsParentSymlink verifies write private atomic file rejects parent
+// symlink.
 func TestWritePrivateAtomicFileRejectsParentSymlink(t *testing.T) {
 	root := t.TempDir()
 	realParent := filepath.Join(root, "real")
@@ -90,6 +98,8 @@ func TestWritePrivateAtomicFileRejectsParentSymlink(t *testing.T) {
 	}
 }
 
+// TestWritePrivateAtomicFileRejectsNonRegularTarget verifies write private atomic file rejects non
+// regular target.
 func TestWritePrivateAtomicFileRejectsNonRegularTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.json")
 	if err := os.Mkdir(path, 0o700); err != nil {
@@ -101,6 +111,8 @@ func TestWritePrivateAtomicFileRejectsNonRegularTarget(t *testing.T) {
 	}
 }
 
+// TestWritePrivateAtomicFileCleansTemporaryFileOnRenderFailure verifies write private atomic file
+// cleans temporary file on render failure.
 func TestWritePrivateAtomicFileCleansTemporaryFileOnRenderFailure(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "report.json")
@@ -120,6 +132,8 @@ func TestWritePrivateAtomicFileCleansTemporaryFileOnRenderFailure(t *testing.T) 
 	}
 }
 
+// TestWritePrivateAtomicFileIsDeterministicForDeterministicRenderer verifies write private atomic
+// file is deterministic for deterministic renderer.
 func TestWritePrivateAtomicFileIsDeterministicForDeterministicRenderer(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.json")
@@ -142,6 +156,7 @@ func TestWritePrivateAtomicFileIsDeterministicForDeterministicRenderer(t *testin
 	}
 }
 
+// writePrivateFixture renders private fixture in the package's stable operator-facing format.
 func writePrivateFixture(value string) func(io.Writer) error {
 	return func(writer io.Writer) error {
 		_, err := io.WriteString(writer, value)

@@ -182,6 +182,7 @@ func Validate(settings Settings) error {
 	return validateObservability(settings.Observability)
 }
 
+// extractConfigFlag extracts config flag from validated source data.
 func extractConfigFlag(args []string) (string, []string, error) {
 	remaining := make([]string, 0, len(args))
 	var path string
@@ -207,6 +208,7 @@ func extractConfigFlag(args []string) (string, []string, error) {
 	return path, remaining, nil
 }
 
+// ensureJSONEOF ensures jsoneof satisfies the required invariant.
 func ensureJSONEOF(decoder *json.Decoder) error {
 	var extra any
 	err := decoder.Decode(&extra)
@@ -219,6 +221,7 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	return err
 }
 
+// resolveRelativePath resolves relative path from the available inputs.
 func resolveRelativePath(baseDir, value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

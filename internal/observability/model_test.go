@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestWriteGuestStatusDeterministic verifies write guest status deterministic.
 func TestWriteGuestStatusDeterministic(t *testing.T) {
 	status := GuestStatus{
 		VM: VMIdentity{Name: "a-web", Tenant: "tenant-a", Role: "web"},
@@ -24,6 +25,7 @@ func TestWriteGuestStatusDeterministic(t *testing.T) {
 	assertPrivacyFalse(t, output)
 }
 
+// TestWriteDBStatusDeterministic verifies write db status deterministic.
 func TestWriteDBStatusDeterministic(t *testing.T) {
 	status := DBStatus{
 		Engine:           "postgresql",
@@ -39,6 +41,7 @@ func TestWriteDBStatusDeterministic(t *testing.T) {
 	assertPrivacyFalse(t, output)
 }
 
+// TestWriteServiceStatusDeterministic verifies write service status deterministic.
 func TestWriteServiceStatusDeterministic(t *testing.T) {
 	status := ServiceStatus{
 		Name: "web",
@@ -54,6 +57,7 @@ func TestWriteServiceStatusDeterministic(t *testing.T) {
 	assertPrivacyFalse(t, output)
 }
 
+// TestWriteIncidentTimelineDeterministic verifies write incident timeline deterministic.
 func TestWriteIncidentTimelineDeterministic(t *testing.T) {
 	timeline := IncidentTimeline{
 		IncidentID: "incident-1",
@@ -71,6 +75,7 @@ func TestWriteIncidentTimelineDeterministic(t *testing.T) {
 	assertPrivacyFalse(t, output)
 }
 
+// TestPrivacyFlagsDefaultToFalse verifies privacy flags default to false.
 func TestPrivacyFlagsDefaultToFalse(t *testing.T) {
 	data, err := json.Marshal(PrivacyFlags{})
 	if err != nil {
@@ -93,6 +98,7 @@ func TestPrivacyFlagsDefaultToFalse(t *testing.T) {
 	}
 }
 
+// TestRendererRejectsUnsafePrivacyFlags verifies renderer rejects unsafe privacy flags.
 func TestRendererRejectsUnsafePrivacyFlags(t *testing.T) {
 	var output bytes.Buffer
 	err := WriteGuestStatus(&output, GuestStatus{Privacy: PrivacyFlags{SecretsCollected: true}})
@@ -101,6 +107,7 @@ func TestRendererRejectsUnsafePrivacyFlags(t *testing.T) {
 	}
 }
 
+// renderTwice renders twice for presentation.
 func renderTwice(t *testing.T, render func(*bytes.Buffer) error) string {
 	t.Helper()
 	var first, second bytes.Buffer
@@ -120,6 +127,7 @@ func renderTwice(t *testing.T, render func(*bytes.Buffer) error) string {
 	return first.String()
 }
 
+// assertOrdered performs assert ordered as part of the package workflow.
 func assertOrdered(t *testing.T, output, first, second string) {
 	t.Helper()
 	firstIndex, secondIndex := strings.Index(output, first), strings.Index(output, second)
@@ -128,6 +136,7 @@ func assertOrdered(t *testing.T, output, first, second string) {
 	}
 }
 
+// assertPrivacyFalse performs assert privacy false as part of the package workflow.
 func assertPrivacyFalse(t *testing.T, output string) {
 	t.Helper()
 	for _, name := range []string{

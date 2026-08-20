@@ -27,10 +27,12 @@ type Options struct {
 	HTTPClient     *http.Client
 }
 
+// DefaultOptions returns the default options.
 func DefaultOptions() Options {
 	return Options{CommandTimeout: 10 * time.Second, HealthTimeout: 5 * time.Second, Now: time.Now}
 }
 
+// Collect collects bounded evidence from the configured source and propagates source failures.
 func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm inventory.VM, services []solisconfig.ServiceObservabilityConfig, options Options) (Report, error) {
 	if runner == nil {
 		return Report{}, errors.New("guest runner is required")
@@ -132,6 +134,7 @@ func Collect(ctx context.Context, runner guest.Runner, target guest.Target, vm i
 	return report, nil
 }
 
+// collectPorts collects ports from the configured evidence sources.
 func collectPorts(ctx context.Context, runner guest.Runner, target guest.Target, timeout time.Duration) ([]observability.ListeningPort, observability.Availability) {
 	commandContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -146,6 +149,7 @@ func collectPorts(ctx context.Context, runner guest.Runner, target guest.Target,
 	return ports, measured()
 }
 
+// checkHealth checks health and reports any failed requirement.
 func checkHealth(ctx context.Context, host string, health solisconfig.HealthCheckConfig, options Options) observability.AppHealthStatus {
 	status := observability.AppHealthStatus{Name: health.Name, Path: health.Path, Checked: true, BodyCollected: false}
 	endpoint := url.URL{Scheme: "http", Host: net.JoinHostPort(host, fmt.Sprintf("%d", health.Port)), Path: health.Path}
@@ -173,6 +177,7 @@ func checkHealth(ctx context.Context, host string, health solisconfig.HealthChec
 	return status
 }
 
+// httpClient builds http client from validated inputs.
 func httpClient(options Options) *http.Client {
 	base := options.HTTPClient
 	client := &http.Client{Timeout: options.HealthTimeout}
@@ -184,6 +189,7 @@ func httpClient(options Options) *http.Client {
 	return client
 }
 
+// sanitizeHTTPError sanitizes http error for safe output.
 func sanitizeHTTPError(err error) error {
 	var urlError *url.Error
 	if errors.As(err, &urlError) {
@@ -195,6 +201,7 @@ func sanitizeHTTPError(err error) error {
 	return errors.New("health check request failed")
 }
 
+// serviceIdentity builds the stable service identity used to correlate configured health checks.
 func serviceIdentity(service solisconfig.ServiceObservabilityConfig) string {
 	if strings.TrimSpace(service.ID) != "" {
 		return strings.TrimSpace(service.ID)
@@ -202,10 +209,12 @@ func serviceIdentity(service solisconfig.ServiceObservabilityConfig) string {
 	return service.VM
 }
 
+// measured constructs availability metadata for a successfully measured value.
 func measured() observability.Availability {
 	return observability.Availability{Available: true, Source: source, Quality: observability.EvidenceQualityMeasured}
 }
 
+// unavailable constructs unavailable metadata with a bounded reason.
 func unavailable(err error) observability.Availability {
 	detail := "unavailable"
 	if err != nil {

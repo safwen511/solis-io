@@ -12,6 +12,7 @@ readonly version_package="github.com/safwen511/solis-io/internal/version"
 
 output_dir="${repo_root}/dist"
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: scripts/build-release.sh [--output-dir DIR]
@@ -22,6 +23,7 @@ be created, but existing release artifacts are never overwritten.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
@@ -112,6 +114,7 @@ readonly temporary_root="$(mktemp -d "${output_dir}/.solis-release-${version}-XX
 archive_temporary=""
 checksum_temporary=""
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM

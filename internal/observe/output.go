@@ -28,6 +28,7 @@ func MarshalJSON(snapshot ObserveSnapshot) ([]byte, error) {
 	return bytes.TrimSuffix(output.Bytes(), []byte("\n")), nil
 }
 
+// WriteJSON renders JSON in the package's stable operator-facing format.
 func WriteJSON(dst io.Writer, snapshot ObserveSnapshot) error {
 	if err := validateSnapshotPrivacy(snapshot); err != nil {
 		return err
@@ -39,6 +40,7 @@ func WriteJSON(dst io.Writer, snapshot ObserveSnapshot) error {
 	return encoder.Encode(snapshot)
 }
 
+// validateSnapshotPrivacy validates snapshot privacy against its required contract.
 func validateSnapshotPrivacy(snapshot ObserveSnapshot) error {
 	flags := []observability.PrivacyFlags{snapshot.Privacy}
 	if snapshot.HostStatus != nil {
@@ -87,6 +89,7 @@ func validateSnapshotPrivacy(snapshot ObserveSnapshot) error {
 	return nil
 }
 
+// normalizeSnapshot normalizes snapshot into its canonical representation.
 func normalizeSnapshot(snapshot *ObserveSnapshot) {
 	if snapshot.SchemaVersion == "" {
 		snapshot.SchemaVersion = SchemaVersion
@@ -174,6 +177,7 @@ func normalizeSnapshot(snapshot *ObserveSnapshot) {
 	normalizeDB(snapshot.SuspectDBStatus)
 }
 
+// normalizeGuest normalizes guest into its canonical representation.
 func normalizeGuest(status *observability.GuestStatus) {
 	if status == nil {
 		return
@@ -193,6 +197,7 @@ func normalizeGuest(status *observability.GuestStatus) {
 	sort.Slice(status.ProcessPressure, func(i, j int) bool { return status.ProcessPressure[i].PID < status.ProcessPressure[j].PID })
 }
 
+// normalizeService normalizes service into its canonical representation.
 func normalizeService(report *servicehealth.Report) {
 	if report == nil {
 		return
@@ -214,6 +219,7 @@ func normalizeService(report *servicehealth.Report) {
 	}
 }
 
+// normalizeDB normalizes db into its canonical representation.
 func normalizeDB(status *observability.DBStatus) {
 	if status == nil {
 		return

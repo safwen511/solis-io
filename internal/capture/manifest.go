@@ -38,6 +38,7 @@ type ManifestFile struct {
 	Mode      string `json:"mode"`
 }
 
+// buildManifest builds manifest from validated inputs.
 func buildManifest(directory, captureID string, createdAt time.Time, names []string) (Manifest, error) {
 	sortedNames := append([]string(nil), names...)
 	sort.Strings(sortedNames)
@@ -61,6 +62,7 @@ func buildManifest(directory, captureID string, createdAt time.Time, names []str
 	return manifest, nil
 }
 
+// validateArtifactName validates artifact name against its required contract.
 func validateArtifactName(name string) error {
 	if filepath.Base(name) != name || name == "." || name == manifestFilename {
 		return fmt.Errorf("invalid capture artifact name %q", name)
@@ -68,6 +70,7 @@ func validateArtifactName(name string) error {
 	return nil
 }
 
+// manifestFile builds manifest file and returns an error when validation or source access fails.
 func manifestFile(path, name string) (ManifestFile, error) {
 	file, err := os.Open(path)
 	if err != nil {

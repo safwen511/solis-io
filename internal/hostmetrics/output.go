@@ -21,6 +21,7 @@ func WriteJSON(dst io.Writer, status HostStatus) error {
 	return encoder.Encode(status)
 }
 
+// normalizeHostStatus normalizes host status into its canonical representation.
 func normalizeHostStatus(status *HostStatus) {
 	if status.SchemaVersion == "" {
 		status.SchemaVersion = SchemaVersion
@@ -55,6 +56,7 @@ func normalizeHostStatus(status *HostStatus) {
 	})
 }
 
+// privacySafe reports whether privacy safe.
 func privacySafe(privacy observability.PrivacyFlags) bool {
 	return !privacy.ProcessArgumentsCollected && !privacy.EnvironmentCollected &&
 		!privacy.GuestFilesCollected && !privacy.QueryTextCollected &&

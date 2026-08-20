@@ -29,6 +29,8 @@ type kernelVMBlockBTFCapabilityResolver struct {
 	spec vmBlockBTFTypeFinder
 }
 
+// inspectKernelVMBlockBTFCapabilities inspects kernel VM block BTF capabilities without mutating
+// the observed host.
 func inspectKernelVMBlockBTFCapabilities() (VMBlockBTFCapabilityReport, error) {
 	spec, err := btf.LoadKernelSpec()
 	if err != nil {
@@ -37,10 +39,13 @@ func inspectKernelVMBlockBTFCapabilities() (VMBlockBTFCapabilityReport, error) {
 	return resolveKernelVMBlockBTFCapabilities(spec), nil
 }
 
+// resolveKernelVMBlockBTFCapabilities resolves kernel vm block btf capabilities from the available
+// inputs.
 func resolveKernelVMBlockBTFCapabilities(spec vmBlockBTFTypeFinder) VMBlockBTFCapabilityReport {
 	return ResolveVMBlockBTFCapabilities(context.Background(), kernelVMBlockBTFCapabilityResolver{spec: spec})
 }
 
+// Resolve resolves source identities from validated inputs and reports unsupported layouts.
 func (resolver kernelVMBlockBTFCapabilityResolver) Resolve(_ context.Context, requirement VMBlockBTFCapabilityRequirement) (VMBlockBTFCapability, error) {
 	available := VMBlockBTFCapability{Available: true, Status: VMBlockCapabilityAvailable}
 	if resolver.spec == nil {
@@ -81,6 +86,8 @@ func (resolver kernelVMBlockBTFCapabilityResolver) Resolve(_ context.Context, re
 	}
 }
 
+// validateVMBlockRequestOperationEnum validates vm block request operation enum against its
+// required contract.
 func validateVMBlockRequestOperationEnum(enumeration *btf.Enum) error {
 	if enumeration == nil {
 		return errors.New("enum req_op is unavailable")
@@ -103,6 +110,7 @@ func validateVMBlockRequestOperationEnum(enumeration *btf.Enum) error {
 	return fmt.Errorf("enum req_op is missing expected values: %s", strings.Join(sortedUniqueStrings(missing), ", "))
 }
 
+// resolveVMBlockMemberPath resolves vm block member path from the available inputs.
 func resolveVMBlockMemberPath(spec vmBlockBTFTypeFinder, path string) error {
 	parts := strings.Split(strings.TrimSpace(path), ".")
 	if len(parts) < 2 {
@@ -129,6 +137,7 @@ func resolveVMBlockMemberPath(spec vmBlockBTFTypeFinder, path string) error {
 	return nil
 }
 
+// vmBlockStructMember builds VM block struct member from validated inputs.
 func vmBlockStructMember(value *btf.Struct, name string) (btf.Member, bool) {
 	if value == nil {
 		return btf.Member{}, false
@@ -141,6 +150,7 @@ func vmBlockStructMember(value *btf.Struct, name string) (btf.Member, bool) {
 	return btf.Member{}, false
 }
 
+// vmBlockUnderlyingStruct builds VM block underlying struct from validated inputs.
 func vmBlockUnderlyingStruct(value btf.Type) (*btf.Struct, bool) {
 	value = btf.UnderlyingType(value)
 	if pointer, ok := value.(*btf.Pointer); ok {
@@ -150,6 +160,7 @@ func vmBlockUnderlyingStruct(value btf.Type) (*btf.Struct, bool) {
 	return structure, ok
 }
 
+// vmBlockCapabilityAvailable reports whether VM block capability available.
 func vmBlockCapabilityAvailable(report VMBlockBTFCapabilityReport, name string) bool {
 	for _, capability := range report.Capabilities {
 		if capability.Name == name {
@@ -159,6 +170,7 @@ func vmBlockCapabilityAvailable(report VMBlockBTFCapabilityReport, name string) 
 	return false
 }
 
+// missingVMBlockCapabilities builds missing VM block capabilities from validated inputs.
 func missingVMBlockCapabilities(report VMBlockBTFCapabilityReport, names []string) []string {
 	missing := make([]string, 0)
 	for _, name := range names {
@@ -169,6 +181,7 @@ func missingVMBlockCapabilities(report VMBlockBTFCapabilityReport, names []strin
 	return sortedUniqueStrings(missing)
 }
 
+// vmBlockAttributionPreflight builds VM block attribution preflight from validated inputs.
 func vmBlockAttributionPreflight(report VMBlockBTFCapabilityReport) VMBlockAttributionPreflight {
 	if len(report.Capabilities) == 0 {
 		return VMBlockAttributionPreflight{
@@ -191,6 +204,8 @@ func vmBlockAttributionPreflight(report VMBlockBTFCapabilityReport) VMBlockAttri
 	return result
 }
 
+// vmBlockAttributionPreflightCaveats builds VM block attribution preflight caveats from validated
+// inputs.
 func vmBlockAttributionPreflightCaveats() []string {
 	return []string{
 		"VM attribution is not enabled; this result validates BTF field availability only",
@@ -201,6 +216,8 @@ func vmBlockAttributionPreflightCaveats() []string {
 	}
 }
 
+// vmBlockAttributionEnabledCaveats builds VM block attribution enabled caveats from validated
+// inputs.
 func vmBlockAttributionEnabledCaveats() []string {
 	return []string{
 		"experimental runtime ownership extraction is enabled for this collection window",

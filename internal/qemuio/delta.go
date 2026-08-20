@@ -43,6 +43,8 @@ func CalculateDelta(previous, current Counters, interval time.Duration) (Rates, 
 	}, nil
 }
 
+// processCounterDelta builds process counter delta and returns an error when validation or source
+// access fails.
 func processCounterDelta(name string, previous, current uint64) (uint64, error) {
 	if current < previous {
 		return 0, fmt.Errorf("%s counter decreased", name)

@@ -21,6 +21,7 @@ type CollectOptions struct {
 	Now            func() time.Time
 }
 
+// DefaultCollectOptions returns the default collect options.
 func DefaultCollectOptions() CollectOptions {
 	return CollectOptions{CommandTimeout: 10 * time.Second, Now: time.Now}
 }
@@ -173,6 +174,7 @@ func Collect(ctx context.Context, runner Runner, target Target, vm inventory.VM,
 	return status, nil
 }
 
+// run executes one allowlisted collection step and propagates source failures.
 func run(ctx context.Context, runner Runner, target Target, command CommandSpec, timeout time.Duration) (string, error) {
 	commandContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -183,10 +185,12 @@ func run(ctx context.Context, runner Runner, target Target, command CommandSpec,
 	return result.Output, nil
 }
 
+// measured constructs availability metadata for a successfully measured value.
 func measured() observability.Availability {
 	return observability.Availability{Available: true, Source: source, Quality: observability.EvidenceQualityMeasured}
 }
 
+// unavailable constructs unavailable metadata with a bounded reason.
 func unavailable(err error) observability.Availability {
 	detail := "unavailable"
 	if err != nil {
@@ -195,6 +199,7 @@ func unavailable(err error) observability.Availability {
 	return observability.Availability{Source: source, Quality: observability.EvidenceQualityUnavailable, Error: detail}
 }
 
+// sectionAvailability builds section availability from validated inputs.
 func sectionAvailability(failures []string, expected int) observability.Availability {
 	if len(failures) == expected {
 		return unavailable(errors.New(strings.Join(failures, "; ")))
@@ -206,6 +211,7 @@ func sectionAvailability(failures []string, expected int) observability.Availabi
 	return availability
 }
 
+// appendFailures appends failures to the bounded result.
 func appendFailures(destination *[]string, section string, failures []string) {
 	if len(failures) > 0 {
 		*destination = append(*destination, fmt.Sprintf("%s: %s", section, strings.Join(failures, ", ")))

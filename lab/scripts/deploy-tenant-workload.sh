@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   echo "Usage: $0 tenant-a|tenant-b" >&2
 }

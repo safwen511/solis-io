@@ -27,10 +27,12 @@ PR_SET_NAME = 15
 
 
 def utc_now() -> str:
+    """Return the current UTC timestamp in the stable report format."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def set_process_name() -> None:
+    """Set a fixed comm name for provider-side metadata without exposing arguments."""
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(
         PR_SET_NAME,
@@ -43,6 +45,7 @@ def set_process_name() -> None:
 
 
 def bounded_float(name: str, value: str, minimum: float, maximum: float) -> float:
+    """Build an argument parser that rejects floats outside the configured safe range."""
     try:
         parsed = float(value)
     except ValueError as error:
@@ -53,6 +56,7 @@ def bounded_float(name: str, value: str, minimum: float, maximum: float) -> floa
 
 
 def bounded_int(name: str, value: str, minimum: int, maximum: int) -> int:
+    """Build an argument parser that rejects integers outside the configured safe range."""
     try:
         parsed = int(value)
     except ValueError as error:
@@ -75,6 +79,7 @@ class Config:
 
     @classmethod
     def from_environment(cls) -> "Config":
+        """Load only the fixed, allowlisted workload settings from the service environment."""
         tenant = os.environ.get("SOLIS_TENANT", "").strip()
         target_host = os.environ.get("SOLIS_TARGET_HOST", "").strip()
         target_vm = os.environ.get("SOLIS_TARGET_VM", "").strip()
@@ -112,6 +117,7 @@ class Config:
 
 class RollingMetrics:
     def __init__(self) -> None:
+        """Initialize bounded in-memory workload state without retaining request or response payloads."""
         self._lock = threading.Lock()
         self.started = time.monotonic()
         self.scheduled = 0
@@ -123,14 +129,17 @@ class RollingMetrics:
         self.max_latency_ns = 0
 
     def record_scheduled(self) -> None:
+        """Count one scheduled request in the current bounded reporting interval."""
         with self._lock:
             self.scheduled += 1
 
     def record_saturated(self) -> None:
+        """Count a request skipped because the configured concurrency ceiling was reached."""
         with self._lock:
             self.saturated += 1
 
     def record_result(self, latency_ns: int, successful: bool) -> None:
+        """Aggregate one request outcome without retaining request or response payloads."""
         with self._lock:
             self.completed += 1
             self.successful += int(successful)
@@ -139,6 +148,7 @@ class RollingMetrics:
             self.max_latency_ns = max(self.max_latency_ns, latency_ns)
 
     def snapshot_and_reset(self) -> dict[str, object]:
+        """Return the bounded interval aggregate and atomically reset its counters."""
         with self._lock:
             elapsed = max(time.monotonic() - self.started, 0.001)
             completed = self.completed
@@ -169,6 +179,7 @@ class RollingMetrics:
 
 
 def request_once(config: Config) -> bool:
+    """Send one fixed request and drain the response without retaining its body."""
     connection = http.client.HTTPConnection(
         config.target_host, 80, timeout=config.timeout_seconds
     )
@@ -193,6 +204,7 @@ def request_once(config: Config) -> bool:
 
 
 def render_summary(config: Config, metrics: RollingMetrics) -> str:
+    """Serialize the bounded workload aggregate without payloads, secrets, or SQL text."""
     return json.dumps(
         {
             "schema_version": "1",
@@ -218,12 +230,14 @@ def render_summary(config: Config, metrics: RollingMetrics) -> str:
 
 
 def run(config: Config, stop: threading.Event) -> None:
+    """Run steady traffic until the stop event is set, emitting only bounded aggregates."""
     metrics = RollingMetrics()
     capacity = threading.BoundedSemaphore(config.concurrency)
     next_request = time.monotonic()
     next_log = next_request + config.log_interval_seconds
 
     def worker() -> None:
+        """Execute one scheduled request and release its concurrency slot on every exit path."""
         started = time.monotonic_ns()
         try:
             successful = request_once(config)
@@ -256,11 +270,13 @@ def run(config: Config, stop: threading.Event) -> None:
 
 
 def main() -> None:
+    """Validate configuration and run the workload with cooperative signal handling."""
     config = Config.from_environment()
     set_process_name()
     stop = threading.Event()
 
     def request_stop(_signal_number, _frame) -> None:
+        """Translate a termination signal into the workload's cooperative stop event."""
         stop.set()
 
     signal.signal(signal.SIGTERM, request_stop)

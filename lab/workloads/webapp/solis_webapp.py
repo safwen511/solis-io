@@ -26,6 +26,7 @@ class SolisHandler(BaseHTTPRequestHandler):
     """Serve health checks and small PostgreSQL-backed workload requests."""
 
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler defines this name.
+        """Serve only the fixed health, write, and statistics endpoints."""
         path = urlsplit(self.path).path
         if path == "/health":
             self._send_json(200, {"status": "ok", "tenant": TENANT})
@@ -37,6 +38,7 @@ class SolisHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found", "path": path})
 
     def _write_row(self, path):
+        """Insert one synthetic database row without logging SQL text or request payloads."""
         try:
             connection = psycopg2.connect(**DB_CONFIG)
             try:
@@ -70,6 +72,7 @@ class SolisHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": "database write failed", "tenant": TENANT})
 
     def _send_stats(self):
+        """Return bounded aggregate counters for lab health validation."""
         try:
             connection = psycopg2.connect(**DB_CONFIG)
             try:
@@ -88,6 +91,7 @@ class SolisHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": "database query failed", "tenant": TENANT})
 
     def _send_json(self, status, payload):
+        """Write a compact JSON response and discard it after transmission."""
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -97,12 +101,14 @@ class SolisHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _timestamp(value):
+        """Convert a database timestamp to a stable JSON representation."""
         if isinstance(value, datetime):
             return value.isoformat()
         return str(value)
 
 
 def main():
+    """Validate configuration and run the workload with cooperative signal handling."""
     if not TENANT:
         raise SystemExit("SOLIS_TENANT must be set")
     if not DB_CONFIG["host"]:

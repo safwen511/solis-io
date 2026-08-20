@@ -10,6 +10,7 @@ readonly evidence_path="${test_root}/solis-live-impact-cleanup-${suffix}"
 readonly blocked_path="${test_root}/solis-bundle-validation-cleanup-${suffix}"
 readonly unrelated_path="${test_root}/unrelated-cleanup-${suffix}"
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   if [[ -d "$test_root" && ! -L "$test_root" ]]; then
     find -P "$test_root" -xdev -depth -delete

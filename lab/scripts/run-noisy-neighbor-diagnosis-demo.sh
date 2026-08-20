@@ -11,6 +11,7 @@ readonly fio_log="/tmp/solis-fio-diagnose-demo.txt"
 fio_pid=""
 latest_report=""
 
+# cleanup_fio performs the bounded cleanup fio step for this lab workflow.
 cleanup_fio() {
   if [[ -z "$fio_pid" ]]; then
     return
@@ -24,12 +25,14 @@ cleanup_fio() {
   fio_pid=""
 }
 
+# handle_signal records interruption, invokes bounded cleanup, and preserves a failing exit status.
 handle_signal() {
   local exit_code=$1
   echo "Demo interrupted." >&2
   exit "$exit_code"
 }
 
+# require_file fails unless the required regular input file already exists.
 require_file() {
   local path=$1
   if [[ ! -f "$path" ]]; then

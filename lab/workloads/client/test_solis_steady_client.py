@@ -19,6 +19,7 @@ SPEC.loader.exec_module(CLIENT)
 
 class SteadyClientTests(unittest.TestCase):
     def config(self):
+        """Return a deterministic test configuration containing only fixed lab targets."""
         return CLIENT.Config(
             tenant="tenant-a",
             target_host="192.168.130.20",
@@ -31,6 +32,7 @@ class SteadyClientTests(unittest.TestCase):
         )
 
     def test_environment_is_bounded_and_requires_fixed_targets(self):
+        """Verify environment is bounded and requires fixed targets."""
         values = {
             "SOLIS_TENANT": "tenant-a",
             "SOLIS_TARGET_HOST": "192.168.130.20",
@@ -49,6 +51,7 @@ class SteadyClientTests(unittest.TestCase):
                 CLIENT.Config.from_environment()
 
     def test_summary_is_bounded_and_privacy_safe(self):
+        """Verify summary is bounded and privacy safe."""
         metrics = CLIENT.RollingMetrics()
         metrics.record_scheduled()
         metrics.record_result(10_000_000, True)
@@ -60,6 +63,7 @@ class SteadyClientTests(unittest.TestCase):
             self.assertNotIn(forbidden, rendered.lower())
 
     def test_request_drains_but_does_not_return_response_payload(self):
+        """Verify request drains but does not return response payload."""
         response = mock.Mock(status=200)
         response.read.side_effect = [b"discarded", b""]
         connection = mock.Mock()

@@ -4,6 +4,7 @@ set -euo pipefail
 readonly BASE_IMAGE="/var/lib/libvirt/images/solis-io/base/ubuntu-24.04-base.qcow2"
 readonly STORAGE_ROOT="/var/lib/libvirt/images/solis-io"
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   echo "Usage: $0 [--force] name tenant network ip memory_mb vcpus disk_gb role" >&2
 }

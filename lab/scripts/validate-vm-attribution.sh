@@ -21,6 +21,7 @@ workload_pids=()
 workload_vms=()
 sudo_keepalive_pid=""
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: lab/scripts/validate-vm-attribution.sh [options]
@@ -47,15 +48,18 @@ inside a-stress/b-stress. Those fixed guest test files are removed on cleanup.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
 }
 
+# positive_integer accepts only strictly positive decimal integers.
 positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
+# nonnegative_integer accepts only zero or a positive decimal integer.
 nonnegative_integer() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
@@ -140,6 +144,7 @@ else
   scenarios=("$scenario_selection")
 fi
 
+# print_plan shows the complete workload and evidence plan before any remote mutation.
 print_plan() {
   echo "Solis VM-attribution validation plan"
   echo "Window: ${window_seconds}s"
@@ -196,6 +201,7 @@ for scenario in "${scenarios[@]}"; do
   esac
 done
 
+# vm_ip returns the fixed lab inventory address for an allowlisted VM name.
 vm_ip() {
   case "$1" in
     a-stress) printf '%s\n' "192.168.130.40" ;;
@@ -239,6 +245,7 @@ for vm in "${unique_needed_vms[@]}"; do
   esac
 done
 
+# stop_remote_workload terminates only the named lab workload started on the selected guest.
 stop_remote_workload() {
   local vm=$1
   local ip
@@ -247,6 +254,7 @@ stop_remote_workload() {
     "pkill -TERM -f '[s]olis-noise' 2>/dev/null || true" >/dev/null 2>&1 || true
 }
 
+# remove_guest_fio_file removes only the fixed fio data path owned by this validation workflow.
 remove_guest_fio_file() {
   local vm=$1
   local ip
@@ -255,6 +263,7 @@ remove_guest_fio_file() {
     "rm -f -- '${fio_guest_file}'" >/dev/null 2>&1
 }
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -290,6 +299,7 @@ sudo -v
 ) &
 sudo_keepalive_pid=$!
 
+# start_fio starts fio using fixed, bounded lab arguments.
 start_fio() {
   local vm=$1
   local log=$2
@@ -298,6 +308,7 @@ start_fio() {
   workload_vms+=("$vm")
 }
 
+# wait_for_workloads waits for workloads while preserving the workload's real exit status.
 wait_for_workloads() {
   local status=0
   local pid
@@ -308,6 +319,7 @@ wait_for_workloads() {
   return "$status"
 }
 
+# cleanup_workload_files performs the bounded cleanup workload files step for this lab workflow.
 cleanup_workload_files() {
   local vm
   local status=0
@@ -318,6 +330,7 @@ cleanup_workload_files() {
   return "$status"
 }
 
+# assert_common_capture checks common capture and fails rather than accepting incomplete evidence.
 assert_common_capture() {
   local capture_dir=$1
   local scenario_dir=$2
@@ -361,6 +374,7 @@ assert_common_capture() {
   fi
 }
 
+# print_attribution_failure performs the bounded print attribution failure step for this lab workflow.
 print_attribution_failure() {
   local snapshot=$1
   local capture_dir
@@ -381,6 +395,7 @@ print_attribution_failure() {
     "${capture_dir}/ebpf-vm-block-latency.json" >&2 || true
 }
 
+# assert_scenario checks scenario and fails rather than accepting incomplete evidence.
 assert_scenario() {
   local scenario=$1
   local snapshot=$2
@@ -426,6 +441,7 @@ assert_scenario() {
   esac
 }
 
+# run_scenario runs scenario and propagates any command failure.
 run_scenario() {
   local scenario=$1
   local scenario_dir="${output_root}/${scenario}"

@@ -20,11 +20,13 @@ fio_ssh_pid=""
 remote_workload_started=false
 guest_cleanup_done=false
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
 }
 
+# print_fio_log performs the bounded print fio log step for this lab workflow.
 print_fio_log() {
   if [[ -f "$fio_log" ]]; then
     echo "=== fio output ===" >&2
@@ -32,6 +34,7 @@ print_fio_log() {
   fi
 }
 
+# stop_remote_fio performs the bounded stop remote fio step for this lab workflow.
 stop_remote_fio() {
   if [[ "$remote_workload_started" != true ]]; then
     return
@@ -42,6 +45,7 @@ stop_remote_fio() {
     >/dev/null 2>&1 || true
 }
 
+# cleanup_guest_file removes only the fixed guest file owned by this demo.
 cleanup_guest_file() {
   if [[ "$remote_workload_started" != true || "$guest_cleanup_done" == true ]]; then
     return
@@ -56,6 +60,7 @@ cleanup_guest_file() {
   guest_cleanup_done=true
 }
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -70,6 +75,7 @@ cleanup() {
   exit "$exit_code"
 }
 
+# handle_signal records interruption, invokes bounded cleanup, and preserves a failing exit status.
 handle_signal() {
   local signal_name=$1
   echo "MVP demo interrupted by ${signal_name}." >&2
@@ -79,6 +85,7 @@ handle_signal() {
   esac
 }
 
+# newest_capture_directory selects the newest capture directory produced by this workflow.
 newest_capture_directory() {
   local directory
   local latest=""

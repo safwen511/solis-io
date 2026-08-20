@@ -5,6 +5,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly report_filter="${script_dir}/benchmark-report.jq"
 test_dir="$(mktemp -d /tmp/solis-benchmark-report-test-XXXXXXXX)"
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   rm -rf -- "$test_dir"
 }
@@ -92,6 +93,7 @@ jq -n '[
   }
 ]' >"${test_dir}/controls.json"
 
+# render_report writes report in the script's deterministic report format.
 render_report() {
   local runs_path=$1
   local controls_path=$2

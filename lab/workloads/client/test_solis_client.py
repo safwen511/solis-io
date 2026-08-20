@@ -18,6 +18,7 @@ SPEC.loader.exec_module(CLIENT)
 
 class AggregateTests(unittest.TestCase):
     def test_fixed_process_name_uses_comm_metadata_only(self):
+        """Verify fixed process name uses comm metadata only."""
         fake_libc = mock.Mock()
         fake_libc.prctl.return_value = 0
         with mock.patch.object(CLIENT.ctypes, "CDLL", return_value=fake_libc):
@@ -27,6 +28,7 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(fake_libc.prctl.call_args.args[0], CLIENT.PR_SET_NAME)
 
     def test_aggregate_is_deterministic_and_bucketed(self):
+        """Verify aggregate is deterministic and bucketed."""
         aggregate = CLIENT.Aggregate(scheduled=3)
         aggregate.record_result(4_000_000, 200, None)
         aggregate.record_result(15_000_000, 503, None)
@@ -49,6 +51,7 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(sum(row["count"] for row in report["histogram"]), 3)
 
     def test_workload_retains_no_response_payload(self):
+        """Verify workload retains no response payload."""
         with mock.patch.object(CLIENT, "request_once", return_value=(200, None)):
             report = CLIENT.run_workload(1, 2.0, 1, 1.0)
 

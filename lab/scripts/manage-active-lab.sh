@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: manage-active-lab.sh setup|normal|pressure|status|stop|remove [options]
@@ -23,6 +24,7 @@ At the default rate this is approximately 1,600 IOPS / 6.25 MiB/s total.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
@@ -97,6 +99,7 @@ readonly total_mib_per_second="$(awk -v iops="$total_iops" -v kib="$pressure_blo
 [[ -x "$steady_manager" ]] || fail "steady traffic manager is unavailable: ${steady_manager}"
 [[ "$ssh_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "SOLIS_SSH_USER is not a safe service user name"
 
+# print_plan shows the complete workload and evidence plan before any remote mutation.
 print_plan() {
   echo "Solis active lab scenario"
   echo "Action: ${action}"
@@ -123,12 +126,14 @@ print_plan() {
 print_plan
 [[ "$dry_run" == false ]] || exit 0
 
+# require_pressure_host verifies that the fixed pressure guest is reachable before remote changes.
 require_pressure_host() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     'command -v fio >/dev/null 2>&1 && sudo -n true' ||
     fail "b-stress is unreachable or lacks fio/passwordless lab sudo; start b-stress, wait for SSH, then retry"
 }
 
+# remote_pressure performs the bounded remote pressure step for this lab workflow.
 remote_pressure() {
   local operation=$1
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
@@ -136,6 +141,7 @@ remote_pressure() {
 set -euo pipefail
 service_group="$(id -gn "$SERVICE_USER")"
 
+# safe_pressure_path accepts only the fixed pressure file owned by this lab scenario.
 safe_pressure_path() {
   [[ ! -L "$PRESSURE_DIRECTORY" ]] || { echo "refusing symlink pressure directory" >&2; exit 1; }
   if [[ -e "$PRESSURE_DIRECTORY" ]]; then
@@ -155,6 +161,7 @@ safe_pressure_path() {
   fi
 }
 
+# remove_legacy_pressure_file removes only the deprecated pressure file after stopping its owning service.
 remove_legacy_pressure_file() {
   [[ ! -L "$LEGACY_PRESSURE_FILE" ]] || { echo "refusing symlink legacy pressure file" >&2; exit 1; }
   if [[ -e "$LEGACY_PRESSURE_FILE" ]]; then
@@ -167,12 +174,14 @@ remove_legacy_pressure_file() {
   fi
 }
 
+# stop_and_remove_file stops the pressure service before removing its fixed data file.
 stop_and_remove_file() {
   systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
   safe_pressure_path
   rm -f -- "$PRESSURE_FILE"
 }
 
+# ensure_pressure_directory verifies the fixed pressure file's parent instead of creating arbitrary directories.
 ensure_pressure_directory() {
   safe_pressure_path
   install -d -o "$SERVICE_USER" -g "$service_group" -m 0700 "$PRESSURE_DIRECTORY"

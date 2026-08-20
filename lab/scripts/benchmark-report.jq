@@ -1,6 +1,8 @@
+# average returns null for an empty sample instead of fabricating a mean.
 def average:
   if length > 0 then add / length else null end;
 
+# median computes the middle order statistic, averaging the two center values.
 def median:
   if length == 0 then null
   else
@@ -12,6 +14,7 @@ def median:
       end
   end;
 
+# sample_stddev estimates sample variation and requires at least two observations.
 def sample_stddev:
   if length < 2 then null
   else
@@ -23,6 +26,7 @@ def sample_stddev:
        | sqrt)
   end;
 
+# distribution summarizes one numeric sample without applying pass/fail policy.
 def distribution:
   {
     count: length,
@@ -33,6 +37,7 @@ def distribution:
     sample_stddev: sample_stddev
   };
 
+# t95 returns the two-sided 95% Student-t critical value for the sample size.
 def t95($degrees_of_freedom):
   if $degrees_of_freedom <= 1 then 12.706
   elif $degrees_of_freedom == 2 then 4.303
@@ -67,6 +72,7 @@ def t95($degrees_of_freedom):
   else 1.960
   end;
 
+# distribution_with_confidence adds an exploratory paired-observation interval.
 def distribution_with_confidence:
   . as $values
   | ($values | distribution) as $stats

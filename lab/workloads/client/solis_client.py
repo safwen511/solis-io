@@ -55,6 +55,7 @@ BUCKET_LABELS = (
 
 
 def utc_now() -> str:
+    """Return the current UTC timestamp in the stable report format."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -94,6 +95,7 @@ class Aggregate:
     def record_result(
         self, latency_ns: int, status_code: int | None, error_category: str | None
     ) -> None:
+        """Aggregate one request outcome without retaining request or response payloads."""
         self.completed += 1
         self.total_latency_ns += latency_ns
         if self.min_latency_ns is None or latency_ns < self.min_latency_ns:
@@ -121,6 +123,7 @@ class Aggregate:
             self.failed += 1
 
     def percentile_ms(self, percentile: float) -> float:
+        """Estimate the requested latency percentile from bounded histogram buckets."""
         if self.completed == 0:
             return 0.0
         wanted = max(1, math.ceil(self.completed * percentile))
@@ -137,6 +140,7 @@ class Aggregate:
         return self.max_latency_ns / 1_000_000
 
     def as_dict(self, elapsed_seconds: float) -> dict[str, object]:
+        """Project aggregate counters into the privacy-safe JSON report model."""
         completed = self.completed
         histogram = []
         for label, count in zip(BUCKET_LABELS, self.buckets, strict=True):
@@ -181,16 +185,19 @@ class Aggregate:
 
 class Metrics:
     def __init__(self, duration_seconds: int) -> None:
+        """Initialize bounded in-memory workload state without retaining request or response payloads."""
         self._lock = threading.Lock()
         self.total = Aggregate()
         self.windows = [Aggregate() for _ in range(duration_seconds)]
 
     def scheduled(self, window: int) -> None:
+        """Record a scheduled request in the selected phase window."""
         with self._lock:
             self.total.scheduled += 1
             self.windows[window].scheduled += 1
 
     def saturated(self, window: int) -> None:
+        """Record a concurrency-limit event in the selected phase window."""
         with self._lock:
             self.total.client_saturated += 1
             self.windows[window].client_saturated += 1
@@ -202,6 +209,7 @@ class Metrics:
         status_code: int | None,
         error_category: str | None,
     ) -> None:
+        """Record one bounded request result in both phase and total aggregates."""
         with self._lock:
             self.total.record_result(latency_ns, status_code, error_category)
             self.windows[window].record_result(
@@ -210,6 +218,7 @@ class Metrics:
 
 
 def request_once(timeout_seconds: float) -> tuple[int | None, str | None]:
+    """Send one fixed request and drain the response without retaining its body."""
     connection = http.client.HTTPConnection(
         TARGET_HOST, TARGET_PORT, timeout=timeout_seconds
     )
@@ -245,6 +254,7 @@ def run_workload(
     concurrency: int,
     timeout_seconds: float,
 ) -> dict[str, object]:
+    """Schedule the fixed-rate workload while respecting duration and concurrency bounds."""
     metrics = Metrics(duration_seconds)
     capacity = threading.BoundedSemaphore(concurrency)
     started_utc = utc_now()
@@ -252,6 +262,7 @@ def run_workload(
     deadline = started + duration_seconds
 
     def worker(window: int) -> None:
+        """Execute one scheduled request and release its concurrency slot on every exit path."""
         request_started = time.monotonic_ns()
         try:
             try:
@@ -328,7 +339,9 @@ def run_workload(
 
 
 def bounded_int(name: str, minimum: int, maximum: int):
+    """Build an argument parser that rejects integers outside the configured safe range."""
     def parse(value: str) -> int:
+        """Parse one value and reject it when it falls outside the configured bounds."""
         try:
             parsed = int(value)
         except ValueError as error:
@@ -343,7 +356,9 @@ def bounded_int(name: str, minimum: int, maximum: int):
 
 
 def bounded_float(name: str, minimum: float, maximum: float):
+    """Build an argument parser that rejects floats outside the configured safe range."""
     def parse(value: str) -> float:
+        """Parse one value and reject it when it falls outside the configured bounds."""
         try:
             parsed = float(value)
         except ValueError as error:
@@ -358,6 +373,7 @@ def bounded_float(name: str, minimum: float, maximum: float):
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse and validate the bounded command-line workload settings."""
     parser = argparse.ArgumentParser(
         description="Generate fixed-rate a-client -> a-web -> a-db lab traffic."
     )
@@ -389,6 +405,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Validate configuration and run the workload with cooperative signal handling."""
     args = parse_args()
     set_process_name()
     report = run_workload(

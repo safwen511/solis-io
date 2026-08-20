@@ -27,6 +27,7 @@ workload_pid=""
 workload_vm=""
 sudo_keepalive_pid=""
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: lab/scripts/benchmark-ebpf-overhead.sh [options]
@@ -52,15 +53,18 @@ control pairs. Performance deltas never receive an automatic pass/fail result.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
 }
 
+# positive_integer accepts only strictly positive decimal integers.
 positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
+# nonnegative_integer accepts only zero or a positive decimal integer.
 nonnegative_integer() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
@@ -156,6 +160,7 @@ if [[ -n "$config_path" ]]; then
   config_path="$(cd -- "$(dirname -- "$config_path")" && pwd -P)/$(basename -- "$config_path")"
 fi
 
+# vm_ip returns the fixed lab inventory address for an allowlisted VM name.
 vm_ip() {
   case "$1" in
     a-stress) printf '%s\n' "192.168.130.40" ;;
@@ -164,6 +169,7 @@ vm_ip() {
   esac
 }
 
+# phase_order performs the bounded phase order step for this lab workflow.
 phase_order() {
   local iteration=$1
   if ((iteration % 2 == 1)); then
@@ -173,6 +179,7 @@ phase_order() {
   fi
 }
 
+# print_plan shows the complete workload and evidence plan before any remote mutation.
 print_plan() {
   echo "Solis eBPF overhead/safety benchmark plan"
   echo "VM: ${vm_name} ($(vm_ip "$vm_name"))"
@@ -234,6 +241,7 @@ go build -o solis ./cmd/solis
 
 readonly stress_ip="$(vm_ip "$vm_name")"
 
+# check_remote_clean refuses to start when a conflicting remote workload or owned file is present.
 check_remote_clean() {
   local process_status=0
   local file_status=0
@@ -253,16 +261,19 @@ check_remote_clean() {
   esac
 }
 
+# stop_remote_workload terminates only the named lab workload started on the selected guest.
 stop_remote_workload() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     "pkill -TERM -x 'fio' 2>/dev/null || true" >/dev/null 2>&1 || true
 }
 
+# remove_guest_fio_file removes only the fixed fio data path owned by this validation workflow.
 remove_guest_fio_file() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     "rm -f -- '${fio_guest_file}'" >/dev/null 2>&1
 }
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -302,6 +313,7 @@ sudo -v
 ) &
 sudo_keepalive_pid=$!
 
+# start_fio starts fio using fixed, bounded lab arguments.
 start_fio() {
   local seconds=$1
   local stdout_file=$2
@@ -313,6 +325,7 @@ start_fio() {
   workload_vm=$vm_name
 }
 
+# wait_fio waits for wait fio while preserving the workload's real exit status.
 wait_fio() {
   local status=0
   [[ -n "$workload_pid" ]] || fail "internal error: fio workload PID is missing"
@@ -321,6 +334,7 @@ wait_fio() {
   return "$status"
 }
 
+# validate_fio_json checks validate fio json and fails rather than accepting incomplete evidence.
 validate_fio_json() {
   local path=$1
   jq -e '
@@ -331,6 +345,7 @@ validate_fio_json() {
   ' "$path" >/dev/null || fail "fio did not return valid successful JSON: ${path}"
 }
 
+# write_fio_metrics writes write fio metrics in the script's deterministic report format.
 write_fio_metrics() {
   local input=$1
   local output=$2
@@ -352,12 +367,14 @@ write_fio_metrics() {
   }' "$input" >"$output"
 }
 
+# read_time_metric reads read time metric from the script-owned result files.
 read_time_metric() {
   local path=$1
   local key=$2
   awk -F= -v key="$key" '$1 == key { print $2; found=1 } END { if (!found) exit 1 }' "$path"
 }
 
+# run_warmup runs warmup and propagates any command failure.
 run_warmup() {
   local phase_dir=$1
   if ((warmup_seconds == 0)); then
@@ -369,6 +386,7 @@ run_warmup() {
   validate_fio_json "${phase_dir}/warmup-fio.json"
 }
 
+# run_collector runs collector and propagates any command failure.
 run_collector() {
   local phase_dir=$1
   local -a command
@@ -393,6 +411,7 @@ run_collector() {
   return "$status"
 }
 
+# validate_collector checks validate collector and fails rather than accepting incomplete evidence.
 validate_collector() {
   local phase_dir=$1
   local report="${phase_dir}/ebpf-vm-block-latency.json"
@@ -426,6 +445,7 @@ validate_collector() {
   esac
 }
 
+# write_collector_summary writes write collector summary in the script's deterministic report format.
 write_collector_summary() {
   local phase_dir=$1
   sudo -n jq --arg vm "$vm_name" '{
@@ -453,6 +473,7 @@ write_collector_summary() {
   }' "${phase_dir}/ebpf-vm-block-latency.json" >"${phase_dir}/collector-summary.json"
 }
 
+# run_phase runs phase and propagates any command failure.
 run_phase() {
   local mode=$1
   local phase_dir=$2
@@ -484,6 +505,7 @@ run_phase() {
   fi
 }
 
+# write_run_summary writes write run summary in the script's deterministic report format.
 write_run_summary() {
   local run_dir=$1
   local iteration=$2
@@ -572,6 +594,7 @@ write_run_summary() {
     }' >"${run_dir}/run-summary.json"
 }
 
+# write_control_summary writes write control summary in the script's deterministic report format.
 write_control_summary() {
   local control_dir=$1
   local pair=$2

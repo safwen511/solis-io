@@ -32,6 +32,7 @@ client_owned=false
 fio_owned=false
 sudo_keepalive_pid=""
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: lab/scripts/validate-live-app-impact.sh [options]
@@ -60,19 +61,23 @@ retain HTTP bodies, SQL text, table data, secrets, or raw kernel pointers.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
 }
 
+# positive_integer accepts only strictly positive decimal integers.
 positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
+# nonnegative_integer accepts only zero or a positive decimal integer.
 nonnegative_integer() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
+# bounded_decimal accepts a decimal value only when it falls inside the configured range.
 bounded_decimal() {
   local value=$1
   local minimum=$2
@@ -178,6 +183,7 @@ if [[ -n "$config_path" ]]; then
   config_path="$(cd -- "$(dirname -- "$config_path")" && pwd -P)/$(basename -- "$config_path")"
 fi
 
+# print_plan shows the complete workload and evidence plan before any remote mutation.
 print_plan() {
   echo "Solis live application-impact validation plan"
   echo "Application path: a-client -> a-web /write -> a-db"
@@ -221,21 +227,25 @@ fi
 output_mode="$(stat -c '%a' "$output_root")"
 [[ "$output_mode" == "700" ]] || fail "output directory mode is ${output_mode}; mode 700 is required"
 
+# stop_remote_client performs the bounded stop remote client step for this lab workflow.
 stop_remote_client() {
   ssh "${ssh_options[@]}" "${ssh_user}@${client_ip}" \
     "pkill -TERM -x 'solis-client' 2>/dev/null || true" >/dev/null 2>&1 || true
 }
 
+# stop_remote_fio performs the bounded stop remote fio step for this lab workflow.
 stop_remote_fio() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     "pkill -TERM -x 'fio' 2>/dev/null || true" >/dev/null 2>&1 || true
 }
 
+# remove_guest_fio_file removes only the fixed fio data path owned by this validation workflow.
 remove_guest_fio_file() {
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     "rm -f -- '${fio_guest_file}'" >/dev/null 2>&1
 }
 
+# cleanup stops script-owned work and removes only paths allocated by this run.
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -263,6 +273,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# check_no_process verifies check no process before the workflow proceeds.
 check_no_process() {
   local ip=$1
   local process_name=$2
@@ -277,6 +288,7 @@ check_no_process() {
   esac
 }
 
+# wait_for_process waits for process while preserving the workload's real exit status.
 wait_for_process() {
   local ip=$1
   local process_name=$2

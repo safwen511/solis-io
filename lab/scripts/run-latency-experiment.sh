@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   echo "Usage: $0 tenant-a|tenant-b a-stress|b-stress" >&2
 }
@@ -60,6 +61,7 @@ echo "=== Starting noisy-neighbor fio workload ==="
   > "${report_dir}/fio-noise.txt" 2>&1 &
 noise_pid=$!
 
+# wait_for_noise waits for noise while preserving the workload's real exit status.
 wait_for_noise() {
   if kill -0 "$noise_pid" 2>/dev/null; then
     wait "$noise_pid" || true

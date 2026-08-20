@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat >&2 <<'EOF'
 Usage: run-client-workload.sh [options]

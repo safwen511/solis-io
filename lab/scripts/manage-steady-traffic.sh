@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: manage-steady-traffic.sh deploy|start|stop|status|remove [options]
@@ -16,6 +17,7 @@ deploy-tenant-workload.sh; otherwise deploy/start refuses to proceed.
 EOF
 }
 
+# fail writes one bounded error message and terminates the script unsuccessfully.
 fail() {
   echo "Error: $*" >&2
   exit 1
@@ -85,6 +87,7 @@ else
   tenants=("$tenant")
 fi
 
+# tenant_values performs the bounded tenant values step for this lab workflow.
 tenant_values() {
   case "$1" in
     a) printf '%s\n' "tenant-a|192.168.130.10|192.168.130.20|192.168.130.30|a-client|a-web|a-db" ;;
@@ -92,6 +95,7 @@ tenant_values() {
   esac
 }
 
+# show_plan shows the complete workload and evidence plan before any remote mutation.
 show_plan() {
   echo "Solis steady lab traffic plan"
   echo "Action: ${command}"
@@ -112,6 +116,7 @@ show_plan() {
 show_plan
 [[ "$dry_run" == false ]] || exit 0
 
+# require_retention validates that the configured retention window is bounded and positive.
 require_retention() {
   local db_ip=$1
   local db_vm=$2
@@ -120,6 +125,7 @@ require_retention() {
     fail "${db_vm} retention timer is not active; rerun ./lab/scripts/deploy-tenant-workload.sh for its tenant"
 }
 
+# deploy_client installs the fixed lab workload and its bounded service configuration on the selected guest.
 deploy_client() {
   local tenant_name=$1 client_ip=$2 web_ip=$3 db_ip=$4 client_vm=$5 web_vm=$6 db_vm=$7
   require_retention "$db_ip" "$db_vm"
@@ -171,6 +177,7 @@ systemctl enable --now solis-steady-traffic.service
 REMOTE_DEPLOY
 }
 
+# manage_client applies the requested allowlisted service action to the selected guest.
 manage_client() {
   local action=$1 client_ip=$2 client_vm=$3
   case "$action" in

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# usage prints the accepted command syntax without changing host or guest state.
 usage() {
   cat <<'EOF'
 Usage: cleanup-solis-temp.sh [--kind cache|evidence|all] [--older-than-days N] [--apply]
@@ -80,6 +81,7 @@ fi
 readonly now_epoch="$(date +%s)"
 readonly minimum_age_seconds=$((older_than_days * 86400))
 
+# artifact_kind classifies an artifact only after it matches an allowlisted Solis path pattern.
 artifact_kind() {
   local name=$1
   case "$name" in
@@ -101,11 +103,13 @@ artifact_kind() {
   esac
 }
 
+# matches_kind reports whether an artifact belongs to the requested allowlisted cleanup class.
 matches_kind() {
   local artifact=$1
   [[ "$kind" == all || "$kind" == "$artifact" ]]
 }
 
+# eligible_age reports whether an artifact is older than the requested retention boundary.
 eligible_age() {
   local path=$1
   local modified
@@ -113,6 +117,7 @@ eligible_age() {
   ((now_epoch - modified >= minimum_age_seconds))
 }
 
+# safe_delete deletes only an artifact that passed the script's path, kind, and age checks.
 safe_delete() {
   local path=$1
   [[ "$(dirname -- "$path")" == "$cleanup_root" ]] || {
@@ -130,6 +135,7 @@ safe_delete() {
   fi
 }
 
+# preflight_delete validates every deletion candidate before any artifact is removed.
 preflight_delete() {
   local path=$1
   [[ ! -L "$path" ]] || return 1

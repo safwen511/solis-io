@@ -1,3 +1,4 @@
+# phase aggregates bounded one-second client windows into one experiment phase.
 def phase($name; $from; $to):
   [.windows[] | select(.offset_seconds >= $from and .offset_seconds < $to)] as $windows
   | ($windows | map(.completed_requests) | add // 0) as $completed

@@ -480,8 +480,7 @@ git diff --check
 ```
 
 Normal builds use the committed authentic eBPF ELF. They do not regenerate it.
-The function-comment contract and generated-object rule are documented in
-[CONTRIBUTING.md](CONTRIBUTING.md) and enforced by the Go test suite.
+The function-comment contract is enforced by the Go test suite.
 
 ### VM-attribution scenarios
 

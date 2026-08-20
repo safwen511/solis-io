@@ -696,18 +696,37 @@ attestation.
 - Secure Boot lockdown, LSM rules, or missing capabilities may block eBPF.
 - Request merging, requeues, missing bio/blkcg ownership, unknown cgroups,
   window boundaries, and map pressure can reduce attribution coverage.
-- Device mapper, LVM, encryption, partitions, and other stacked devices can
-  make physical-layer interpretation ambiguous.
+- Current device identity is the block request's observed `major:minor`.
+  Solis does not yet construct a per-request graph through Device Mapper, LVM,
+  LUKS, mdadm, partitions, Ceph/RBD, or other stacked devices, so virtual-layer
+  and physical-layer queuing can remain ambiguous.
+- The typed-BTF block hooks do not cover storage paths that bypass the normal
+  Linux block layer. vhost-user-blk and userspace SPDK queue activity are not
+  currently traced or joined to VM evidence.
+- iSCSI, NVMe-over-Fabrics, and Ceph traffic is not correlated with block
+  latency or network-fabric telemetry. Solis therefore cannot distinguish a
+  local device bottleneck from a remote target or storage-network bottleneck.
 - Block-request latency is not equivalent to customer-facing application
   latency or proof of causality.
-- Fixed-bucket p50/p95/p99 values are approximate.
+- Fixed-bucket p50/p95/p99 values are approximate; the current histogram is not
+  suitable for precise p99.9 or similarly deep-tail claims.
+- Solis has no statistical causality engine. Its verdict combines concurrent
+  topology, QEMU pressure, application, and attributed block evidence
+  conservatively; temporal association alone does not prove causation.
+- The eBPF programs classify operation type and device, but do not yet
+  fingerprint sequential/random access, queue-depth saturation, or destructive
+  flush/fsync patterns.
 - QEMU, cgroup `io.stat`, and libvirt block counters are supporting evidence,
   not interchangeable latency measurements.
 - The dashboard keeps bounded in-memory history and derived events; it is not a
   durable time-series database.
-- There is no API server, daemon, fleet controller, automatic remediation, VM
-  control, authentication layer, Debian/RPM package, or package-manager
-  lifecycle.
+- There is no Prometheus/OpenMetrics exporter, API server, daemon, fleet
+  controller, authentication layer, or continuous ring-buffer event service.
+- There is no automatic BTF fallback matrix or runtime compilation path for
+  incompatible enterprise kernels.
+- Solis is read-only: it does not apply cgroup I/O limits, migrate VMs, call an
+  orchestrator, or perform automatic remediation.
+- There is no Debian/RPM package or package-manager lifecycle.
 - Collector safety has been exercised in the lab, but a defensible universal
   performance-overhead bound has not been established.
 - Archive checksums and a signed tag exist; detached artifact signatures, SBOM,
@@ -715,22 +734,90 @@ attestation.
 
 ## Roadmap
 
-Near-term work stays focused on making the existing single-host product more
-defensible rather than broadening it prematurely:
+Everything below is planned or exploratory; none of it should be inferred from
+the current `v1.0.0-experimental` capability list. Work remains gated on exact
+accounting, bounded resource use, explicit privacy tests, and honest unavailable
+states.
 
-1. Longer attach/detach, cancellation, VM-restart, cgroup-replacement, and map
-   pressure soak tests.
-2. A published compatibility matrix across kernels, BTF layouts,
-   libvirt/QEMU versions, cgroup layouts, and storage stacks.
-3. Performance characterization on quieter and additional hosts with balanced
-   controls.
-4. Detached artifact signatures, SBOM/provenance metadata, and fresh-host
+### Phase 1 — Stabilize the current single-host collector
+
+1. Run longer attach/detach, cancellation, VM-restart, cgroup-replacement, and
+   map-pressure soak tests.
+2. Publish a compatibility matrix across kernels, BTF layouts, libvirt/QEMU
+   versions, cgroup layouts, and storage stacks.
+3. Repeat performance characterization on quieter and additional hosts with
+   balanced controls and baseline/baseline variance measurements.
+4. Add detached artifact signatures, SBOM/provenance metadata, and fresh-host
    installation smoke tests.
-5. More compact trend visualization and evidence filtering while keeping the
-   console read-only and honest about unavailable data.
+5. Improve trend visualization and evidence filtering while keeping the
+   console read-only and explicit about unavailable data.
 
-Multi-host orchestration, remote agents, automatic VM remediation, and broader
-hypervisor support remain outside the current roadmap.
+### Phase 2 — Multi-tier storage topology and virtualization depth
+
+1. **Stacked-device graph disambiguation:** model Device Mapper, LVM, LUKS,
+   mdadm, partitions, and Ceph/RBD relationships. Attribute observations to a
+   named layer and distinguish virtual block queuing from physical-device
+   pressure without pretending that one request can always be followed through
+   every transformation.
+2. **NVMe and userspace backend tracing:** research bounded instrumentation for
+   NVMe, vhost-user-blk, and SPDK queue pairs. Paths that bypass standard QEMU
+   or kernel block hooks will require separately validated backend evidence and
+   an explicit join model; they must not be labeled as normal blkcg attribution.
+3. **Distributed-storage awareness:** correlate sanitized iSCSI, NVMe-oF, and
+   Ceph/RBD transport/target indicators with local block evidence to separate
+   local media pressure from remote-target or network-fabric congestion. No
+   packets, payloads, credentials, or storage contents should be collected.
+
+### Phase 3 — Statistical precision and diagnostic evidence
+
+1. **Higher-precision histograms:** evaluate verifier-safe, bounded
+   DDSketch/HDR-style integer histograms in eBPF maps, with userspace decoding
+   and explicit error bounds for p99 and p99.9. This would replace the current
+   coarse fixed buckets only after map-memory and update-cost benchmarks pass.
+2. **Correlation and causal-assessment research:** add aligned time-series
+   scoring, lag analysis, controlled baselines, and methods such as Granger
+   predictability tests or dynamic time warping where statistically valid.
+   Scores would quantify evidence strength, not claim mathematical proof of
+   causation; confounding host workloads and insufficient samples must produce
+   an inconclusive result.
+3. **I/O pattern fingerprinting:** classify sequential versus random access,
+   queue-depth saturation, and elevated flush/fsync behavior using bounded
+   aggregate metadata. Classification must avoid payloads, process arguments,
+   raw addresses, and unbounded per-request output.
+
+### Phase 4 — Production readiness and enterprise integration
+
+1. **Prometheus/OpenMetrics exporter:** provide an optional aggregate exporter
+   for VM-attributed operations, latency, attribution quality, and loss
+   counters. Cardinality, authentication, bind address, and metric lifecycle
+   need explicit safeguards before it is suitable for continuous operation.
+2. **Kernel/BTF fallback matrix:** add tested CO-RE variants for enterprise
+   kernels such as RHEL and SLES. Optional runtime compilation may be evaluated,
+   but only with pinned inputs, clear toolchain requirements, and no silent
+   downgrade to fabricated or less-trustworthy attribution.
+3. **Bounded ring-buffer streaming:** evaluate `BPF_MAP_TYPE_RINGBUF` for
+   sanitized high-rate event delivery with a fixed memory budget, explicit
+   loss counters, backpressure behavior, and allocation benchmarks. “Zero
+   allocation” will be treated as a measured implementation property, not an
+   assumed guarantee.
+
+### Phase 5 — Opt-in safe remediation research
+
+1. **Dynamic cgroup v2 I/O throttling:** prototype `io.max` or `io.latency`
+   recommendations in dry-run mode first. Any later active mode must require an
+   exact VM ownership match, sustained high-quality evidence, allowlisted
+   targets, bounded limits, an audit trail, automatic rollback, and explicit
+   operator opt-in. Solis must never throttle on degraded or unavailable
+   attribution alone.
+2. **Orchestrator integration:** emit authenticated, rate-limited events for
+   OpenStack or Kubernetes/KubeVirt to mark a host degraded or request an
+   orchestrator-managed live migration. Solis would provide evidence and a
+   guarded request; the orchestrator would retain placement and migration
+   authority.
+
+Broader hypervisor support and a general multi-host control plane remain beyond
+these phases. The read-only single-host collector stays the trusted baseline;
+remediation cannot become the default behavior.
 
 ## Acknowledgements
 

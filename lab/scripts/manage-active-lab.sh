@@ -82,7 +82,9 @@ fi
 [[ "$action" == setup || "$pressure_iops_set" == false ]] || fail "--pressure-iops is valid only with setup"
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly project_dir="$(cd -- "${script_dir}/../.." && pwd)"
 readonly steady_manager="${script_dir}/manage-steady-traffic.sh"
+readonly pressure_service_template="${project_dir}/lab/guest-configs/stress/solis-moderate-pressure.service.template"
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
 readonly stress_ip="192.168.140.40"
 readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
@@ -97,6 +99,7 @@ readonly total_iops=$((pressure_iops * pressure_jobs))
 readonly total_mib_per_second="$(awk -v iops="$total_iops" -v kib="$pressure_block_kib" 'BEGIN { printf "%.2f", iops * kib / 1024 }')"
 
 [[ -x "$steady_manager" ]] || fail "steady traffic manager is unavailable: ${steady_manager}"
+[[ -r "$pressure_service_template" ]] || fail "pressure service template is unavailable: ${pressure_service_template}"
 [[ "$ssh_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "SOLIS_SSH_USER is not a safe service user name"
 
 # print_plan shows the complete workload and evidence plan before any remote mutation.
@@ -136,9 +139,14 @@ require_pressure_host() {
 # remote_pressure performs the bounded remote pressure step for this lab workflow.
 remote_pressure() {
   local operation=$1
+  if [[ "$operation" == setup ]]; then
+    scp "${ssh_options[@]}" "$pressure_service_template" \
+      "${ssh_user}@${stress_ip}:/tmp/solis-moderate-pressure.service.template"
+  fi
   ssh "${ssh_options[@]}" "${ssh_user}@${stress_ip}" \
     "sudo -n env SERVICE_USER='${ssh_user}' SERVICE_NAME='${pressure_service}' PRESSURE_DIRECTORY='${pressure_directory}' PRESSURE_FILE='${pressure_file}' LEGACY_PRESSURE_FILE='${legacy_pressure_file}' PRESSURE_BYTES='${pressure_size_bytes}' PRESSURE_IOPS='${pressure_iops}' OPERATION='${operation}' bash -s" <<'REMOTE_PRESSURE'
 set -euo pipefail
+trap 'rm -f -- /tmp/solis-moderate-pressure.service.template /tmp/solis-moderate-pressure.service' EXIT
 service_group="$(id -gn "$SERVICE_USER")"
 
 # safe_pressure_path accepts only the fixed pressure file owned by this lab scenario.
@@ -193,31 +201,18 @@ case "$OPERATION" in
     stop_and_remove_file
     remove_legacy_pressure_file
     ensure_pressure_directory
-    cat >"/etc/systemd/system/${SERVICE_NAME}" <<EOF
-[Unit]
-Description=Solis bounded moderate storage pressure
-After=local-fs.target
-
-[Service]
-Type=simple
-User=${SERVICE_USER}
-ExecStart=/usr/bin/fio --name=solis-moderate --ioengine=libaio --filename=${PRESSURE_FILE} --size=${PRESSURE_BYTES} --rw=randwrite --bs=4k --iodepth=16 --numjobs=2 --direct=1 --time_based --runtime=3600 --fdatasync=1024 --rate_iops=${PRESSURE_IOPS} --group_reporting
-Restart=always
-RestartSec=3
-Nice=5
-NoNewPrivileges=true
-PrivateDevices=false
-PrivateTmp=true
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-ProtectSystem=strict
-ReadWritePaths=${PRESSURE_DIRECTORY}
-TimeoutStopSec=20s
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    sed \
+      -e "s|@SERVICE_USER@|${SERVICE_USER}|g" \
+      -e "s|@PRESSURE_FILE@|${PRESSURE_FILE}|g" \
+      -e "s|@PRESSURE_BYTES@|${PRESSURE_BYTES}|g" \
+      -e "s|@PRESSURE_IOPS@|${PRESSURE_IOPS}|g" \
+      -e "s|@PRESSURE_DIRECTORY@|${PRESSURE_DIRECTORY}|g" \
+      /tmp/solis-moderate-pressure.service.template > /tmp/solis-moderate-pressure.service
+    if grep -Eq '@[A-Z_]+@' /tmp/solis-moderate-pressure.service; then
+      echo "unresolved placeholder in pressure service" >&2
+      exit 1
+    fi
+    install -m 0644 /tmp/solis-moderate-pressure.service "/etc/systemd/system/${SERVICE_NAME}"
     systemctl daemon-reload
     ;;
   start)

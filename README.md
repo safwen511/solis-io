@@ -401,30 +401,96 @@ discover or manage an arbitrary fleet.
 
 ## Controlled lab scenario
 
-The optional lab keeps two small application paths active:
+The optional lab is reproducible from the files in this repository. It defines
+eight small VMs in [lab/config/vms.csv](lab/config/vms.csv), split across the
+[tenant A](lab/networks/tenant-a-net.xml) and
+[tenant B](lab/networks/tenant-b-net.xml) libvirt networks. Six VMs form two
+application paths:
 
 ```text
 a-client -> a-web -> PostgreSQL on a-db
 b-client -> b-web -> PostgreSQL on b-db
 ```
 
-It can add a bounded storage neighbor on `b-stress`: two 4 KiB direct-write fio
-jobs, 800 IOPS each by default (about 1,600 IOPS or 6.25 MiB/s total), using a
-fixed 1 GiB file. Random writes overwrite that fixed range; the file does not
-grow indefinitely.
+`a-stress` is retained for attribution validation, while `b-stress` can run a
+bounded storage-neighbor profile: two 4 KiB direct-write fio jobs, 800 IOPS
+each by default (about 1,600 IOPS or 6.25 MiB/s total), using a fixed 1 GiB
+file. Random writes overwrite that fixed range; the file does not grow
+indefinitely.
 
-### One-time deployment
+### Recreate the tenant lab
 
-The lab VMs must already exist, be running, and be reachable through the fixed
-lab inventory. Install both application paths and their two-hour database
-retention timers:
+Read the [optional lab requirements](REQUIREMENTS.md#optional-lab-environment)
+first. The creation scripts expect an Ubuntu 24.04 cloud image at:
+
+```text
+/var/lib/libvirt/images/solis-io/base/ubuntu-24.04-base.qcow2
+```
+
+They also expect the operator's Ed25519 public key at
+`~/.ssh/id_ed25519.pub`; set `SSH_PUBLIC_KEY_FILE` to use a different public
+key. Define and start the two isolated networks once:
+
+```bash
+sudo virsh net-define lab/networks/tenant-a-net.xml
+sudo virsh net-define lab/networks/tenant-b-net.xml
+sudo virsh net-autostart tenant-a-net
+sudo virsh net-autostart tenant-b-net
+sudo virsh net-start tenant-a-net
+sudo virsh net-start tenant-b-net
+```
+
+Skip `net-define` for a network that is already defined and `net-start` for one
+that is already active. Inspect the result with `virsh net-list --all` before
+creating guests.
+
+Create the eight VMs from the versioned inventory:
+
+```bash
+sudo ./lab/scripts/create-all-vms.sh
+```
+
+[create-all-vms.sh](lab/scripts/create-all-vms.sh) calls
+[create-vm.sh](lab/scripts/create-vm.sh) for each row and installs only the
+role-specific guest packages. The `--force` option destroys and replaces
+existing domains and disks; do not use it during normal startup.
+
+Power on every declared VM and wait for SSH as the unprivileged lab account:
+
+```bash
+./lab/scripts/start-lab-vms.sh --dry-run
+./lab/scripts/start-lab-vms.sh
+./lab/scripts/check-lab.sh
+```
+
+The default SSH user is `flint`; override it with `SOLIS_SSH_USER` if the image
+was prepared differently. Verify access before deployment—for example,
+`ssh flint@192.168.130.20 true`. Passwordless SSH and the lab-only passwordless
+sudo configured by [create-vm.sh](lab/scripts/create-vm.sh) are required by the
+deployment helpers.
+
+### Install the guest applications
+
+The source applications and SQL are in [lab/workloads](lab/workloads). The
+reviewable Nginx, PostgreSQL, and systemd files are in
+[lab/guest-configs](lab/guest-configs), with their exact VM destinations listed
+in [lab/guest-configs/README.md](lab/guest-configs/README.md).
+
+Deploy both application paths and their two-hour database retention timers:
 
 ```bash
 ./lab/scripts/deploy-tenant-workload.sh tenant-a
 ./lab/scripts/deploy-tenant-workload.sh tenant-b
 ```
 
-Review the active scenario plan, then install it:
+[deploy-tenant-workload.sh](lab/scripts/deploy-tenant-workload.sh) copies the
+fixed files with SCP, renders only documented placeholders, installs the
+PostgreSQL and Nginx configurations, and starts the web and retention services.
+It uses the fixed `solis` / `solispass` credential only inside these isolated
+demonstration networks; do not reuse it in production.
+
+Review the active scenario plan, then install the steady clients and bounded
+pressure unit:
 
 ```bash
 ./lab/scripts/manage-active-lab.sh setup --dry-run
@@ -463,6 +529,10 @@ These guest services and workloads are opt-in lab fixtures. They are not
 installed by the Solis binary and are not a production workload model. The
 clients retain no bodies or secrets and emit only bounded aggregate summaries;
 the database retention timer removes demonstration rows older than two hours.
+Use [manage-steady-traffic.sh](lab/scripts/manage-steady-traffic.sh) when only
+the two application clients are needed, and
+[manage-active-lab.sh](lab/scripts/manage-active-lab.sh) for the complete
+normal/pressure lifecycle.
 
 ## Validation
 

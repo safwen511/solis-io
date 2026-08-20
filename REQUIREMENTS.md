@@ -60,3 +60,19 @@ Guest packages are role-specific:
 The Python client workloads use only the Python standard library. The lab web
 application imports `psycopg2`, supplied by the guest OS package above; no
 untracked `pip` environment or secrets file is required.
+
+First-time reconstruction also requires:
+
+- An Ubuntu 24.04 qcow2 cloud image installed at the base-image path documented
+  in [README.md](README.md#recreate-the-tenant-lab).
+- A local SSH public key for cloud-init and passwordless SSH to the fixed guest
+  addresses.
+- Permission to manage the system libvirt connection and image directory.
+- The versioned [VM inventory](lab/config/vms.csv),
+  [network definitions](lab/networks), [guest configuration](lab/guest-configs),
+  and [lab scripts](lab/scripts) from the same source revision.
+
+The guest templates include a fixed demonstration database credential, and VM
+creation provisions passwordless sudo for the created lab user. Those choices
+are suitable only for the isolated local lab and must be replaced before
+adapting the topology elsewhere.

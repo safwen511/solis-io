@@ -74,12 +74,14 @@ fi
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly project_dir="$(cd -- "${script_dir}/../.." && pwd)"
 readonly steady_client="${project_dir}/lab/workloads/client/solis_steady_client.py"
+readonly steady_service_template="${project_dir}/lab/guest-configs/client/solis-steady-traffic.service.template"
 readonly ssh_user="${SOLIS_SSH_USER:-flint}"
 readonly ssh_options=(-o BatchMode=yes -o ConnectTimeout=10)
 readonly service_name="solis-steady-traffic.service"
 
 [[ "$ssh_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "SOLIS_SSH_USER is not a safe service user name"
 [[ -r "$steady_client" ]] || fail "steady client program is missing: ${steady_client}"
+[[ -r "$steady_service_template" ]] || fail "steady client service template is missing: ${steady_service_template}"
 
 if [[ "$tenant" == all ]]; then
   tenants=(a b)
@@ -132,45 +134,28 @@ deploy_client() {
   ssh "${ssh_options[@]}" "${ssh_user}@${client_ip}" 'command -v python3 >/dev/null 2>&1' ||
     fail "python3 is unavailable on ${client_vm}"
   scp "${ssh_options[@]}" "$steady_client" "${ssh_user}@${client_ip}:/tmp/solis_steady_client.py"
+  scp "${ssh_options[@]}" "$steady_service_template" "${ssh_user}@${client_ip}:/tmp/solis-steady-traffic.service.template"
   ssh "${ssh_options[@]}" "${ssh_user}@${client_ip}" \
     "sudo -n env SERVICE_USER='${ssh_user}' TENANT_NAME='${tenant_name}' TARGET_HOST='${web_ip}' TARGET_VM='${web_vm}' DATABASE_VM='${db_vm}' REQUEST_RATE='${rate}' bash -s" <<'REMOTE_DEPLOY'
 set -euo pipefail
+trap 'rm -f -- /tmp/solis_steady_client.py /tmp/solis-steady-traffic.service.template /tmp/solis-steady-traffic.service' EXIT
 install -d -m 0755 /opt/solis-workload
 install -m 0755 /tmp/solis_steady_client.py /opt/solis-workload/solis_steady_client.py
-rm -f -- /tmp/solis_steady_client.py
 
-cat > /etc/systemd/system/solis-steady-traffic.service <<EOF
-[Unit]
-Description=Solis low-rate steady tenant traffic
-After=network-online.target
-Wants=network-online.target
+sed \
+  -e "s|@SERVICE_USER@|${SERVICE_USER}|g" \
+  -e "s|@TENANT_NAME@|${TENANT_NAME}|g" \
+  -e "s|@TARGET_HOST@|${TARGET_HOST}|g" \
+  -e "s|@TARGET_VM@|${TARGET_VM}|g" \
+  -e "s|@DATABASE_VM@|${DATABASE_VM}|g" \
+  -e "s|@REQUEST_RATE@|${REQUEST_RATE}|g" \
+  /tmp/solis-steady-traffic.service.template > /tmp/solis-steady-traffic.service
+if grep -Eq '@[A-Z_]+@' /tmp/solis-steady-traffic.service; then
+  echo "unresolved placeholder in steady traffic service" >&2
+  exit 1
+fi
 
-[Service]
-Type=simple
-User=${SERVICE_USER}
-Environment=SOLIS_TENANT=${TENANT_NAME}
-Environment=SOLIS_TARGET_HOST=${TARGET_HOST}
-Environment=SOLIS_TARGET_VM=${TARGET_VM}
-Environment=SOLIS_DATABASE_VM=${DATABASE_VM}
-Environment=SOLIS_RATE_RPS=${REQUEST_RATE}
-Environment=SOLIS_MAX_CONCURRENCY=4
-Environment=SOLIS_TIMEOUT_SECONDS=3
-Environment=SOLIS_LOG_INTERVAL_SECONDS=300
-ExecStart=/usr/bin/python3 /opt/solis-workload/solis_steady_client.py
-Restart=always
-RestartSec=3
-NoNewPrivileges=true
-PrivateDevices=true
-PrivateTmp=true
-ProtectControlGroups=true
-ProtectHome=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-ProtectSystem=strict
-
-[Install]
-WantedBy=multi-user.target
-EOF
+install -m 0644 /tmp/solis-steady-traffic.service /etc/systemd/system/solis-steady-traffic.service
 
 systemctl daemon-reload
 systemctl enable --now solis-steady-traffic.service

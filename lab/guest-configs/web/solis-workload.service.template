@@ -1,0 +1,26 @@
+[Unit]
+Description=Solis tenant workload service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+Environment=SOLIS_TENANT=@TENANT_NAME@
+Environment=SOLIS_DB_HOST=@DB_HOST@
+Environment=SOLIS_DB_PORT=5432
+Environment=SOLIS_DB_NAME=solisapp
+Environment=SOLIS_DB_USER=solis
+Environment=SOLIS_DB_PASSWORD=solispass
+Environment=SOLIS_WEB_PORT=8080
+ExecStart=/usr/bin/python3 /opt/solis-workload/solis_webapp.py
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

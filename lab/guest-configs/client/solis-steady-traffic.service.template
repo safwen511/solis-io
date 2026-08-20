@@ -1,0 +1,30 @@
+[Unit]
+Description=Solis low-rate steady tenant traffic
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Environment=SOLIS_TENANT=@TENANT_NAME@
+Environment=SOLIS_TARGET_HOST=@TARGET_HOST@
+Environment=SOLIS_TARGET_VM=@TARGET_VM@
+Environment=SOLIS_DATABASE_VM=@DATABASE_VM@
+Environment=SOLIS_RATE_RPS=@REQUEST_RATE@
+Environment=SOLIS_MAX_CONCURRENCY=4
+Environment=SOLIS_TIMEOUT_SECONDS=3
+Environment=SOLIS_LOG_INTERVAL_SECONDS=300
+ExecStart=/usr/bin/python3 /opt/solis-workload/solis_steady_client.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+host solisapp solis @TENANT_SUBNET@ scram-sha-256

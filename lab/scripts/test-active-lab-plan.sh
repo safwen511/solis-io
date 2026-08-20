@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly script="${script_dir}/manage-active-lab.sh"
+readonly template="${script_dir}/../guest-configs/stress/solis-moderate-pressure.service.template"
 
 setup="$($script setup --dry-run)"
 for expected in \
@@ -23,8 +24,9 @@ normal="$($script normal --dry-run)"
 grep -Fq "pressure inactive" <<<"$normal"
 
 grep -Fq 'readonly pressure_directory="/var/lib/solis-moderate-pressure"' "$script"
-grep -Fq 'ReadWritePaths=${PRESSURE_DIRECTORY}' "$script"
-if grep -Fq 'ReadWritePaths=${PRESSURE_FILE}' "$script"; then
+grep -Fq 'pressure_service_template=' "$script"
+grep -Fq 'ReadWritePaths=@PRESSURE_DIRECTORY@' "$template"
+if grep -Fq 'ReadWritePaths=@PRESSURE_FILE@' "$template"; then
   echo "pressure service bind-mounts the exact fio file" >&2
   exit 1
 fi

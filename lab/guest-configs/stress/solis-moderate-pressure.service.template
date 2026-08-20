@@ -1,0 +1,23 @@
+[Unit]
+Description=Solis bounded moderate storage pressure
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+ExecStart=/usr/bin/fio --name=solis-moderate --ioengine=libaio --filename=@PRESSURE_FILE@ --size=@PRESSURE_BYTES@ --rw=randwrite --bs=4k --iodepth=16 --numjobs=2 --direct=1 --time_based --runtime=3600 --fdatasync=1024 --rate_iops=@PRESSURE_IOPS@ --group_reporting
+Restart=always
+RestartSec=3
+Nice=5
+NoNewPrivileges=true
+PrivateDevices=false
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=@PRESSURE_DIRECTORY@
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

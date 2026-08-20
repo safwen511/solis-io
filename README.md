@@ -63,7 +63,7 @@ of filling gaps with invented measurements.
 
 ## Internship context
 
-Solis I/O was developed by Safwen during an internship at
+Solis I/O was developed  during an internship at
 [EO Data Center](https://www.eodatacenter.com/) in Tunisia. The project applies
 Linux, KVM/libvirt, and eBPF observability to a practical data-center problem:
 investigating host storage contention and attributing I/O activity to individual
@@ -734,7 +734,7 @@ hypervisor support remain outside the current roadmap.
 
 ## Acknowledgements
 
-Developed by Safwen during an internship at
+Developed an internship at
 [EO Data Center](https://www.eodatacenter.com/), Tunisia, with appreciation for
 its support and for the practical environment in which the project took shape.
 The EO Data Center logo is displayed in recognition of this internship

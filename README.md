@@ -821,7 +821,7 @@ remediation cannot become the default behavior.
 
 ## Acknowledgements
 
-Developed an internship at
+Developed in an internship at
 [EO Data Center](https://www.eodatacenter.com/), Tunisia, with appreciation for
 its support and for the practical environment in which the project took shape.
 The EO Data Center logo is displayed in recognition of this internship

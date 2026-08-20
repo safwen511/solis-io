@@ -5,7 +5,6 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly repo_root="$(cd -- "${script_dir}/.." && pwd)"
 readonly object_relative_path="internal/ebpf/bpf/generated/vm_block_latency_bpfel.o"
 readonly install_relative_path="docs/INSTALL.md"
-readonly license_relative_path="LICENSE"
 readonly notice_relative_path="NOTICE"
 readonly requirements_relative_path="REQUIREMENTS.md"
 readonly version_package="github.com/safwen511/solis-io/internal/version"
@@ -98,8 +97,6 @@ readonly object_sha256="$(sha256sum "$object_relative_path" | awk '{print $1}')"
 
 [[ -f "$install_relative_path" && ! -L "$install_relative_path" ]] ||
   fail "release install documentation is missing or unsafe: ${install_relative_path}"
-[[ -f "$license_relative_path" && ! -L "$license_relative_path" ]] ||
-  fail "release license is missing or unsafe: ${license_relative_path}"
 [[ -f "$notice_relative_path" && ! -L "$notice_relative_path" ]] ||
   fail "release notice is missing or unsafe: ${notice_relative_path}"
 [[ -f "$requirements_relative_path" && ! -L "$requirements_relative_path" ]] ||
@@ -166,8 +163,6 @@ readonly binary_size="$(stat -c '%s' "${package_dir}/solis")"
 
 cp -- "$install_relative_path" "${package_dir}/INSTALL.md"
 chmod 0644 "${package_dir}/INSTALL.md"
-cp -- "$license_relative_path" "${package_dir}/LICENSE"
-chmod 0644 "${package_dir}/LICENSE"
 cp -- "$notice_relative_path" "${package_dir}/NOTICE"
 chmod 0644 "${package_dir}/NOTICE"
 cp -- "$requirements_relative_path" "${package_dir}/REQUIREMENTS.md"
@@ -193,7 +188,6 @@ jq -n \
     source_date_epoch: $source_date_epoch,
     go_version: $go_version,
     platform: $platform,
-    license: "GPL-3.0-only",
     binary: {
       path: "solis",
       sha256: $binary_sha256,
@@ -220,7 +214,7 @@ chmod 0644 "${package_dir}/RELEASE-METADATA.json"
 
 (
   cd "$package_dir"
-  sha256sum solis INSTALL.md LICENSE NOTICE REQUIREMENTS.md RELEASE-METADATA.json >SHA256SUMS
+  sha256sum solis INSTALL.md NOTICE REQUIREMENTS.md RELEASE-METADATA.json >SHA256SUMS
 )
 chmod 0644 "${package_dir}/SHA256SUMS"
 

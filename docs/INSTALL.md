@@ -20,8 +20,9 @@ sha256sum -c SHA256SUMS
 Replace the example version in those filenames when installing a later
 release. Inspect `RELEASE-METADATA.json` to confirm the Git commit, source
 timestamp, Go toolchain, target platform, binary digest, and embedded eBPF
-object digest. Read `LICENSE` for the GPL-3.0-only terms, `NOTICE` for project
-attribution, and `REQUIREMENTS.md` for runtime and optional tooling details.
+object digest. Read `NOTICE` for copyright and project attribution, and
+`REQUIREMENTS.md` for runtime and optional tooling details. This release does
+not grant a public source-code license.
 
 ## Host requirements
 
